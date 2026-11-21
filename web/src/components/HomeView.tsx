@@ -1,8 +1,10 @@
-import type { MouseEvent } from "react";
-import { Pin, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { Pin, Play, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import type {
+  DailyRecommendationsDTO,
   EnqueueMode,
   HistoryEntryDTO,
+  PinnedTrackDTO,
   PlaylistDTO,
   SearchSource,
   TrackDTO,
@@ -17,9 +19,11 @@ import { TrackArtwork } from "./TrackArtwork";
 interface Props {
   user: UserProfileDTO;
   history: HistoryEntryDTO[];
+  pinnedTracks: PinnedTrackDTO[];
   playlists: PlaylistDTO[];
   onMoodSearch: (query: string, source?: SearchSource) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onTogglePinTrack: (track: TrackDTO) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onClearHistory: () => void;
@@ -77,9 +81,11 @@ const QUICK_PICKS: { title: string; subtitle: string; query: string; gradient: s
 export function HomeView({
   user,
   history,
+  pinnedTracks,
   playlists,
   onMoodSearch,
   onEnqueue,
+  onTogglePinTrack,
   onSelectPlaylist,
   onPlayPlaylist,
   onClearHistory,
@@ -87,14 +93,56 @@ export function HomeView({
   onTrackContextMenu,
   onPlaylistContextMenu,
 }: Props) {
-  const uniqueHistory: TrackDTO[] = [];
-  const seen = new Set<string>();
-  for (const entry of history) {
-    if (!seen.has(entry.track.identifier)) {
-      seen.add(entry.track.identifier);
-      uniqueHistory.push(entry.track);
+  const [recs, setRecs] = useState<DailyRecommendationsDTO | null>(null);
+  const [recsLoading, setRecsLoading] = useState(false);
+
+  const hasSeedSource = history.length > 0 || pinnedTracks.length > 0;
+
+  const fetchRecommendations = useCallback(async (forceRefresh = false) => {
+    setRecsLoading(true);
+    try {
+      const res = await fetch(
+        forceRefresh ? "/api/recommendations?refresh=1" : "/api/recommendations"
+      );
+      if (res.ok) {
+        const data = (await res.json()) as DailyRecommendationsDTO;
+        setRecs(data);
+      }
+    } catch {
+      // Ignore transient recommendations fetch failure
+    } finally {
+      setRecsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!hasSeedSource) {
+      setRecs(null);
+      return;
+    }
+    if (!recs && !recsLoading) {
+      void fetchRecommendations(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasSeedSource]);
+
+  const listenAgainItems = useMemo(() => {
+    const items: { track: TrackDTO; isPinned: boolean }[] = [];
+    const seen = new Set<string>();
+    for (const pinned of pinnedTracks) {
+      if (!seen.has(pinned.track.identifier)) {
+        seen.add(pinned.track.identifier);
+        items.push({ track: pinned.track, isPinned: true });
+      }
+    }
+    for (const entry of history) {
+      if (!seen.has(entry.track.identifier)) {
+        seen.add(entry.track.identifier);
+        items.push({ track: entry.track, isPinned: false });
+      }
+    }
+    return items;
+  }, [history, pinnedTracks]);
 
   return (
     <div className="space-y-9">
@@ -135,7 +183,7 @@ export function HomeView({
             </div>
           </div>
 
-          {uniqueHistory.length > 0 && (
+          {history.length > 0 && (
             <button
               type="button"
               onClick={onClearHistory}
@@ -147,12 +195,12 @@ export function HomeView({
           )}
         </div>
 
-        {uniqueHistory.length > 0 ? (
+        {listenAgainItems.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-            {uniqueHistory.slice(0, 10).map((track) => (
+            {listenAgainItems.slice(0, 10).map(({ track, isPinned }) => (
               <div
                 key={track.identifier}
-                onClick={() => onEnqueue([track], "now", "Listen again")}
+                onClick={() => onEnqueue([track], "now")}
                 onContextMenu={(e) => onTrackContextMenu(e, track)}
                 className="group cursor-pointer space-y-2.5"
               >
@@ -162,6 +210,20 @@ export function HomeView({
                     className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
                     iconClassName="h-12 w-12"
                   />
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePinTrack(track);
+                    }}
+                    title={isPinned ? "Unpin from Listen again" : "Pin to Listen again"}
+                    className={`absolute left-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-white shadow transition ${
+                      isPinned ? "opacity-100" : "opacity-0 hover:bg-black group-hover:opacity-100"
+                    }`}
+                  >
+                    <Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-current" : ""}`} />
+                  </button>
 
                   <button
                     type="button"
@@ -216,6 +278,90 @@ export function HomeView({
         )}
       </section>
 
+      {/* Recommended for today */}
+      {hasSeedSource && (recsLoading || (recs && recs.tracks.length > 0)) && (
+        <section className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+                <Sparkles className="h-3 w-3" style={{ color: "var(--cadence-accent)" }} />
+                {recs?.basedOn && recs.basedOn.length > 0
+                  ? `Based on ${recs.basedOn.slice(0, 2).join(", ")}`
+                  : "Picked from your listening history"}
+              </p>
+              <h2 className="text-2xl font-bold tracking-tight text-white">
+                Recommended for today
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              disabled={recsLoading}
+              onClick={() => void fetchRecommendations(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white disabled:opacity-45"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${recsLoading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
+
+          {recsLoading && (!recs || recs.tracks.length === 0) ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="space-y-2.5">
+                  <div className="aspect-square animate-pulse rounded-lg bg-white/[0.06]" />
+                  <div className="h-4 w-3/4 animate-pulse rounded bg-white/[0.06]" />
+                  <div className="h-3 w-1/2 animate-pulse rounded bg-white/[0.04]" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+              {(recs?.tracks ?? []).slice(0, 10).map((track) => (
+                <div
+                  key={`rec-${track.identifier}`}
+                  onClick={() => onEnqueue([track], "now")}
+                  onContextMenu={(e) => onTrackContextMenu(e, track)}
+                  className="group cursor-pointer space-y-2.5"
+                >
+                  <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]">
+                    <TrackArtwork
+                      track={track}
+                      className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
+                      iconClassName="h-12 w-12"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEnqueue([track], "end");
+                      }}
+                      title="Add to queue"
+                      className="absolute right-2.5 top-2.5 rounded-full bg-black/75 p-1.5 text-white opacity-0 transition hover:bg-black group-hover:opacity-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+
+                    <span className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                      <Play className="ml-0.5 h-5 w-5 fill-current" />
+                    </span>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                    <p className="truncate text-xs text-zinc-400">
+                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                      <span> • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}</span>
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Your Playlists */}
       {playlists.length > 0 && (
         <section className="space-y-4">
@@ -236,6 +382,14 @@ export function HomeView({
                       className="absolute left-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-zinc-200 shadow"
                     >
                       <RefreshCw className="h-3 w-3" />
+                    </span>
+                  )}
+                  {pl.isPinned && !pl.isLiked && (
+                    <span
+                      title="Pinned playlist"
+                      className="absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-white shadow"
+                    >
+                      <Pin className="h-3 w-3 fill-current" />
                     </span>
                   )}
                   {pl.tracks.length > 0 && (
@@ -260,6 +414,14 @@ export function HomeView({
                         <Pin className="h-3 w-3 shrink-0 fill-current text-zinc-400" />
                         <span>
                           Auto playlist • {pl.tracks.length}{" "}
+                          {pl.tracks.length === 1 ? "track" : "tracks"}
+                        </span>
+                      </>
+                    ) : pl.isPinned ? (
+                      <>
+                        <Pin className="h-3 w-3 shrink-0 fill-current text-zinc-400" />
+                        <span>
+                          Pinned • {pl.tracks.length}{" "}
                           {pl.tracks.length === 1 ? "track" : "tracks"}
                         </span>
                       </>

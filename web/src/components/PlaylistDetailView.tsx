@@ -23,6 +23,7 @@ interface Props {
   playlist: PlaylistDTO | null;
   onBack: () => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean, startIndex?: number) => void;
+  onTogglePinPlaylist: (playlistId: string) => void;
   onRenamePlaylist: (playlistId: string, name: string) => void;
   onSyncPlaylist: (playlistId: string, url?: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
@@ -35,6 +36,7 @@ export function PlaylistDetailView({
   playlist,
   onBack,
   onPlayPlaylist,
+  onTogglePinPlaylist,
   onRenamePlaylist,
   onSyncPlaylist,
   onDeletePlaylist,
@@ -105,6 +107,12 @@ export function PlaylistDetailView({
               <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-200">
                 <Pin className="h-3 w-3 fill-current" />
                 Auto playlist
+              </span>
+            )}
+            {playlist.isPinned && !playlist.isLiked && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-200">
+                <Pin className="h-3 w-3 fill-current" />
+                Pinned
               </span>
             )}
             {playlist.sourceUrl && (
@@ -189,6 +197,21 @@ export function PlaylistDetailView({
               <Shuffle className="h-4 w-4" />
               Shuffle
             </button>
+
+            {!playlist.isLiked && (
+              <button
+                type="button"
+                onClick={() => onTogglePinPlaylist(playlist.id)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-medium transition ${
+                  playlist.isPinned
+                    ? "border-white/30 bg-white/15 text-white"
+                    : "border-white/15 bg-white/[0.06] text-zinc-200 hover:bg-white/15 hover:text-white"
+                }`}
+              >
+                <Pin className={`h-4 w-4 ${playlist.isPinned ? "fill-current" : ""}`} />
+                {playlist.isPinned ? "Pinned" : "Pin"}
+              </button>
+            )}
 
             {!playlist.isLiked && (
               playlist.sourceUrl ? (

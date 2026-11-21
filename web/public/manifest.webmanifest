@@ -1,0 +1,17 @@
+{
+  "name": "Cadence",
+  "short_name": "Cadence",
+  "description": "YouTube Music–inspired Discord music controller & live deck",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#030303",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

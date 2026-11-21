@@ -45,14 +45,18 @@ function compareCustomPlaylists(a: PlaylistDTO, b: PlaylistDTO, mode: PlaylistSo
 
 export function sortPlaylists(playlists: PlaylistDTO[], mode: PlaylistSortMode): PlaylistDTO[] {
   const liked: PlaylistDTO[] = [];
+  const pinned: PlaylistDTO[] = [];
   const custom: PlaylistDTO[] = [];
   for (const pl of playlists) {
     if (pl.isLiked) {
       liked.push(pl);
+    } else if (pl.isPinned) {
+      pinned.push(pl);
     } else {
       custom.push(pl);
     }
   }
+  pinned.sort((a, b) => compareCustomPlaylists(a, b, mode));
   custom.sort((a, b) => compareCustomPlaylists(a, b, mode));
-  return [...liked, ...custom];
+  return [...liked, ...pinned, ...custom];
 }

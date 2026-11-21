@@ -57,6 +57,7 @@ interface Props {
   displayPosition: number;
   drawerOpen: boolean;
   isCurrentLiked: boolean;
+  artworkSeekSeconds?: number;
   onToggleDrawer: () => void;
   onTogglePause: () => void;
   onSkip: () => void;
@@ -80,6 +81,7 @@ export function PlayerBar({
   displayPosition,
   drawerOpen,
   isCurrentLiked,
+  artworkSeekSeconds = 10,
   onToggleDrawer,
   onTogglePause,
   onSkip,
@@ -100,7 +102,9 @@ export function PlayerBar({
   const [scrubPosition, setScrubPosition] = useState(0);
   const [hoverInfo, setHoverInfo] = useState<{ pct: number; ms: number } | null>(null);
   const [effectsOpen, setEffectsOpen] = useState(false);
-  const [volumeDraft, setVolumeDraft] = useState(String(playerState?.volume ?? 100));
+  const serverVolume = Math.min(100, Math.max(0, playerState?.volume ?? 100));
+  const [localVolume, setLocalVolume] = useState(serverVolume);
+  const [volumeDraft, setVolumeDraft] = useState(String(serverVolume));
   const [isEditingVolume, setIsEditingVolume] = useState(false);
 
   const barRef = useRef<HTMLDivElement>(null);
@@ -109,6 +113,11 @@ export function PlayerBar({
   const scrubPosRef = useRef(0);
   const isSeekingRef = useRef(false);
   const effectsRef = useRef<HTMLDivElement>(null);
+  const isDraggingVolumeRef = useRef(false);
+  const volumeThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastVolumeSentAtRef = useRef(0);
+  const pendingVolumeRef = useRef<number | null>(null);
+  const lastNonZeroVolumeRef = useRef(serverVolume > 0 ? serverVolume : 100);
 
   const track = playerState?.current ?? null;
   const duration = track?.duration || 0;
@@ -119,13 +128,72 @@ export function PlayerBar({
   const canSeek = Boolean(hasPlayer && !track?.isStream && duration > 0);
   const activeFilter = playerState?.activeFilter ?? "none";
   const privileged = Boolean(playerState?.isPrivileged);
-  const serverVolume = playerState?.volume ?? 100;
 
   useEffect(() => {
-    if (!isEditingVolume) {
+    if (serverVolume > 0) {
+      lastNonZeroVolumeRef.current = serverVolume;
+    }
+    if (!isDraggingVolumeRef.current && !isEditingVolume) {
+      setLocalVolume(serverVolume);
       setVolumeDraft(String(serverVolume));
     }
   }, [isEditingVolume, serverVolume]);
+
+  useEffect(() => {
+    return () => {
+      if (volumeThrottleTimerRef.current) {
+        clearTimeout(volumeThrottleTimerRef.current);
+      }
+    };
+  }, []);
+
+  const sendVolumeImmediate = useCallback(
+    (vol: number) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+      if (clamped > 0) lastNonZeroVolumeRef.current = clamped;
+      pendingVolumeRef.current = null;
+      if (volumeThrottleTimerRef.current) {
+        clearTimeout(volumeThrottleTimerRef.current);
+        volumeThrottleTimerRef.current = null;
+      }
+      lastVolumeSentAtRef.current = performance.now();
+      onVolume(clamped);
+    },
+    [onVolume]
+  );
+
+  const sendVolumeThrottled = useCallback(
+    (vol: number) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+      if (clamped > 0) lastNonZeroVolumeRef.current = clamped;
+      const now = performance.now();
+      const elapsed = now - lastVolumeSentAtRef.current;
+      if (elapsed >= 65) {
+        sendVolumeImmediate(clamped);
+        return;
+      }
+      pendingVolumeRef.current = clamped;
+      if (!volumeThrottleTimerRef.current) {
+        volumeThrottleTimerRef.current = setTimeout(() => {
+          volumeThrottleTimerRef.current = null;
+          if (pendingVolumeRef.current !== null) {
+            const next = pendingVolumeRef.current;
+            pendingVolumeRef.current = null;
+            lastVolumeSentAtRef.current = performance.now();
+            onVolume(next);
+          }
+        }, Math.max(10, 65 - elapsed));
+      }
+    },
+    [onVolume, sendVolumeImmediate]
+  );
+
+  const finishVolumeDrag = useCallback(() => {
+    isDraggingVolumeRef.current = false;
+    if (pendingVolumeRef.current !== null) {
+      sendVolumeImmediate(pendingVolumeRef.current);
+    }
+  }, [sendVolumeImmediate]);
 
   const applyBarVisualPct = useCallback((pct: number) => {
     const safe = Math.min(100, Math.max(0, pct));
@@ -226,9 +294,10 @@ export function PlayerBar({
 
   const handleBarKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!canSeek) return;
+    const stepMs = Math.max(5, Math.min(30, artworkSeekSeconds)) * 1000;
     let next: number | null = null;
-    if (e.key === "ArrowLeft") next = Math.max(0, clampedPos - 5000);
-    else if (e.key === "ArrowRight") next = Math.min(duration, clampedPos + 5000);
+    if (e.key === "ArrowLeft") next = Math.max(0, clampedPos - stepMs);
+    else if (e.key === "ArrowRight") next = Math.min(duration, clampedPos + stepMs);
     else if (e.key === "PageDown") next = Math.max(0, clampedPos - 15_000);
     else if (e.key === "PageUp") next = Math.min(duration, clampedPos + 15_000);
     else if (e.key === "Home") next = 0;
@@ -261,13 +330,14 @@ export function PlayerBar({
     setIsEditingVolume(false);
     const parsed = Number.parseInt(volumeDraft.replace(/[^0-9]/g, ""), 10);
     if (!Number.isFinite(parsed)) {
-      setVolumeDraft(String(serverVolume));
+      setVolumeDraft(String(localVolume));
       return;
     }
     const clamped = Math.max(0, Math.min(100, parsed));
+    setLocalVolume(clamped);
     setVolumeDraft(String(clamped));
     if (clamped !== serverVolume) {
-      onVolume(clamped);
+      sendVolumeImmediate(clamped);
     }
   };
 
@@ -276,10 +346,17 @@ export function PlayerBar({
       e.preventDefault();
       e.currentTarget.blur();
     } else if (e.key === "Escape") {
-      setVolumeDraft(String(serverVolume));
+      setVolumeDraft(String(localVolume));
       setIsEditingVolume(false);
       e.currentTarget.blur();
     }
+  };
+
+  const handleToggleMute = () => {
+    const next = localVolume === 0 ? (lastNonZeroVolumeRef.current || 100) : 0;
+    setLocalVolume(next);
+    setVolumeDraft(String(next));
+    sendVolumeImmediate(next);
   };
 
   return (
@@ -335,7 +412,75 @@ export function PlayerBar({
         </div>
       </div>
 
-      <div className="flex h-[72px] items-center justify-between gap-3 px-4">
+      {/* Mobile Mini-Player (< md) */}
+      <div className="flex h-14 items-center justify-between gap-2 px-3 md:hidden">
+        <button
+          type="button"
+          onClick={onToggleDrawer}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        >
+          <TrackArtwork
+            track={track}
+            className="h-10 w-10 shrink-0 rounded"
+            iconClassName="h-4 w-4"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">
+              {track ? track.title : "Nothing playing"}
+            </p>
+            <p className="truncate text-xs text-zinc-400">
+              {track
+                ? `${track.author}`
+                : playerState?.voiceChannelName
+                  ? `Connected to #${playerState.voiceChannelName}`
+                  : "Tap a song to play"}
+            </p>
+          </div>
+        </button>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          {track && (
+            <button
+              type="button"
+              disabled={track.isStream}
+              onClick={() => onToggleLike(track)}
+              title={isCurrentLiked ? "Remove from Liked Music" : "Save to Liked Music"}
+              className={`rounded-full p-2 transition hover:bg-white/10 disabled:opacity-35 ${
+                isCurrentLiked ? "text-white" : "text-zinc-400"
+              }`}
+            >
+              <ThumbsUp className={`h-4 w-4 ${isCurrentLiked ? "fill-current" : ""}`} />
+            </button>
+          )}
+
+          <button
+            type="button"
+            disabled={!hasPlayer}
+            onClick={onTogglePause}
+            title={playerState?.paused ? "Play" : "Pause"}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:bg-white/10 disabled:opacity-40"
+          >
+            {playerState?.paused || !hasPlayer ? (
+              <Play className="ml-0.5 h-5 w-5 fill-current" />
+            ) : (
+              <Pause className="h-5 w-5 fill-current" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            disabled={!hasPlayer}
+            onClick={onSkip}
+            title="Next"
+            className="rounded-full p-2 text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
+          >
+            <SkipForward className="h-4 w-4 fill-current" />
+          </button>
+        </div>
+      </div>
+
+      {/* Desktop Player Bar (>= md) */}
+      <div className="hidden h-[72px] items-center justify-between gap-3 px-4 md:flex">
         {/* Left: Playback transport + timestamp */}
         <div className="flex items-center gap-1 sm:gap-2">
           <button
@@ -458,11 +603,11 @@ export function PlayerBar({
             <button
               type="button"
               disabled={!playerState?.connected || !privileged}
-              onClick={() => onVolume(serverVolume === 0 ? 100 : 0)}
+              onClick={handleToggleMute}
               title="Mute / Unmute"
               className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
             >
-              {serverVolume === 0 ? (
+              {localVolume === 0 ? (
                 <VolumeX className="h-4 w-4" />
               ) : (
                 <Volume2 className="h-4 w-4" />
@@ -472,12 +617,21 @@ export function PlayerBar({
               type="range"
               min={0}
               max={100}
-              value={Math.min(100, serverVolume)}
+              value={localVolume}
               disabled={!playerState?.connected || !privileged}
+              onPointerDown={() => {
+                isDraggingVolumeRef.current = true;
+              }}
+              onPointerUp={finishVolumeDrag}
+              onPointerCancel={finishVolumeDrag}
+              onMouseUp={finishVolumeDrag}
+              onTouchEnd={finishVolumeDrag}
+              onBlur={finishVolumeDrag}
               onChange={(e) => {
                 const v = Number(e.target.value);
+                setLocalVolume(v);
                 setVolumeDraft(String(v));
-                onVolume(v);
+                sendVolumeThrottled(v);
               }}
               aria-label="Volume slider"
               className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/25 accent-white disabled:opacity-40"

@@ -2,9 +2,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowUpToLine,
   BookmarkPlus,
+  CircleMinus,
   ListPlus,
   ListStart,
+  ListX,
   Mic2,
+  Pin,
+  PinOff,
   Play,
   Radio,
   RefreshCw,
@@ -45,10 +49,12 @@ interface Props {
   privileged: boolean;
   currentUserId: string;
   likedTrackIds: Set<string>;
+  pinnedTrackIds: Set<string>;
   onClose: () => void;
   onStartMix: (track: TrackDTO) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onToggleLike: (track: TrackDTO) => void;
+  onTogglePinTrack: (track: TrackDTO) => void;
   onFindRelated: (track: TrackDTO) => void;
   onSkip: () => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
@@ -56,8 +62,10 @@ interface Props {
   onViewLyrics: (track: TrackDTO) => void;
   onMoveTrack: (from: number, to: number) => void;
   onRemoveTrack: (index: number) => void;
+  onDismissQueue: () => void;
   onRemoveFromPlaylist: (playlistId: string, index: number) => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
+  onTogglePinPlaylist: (playlistId: string) => void;
   onSyncPlaylist: (playlistId: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onToast: (level: ToastLevel, message: string) => void;
@@ -95,10 +103,12 @@ export function ContextMenu({
   privileged,
   currentUserId,
   likedTrackIds,
+  pinnedTrackIds,
   onClose,
   onStartMix,
   onEnqueue,
   onToggleLike,
+  onTogglePinTrack,
   onFindRelated,
   onSkip,
   onOpenSaveModal,
@@ -106,8 +116,10 @@ export function ContextMenu({
   onViewLyrics,
   onMoveTrack,
   onRemoveTrack,
+  onDismissQueue,
   onRemoveFromPlaylist,
   onPlayPlaylist,
+  onTogglePinPlaylist,
   onSyncPlaylist,
   onDeletePlaylist,
   onToast,
@@ -177,7 +189,7 @@ export function ContextMenu({
       role="menu"
       onContextMenu={(e) => e.preventDefault()}
       style={{ left: `${position.left}px`, top: `${position.top}px` }}
-      className="fixed z-50 w-60 rounded-lg border border-white/10 bg-[#212121] py-1.5 text-sm text-zinc-100 shadow-2xl select-none"
+      className="fixed z-50 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-lg border border-white/10 bg-[#212121] py-1.5 text-sm text-zinc-100 shadow-2xl select-none"
     >
       {menu.kind === "track" ? (
         <>
@@ -197,20 +209,6 @@ export function ContextMenu({
             <Radio className="h-4 w-4 text-zinc-300" />
             <span>Start mix</span>
           </button>
-
-          {!menu.isCurrent && (
-            <button
-              type="button"
-              onClick={() => {
-                onEnqueue([menu.track], "now");
-                onClose();
-              }}
-              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
-            >
-              <Play className="h-4 w-4 text-zinc-300" />
-              <span>Play now</span>
-            </button>
-          )}
 
           <button
             type="button"
@@ -235,6 +233,20 @@ export function ContextMenu({
             <ListPlus className="h-4 w-4 text-zinc-300" />
             <span>Add to queue</span>
           </button>
+
+          {!menu.isCurrent && (
+            <button
+              type="button"
+              onClick={() => {
+                onEnqueue([menu.track], "now");
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+            >
+              <Play className="h-4 w-4 text-zinc-300" />
+              <span>Play now</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -271,17 +283,65 @@ export function ContextMenu({
             <span>Save to playlist</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              onFindRelated(menu.track);
-              onClose();
-            }}
-            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
-          >
-            <Sparkles className="h-4 w-4 text-zinc-300" />
-            <span>Find related songs</span>
-          </button>
+          {typeof menu.queueIndex === "number" && (
+            <>
+              {(() => {
+                const canRemove =
+                  privileged ||
+                  Boolean(menu.track.isAutoplay) ||
+                  menu.track.requester?.id === currentUserId;
+                return (
+                  <button
+                    type="button"
+                    disabled={!canRemove}
+                    title={
+                      canRemove
+                        ? "Remove from queue"
+                        : "Requires DJ role or being the track requester"
+                    }
+                    onClick={() => {
+                      onRemoveTrack(menu.queueIndex!);
+                      onClose();
+                    }}
+                    className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-40"
+                  >
+                    <CircleMinus className="h-4 w-4" />
+                    <span>Remove from queue</span>
+                  </button>
+                );
+              })()}
+
+              {privileged && menu.queueIndex > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onMoveTrack(menu.queueIndex!, 0);
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+                >
+                  <ArrowUpToLine className="h-4 w-4 text-zinc-300" />
+                  <span>Move to top</span>
+                </button>
+              )}
+            </>
+          )}
+
+          {menu.isCurrent && (
+            <button
+              type="button"
+              disabled={!privileged}
+              title={!privileged ? "Requires DJ role" : undefined}
+              onClick={() => {
+                onSkip();
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
+            >
+              <SkipForward className="h-4 w-4 text-zinc-300" />
+              <span>Skip current track</span>
+            </button>
+          )}
 
           {(() => {
             const artists = splitArtists(menu.track.author).slice(0, 3);
@@ -306,6 +366,18 @@ export function ContextMenu({
           <button
             type="button"
             onClick={() => {
+              onFindRelated(menu.track);
+              onClose();
+            }}
+            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+          >
+            <Sparkles className="h-4 w-4 text-zinc-300" />
+            <span>Find related songs</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
               onViewLyrics(menu.track);
               onClose();
             }}
@@ -324,85 +396,58 @@ export function ContextMenu({
             <span>Share</span>
           </button>
 
-          {(menu.isCurrent ||
-            typeof menu.queueIndex === "number" ||
-            (menu.playlistId && typeof menu.playlistTrackIndex === "number")) && (
+          <button
+            type="button"
+            disabled={menu.track.isStream}
+            onClick={() => {
+              onTogglePinTrack(menu.track);
+              onClose();
+            }}
+            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+          >
+            {pinnedTrackIds.has(menu.track.identifier) ? (
+              <>
+                <PinOff className="h-4 w-4 text-zinc-300" />
+                <span>Unpin from Listen again</span>
+              </>
+            ) : (
+              <>
+                <Pin className="h-4 w-4 text-zinc-300" />
+                <span>Pin to Listen again</span>
+              </>
+            )}
+          </button>
+
+          {(menu.isCurrent || typeof menu.queueIndex === "number") && (
+            <button
+              type="button"
+              disabled={!privileged}
+              title={!privileged ? "Requires DJ role" : "Clear upcoming queue"}
+              onClick={() => {
+                onDismissQueue();
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-40"
+            >
+              <ListX className="h-4 w-4" />
+              <span>Dismiss queue</span>
+            </button>
+          )}
+
+          {menu.playlistId && typeof menu.playlistTrackIndex === "number" && (
             <>
               <div className="my-1 border-t border-white/10" />
-
-              {menu.isCurrent && (
-                <button
-                  type="button"
-                  disabled={!privileged}
-                  title={!privileged ? "Requires DJ role" : undefined}
-                  onClick={() => {
-                    onSkip();
-                    onClose();
-                  }}
-                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
-                >
-                  <SkipForward className="h-4 w-4 text-zinc-300" />
-                  <span>Skip current track</span>
-                </button>
-              )}
-
-              {typeof menu.queueIndex === "number" && (
-                <>
-                  {privileged && menu.queueIndex > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onMoveTrack(menu.queueIndex!, 0);
-                        onClose();
-                      }}
-                      className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
-                    >
-                      <ArrowUpToLine className="h-4 w-4 text-zinc-300" />
-                      <span>Move to top</span>
-                    </button>
-                  )}
-
-                  {(() => {
-                    const canRemove =
-                      privileged ||
-                      Boolean(menu.track.isAutoplay) ||
-                      menu.track.requester?.id === currentUserId;
-                    return (
-                      <button
-                        type="button"
-                        disabled={!canRemove}
-                        title={
-                          canRemove
-                            ? "Remove from queue"
-                            : "Requires DJ role or being the track requester"
-                        }
-                        onClick={() => {
-                          onRemoveTrack(menu.queueIndex!);
-                          onClose();
-                        }}
-                        className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-40"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        <span>Remove from queue</span>
-                      </button>
-                    );
-                  })()}
-                </>
-              )}
-
-              {menu.playlistId && typeof menu.playlistTrackIndex === "number" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRemoveFromPlaylist(menu.playlistId!, menu.playlistTrackIndex!);
-                    onClose();
-                  }}
-                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>Remove from playlist</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onRemoveFromPlaylist(menu.playlistId!, menu.playlistTrackIndex!);
+                  onClose();
+                }}
+                className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Remove from playlist</span>
+              </button>
             </>
           )}
         </>
@@ -454,6 +499,29 @@ export function ContextMenu({
             <ListPlus className="h-4 w-4 text-zinc-300" />
             <span>Add to queue</span>
           </button>
+
+          {!menu.playlist.isLiked && (
+            <button
+              type="button"
+              onClick={() => {
+                onTogglePinPlaylist(menu.playlist.id);
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+            >
+              {menu.playlist.isPinned ? (
+                <>
+                  <PinOff className="h-4 w-4 text-zinc-300" />
+                  <span>Unpin playlist</span>
+                </>
+              ) : (
+                <>
+                  <Pin className="h-4 w-4 text-zinc-300" />
+                  <span>Pin playlist</span>
+                </>
+              )}
+            </button>
+          )}
 
           {menu.playlist.sourceUrl && (
             <button

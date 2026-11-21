@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Loader2 } from "lucide-react";
+import { Bookmark, Compass, Home, Loader2, Settings } from "lucide-react";
 import type {
   AppMetaDTO,
   EnqueueMode,
@@ -7,8 +7,10 @@ import type {
   PlaylistDTO,
   SearchSource,
   TrackDTO,
+  UserPreferencesDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { loadUiPrefs } from "./utils/theme";
 import { ArtistView } from "./components/ArtistView";
 import { ContextMenu, type ContextMenuState, type TrackMenuContext } from "./components/ContextMenu";
 import { ExploreView } from "./components/ExploreView";
@@ -33,6 +35,7 @@ interface MeResponse {
   user?: UserProfileDTO;
   meta: AppMetaDTO;
   guilds?: GuildSummaryDTO[];
+  preferences?: UserPreferencesDTO;
 }
 
 export function App() {
@@ -40,6 +43,7 @@ export function App() {
   const [user, setUser] = useState<UserProfileDTO | null>(null);
   const [meta, setMeta] = useState<AppMetaDTO | null>(null);
   const [guilds, setGuilds] = useState<GuildSummaryDTO[]>([]);
+  const [initialPreferences, setInitialPreferences] = useState<UserPreferencesDTO | null>(null);
 
   const [activeView, setActiveView] = useState<MainView>("home");
   const prevViewRef = useRef<MainView>("home");
@@ -47,7 +51,6 @@ export function App() {
   const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
-  const [playSourceLabel, setPlaySourceLabel] = useState("Queue");
   const [lyricsSubjectTrack, setLyricsSubjectTrack] = useState<TrackDTO | null>(null);
   const [relatedSubjectTrack, setRelatedSubjectTrack] = useState<TrackDTO | null>(null);
   const [saveModalTracks, setSaveModalTracks] = useState<TrackDTO[] | null>(null);
@@ -64,6 +67,9 @@ export function App() {
         setUser(data.user ?? null);
         setMeta(data.meta);
         setGuilds(data.guilds ?? []);
+        if (data.preferences) {
+          setInitialPreferences(data.preferences);
+        }
       } else {
         setUser(null);
         const metaRes = await fetch("/api/meta");
@@ -82,14 +88,17 @@ export function App() {
     void loadSession();
   }, [loadSession]);
 
-  const socket = useCadenceSocket(Boolean(user));
+  const socket = useCadenceSocket(Boolean(user), initialPreferences);
 
-  // Auto-select first mutual guild with the bot if server didn't preselect one
+  // Auto-select saved/mutual guild with the bot if server didn't preselect one
   useEffect(() => {
     if (!socket.connected || socket.selectedGuildId) return;
-    const firstMutual = guilds.find((g) => g.botPresent);
-    if (firstMutual) {
-      socket.selectGuild(firstMutual.id);
+    const savedGuildId = loadUiPrefs().selectedGuildId;
+    const preferred =
+      (savedGuildId ? guilds.find((g) => g.id === savedGuildId && g.botPresent) : null) ??
+      guilds.find((g) => g.botPresent);
+    if (preferred) {
+      socket.selectGuild(preferred.id);
     }
   }, [guilds, socket]);
 
@@ -110,14 +119,11 @@ export function App() {
   );
 
   const handleEnqueue = useCallback(
-    (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => {
-      socket.enqueue(tracks, mode);
+    (tracks: TrackDTO[], mode: EnqueueMode, queueName?: string) => {
+      socket.enqueue(tracks, mode, queueName);
       if (mode === "now" || mode === "replace") {
         setLyricsSubjectTrack(null);
         setRelatedSubjectTrack(null);
-        if (sourceLabel) {
-          setPlaySourceLabel(sourceLabel);
-        }
         setNowPlayingTab("upnext");
         setNowPlayingOpen(true);
       }
@@ -130,7 +136,6 @@ export function App() {
       socket.startMix(track);
       setLyricsSubjectTrack(null);
       setRelatedSubjectTrack(null);
-      setPlaySourceLabel(`Mix • ${track.title}`);
       setNowPlayingTab("upnext");
       setNowPlayingOpen(true);
     },
@@ -139,11 +144,9 @@ export function App() {
 
   const handlePlayPlaylist = useCallback(
     (playlistId: string, shuffle = false, startIndex?: number) => {
-      const playlist = socket.playlists.find((p) => p.id === playlistId);
       socket.playPlaylist(playlistId, shuffle, startIndex);
       setLyricsSubjectTrack(null);
       setRelatedSubjectTrack(null);
-      setPlaySourceLabel(playlist?.name || "Playlist");
       setNowPlayingTab("upnext");
       setNowPlayingOpen(true);
     },
@@ -232,6 +235,11 @@ export function App() {
     return new Set((liked?.tracks ?? []).map((t) => t.identifier));
   }, [socket.playlists]);
 
+  const pinnedTrackIds = useMemo(
+    () => new Set(socket.pinnedTracks.map((p) => p.track.identifier)),
+    [socket.pinnedTracks]
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030303] text-zinc-400">
@@ -252,7 +260,7 @@ export function App() {
     socket.playlists.find((p) => p.id === selectedPlaylistId) ?? null;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#030303] text-zinc-100">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#030303] text-zinc-100">
       <ToastStack toasts={socket.toasts} onDismiss={socket.dismissToast} />
 
       <SaveToPlaylistModal
@@ -268,10 +276,12 @@ export function App() {
         privileged={Boolean(socket.playerState?.isPrivileged)}
         currentUserId={user.id}
         likedTrackIds={likedTrackIds}
+        pinnedTrackIds={pinnedTrackIds}
         onClose={() => setContextMenu(null)}
         onStartMix={handleStartMix}
         onEnqueue={handleEnqueue}
         onToggleLike={socket.toggleLike}
+        onTogglePinTrack={socket.togglePinTrack}
         onFindRelated={handleFindRelated}
         onSkip={socket.skip}
         onOpenSaveModal={handleOpenSaveModal}
@@ -279,8 +289,10 @@ export function App() {
         onViewLyrics={handleViewLyrics}
         onMoveTrack={socket.moveTrack}
         onRemoveTrack={socket.removeTrack}
+        onDismissQueue={socket.clearQueue}
         onRemoveFromPlaylist={socket.removeTrackFromPlaylist}
         onPlayPlaylist={handlePlayPlaylist}
+        onTogglePinPlaylist={socket.togglePinPlaylist}
         onSyncPlaylist={(id) => socket.syncPlaylist(id)}
         onDeletePlaylist={(id) => {
           socket.deletePlaylist(id);
@@ -321,7 +333,7 @@ export function App() {
             searching={socket.searching}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onSearch={handleSearch}
-            onPlayTrack={(track, label) => handleEnqueue([track], "now", label)}
+            onPlayTrack={(track) => handleEnqueue([track], "now")}
             onOpenArtist={handleOpenArtist}
             onTrackContextMenu={handleTrackContextMenu}
             onSelectGuild={socket.selectGuild}
@@ -344,16 +356,25 @@ export function App() {
                 lyricsSubjectTrack={lyricsSubjectTrack}
                 relatedSubjectTrack={relatedSubjectTrack}
                 activeTab={nowPlayingTab}
-                playSourceLabel={playSourceLabel}
                 ambienceMode={socket.preferences.ambienceMode}
                 showArtworkSeekButtons={socket.preferences.artworkSeekButtons}
+                artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
+                lyricsAutoScroll={socket.preferences.lyricsAutoScroll}
+                likedTrackIds={likedTrackIds}
                 onTabChange={(tab) => {
                   setLyricsSubjectTrack(null);
                   setRelatedSubjectTrack(null);
                   setNowPlayingTab(tab);
                 }}
+                onCloseMobile={() => setNowPlayingOpen(false)}
                 onTogglePause={socket.togglePause}
+                onSkip={socket.skip}
+                onPrevious={socket.previous}
+                onRepeat={socket.setRepeat}
+                onVolume={socket.setVolume}
+                onStop={socket.stop}
                 onSeek={socket.seek}
+                onSeekBy={socket.seekBy}
                 onPlayTrack={socket.playTrack}
                 onPlayPrevious={socket.playPrevious}
                 onEnqueue={handleEnqueue}
@@ -362,8 +383,10 @@ export function App() {
                 onRemoveTrack={socket.removeTrack}
                 onShuffle={socket.shuffle}
                 onClear={socket.clearQueue}
+                onToggleLike={socket.toggleLike}
                 onToggleAutoplay={socket.toggleAutoplay}
                 onSetAutoplayMood={socket.setAutoplayMood}
+                onUpdatePreferences={socket.updatePreferences}
                 onFetchLyrics={socket.requestLyrics}
                 onOpenSaveModal={handleOpenSaveModal}
                 onOpenArtist={handleOpenArtist}
@@ -375,9 +398,11 @@ export function App() {
                   <HomeView
                     user={user}
                     history={socket.history}
+                    pinnedTracks={socket.pinnedTracks}
                     playlists={sortedPlaylists}
                     onMoodSearch={(q, src) => handleSearch(q, src ?? "ytmsearch")}
                     onEnqueue={handleEnqueue}
+                    onTogglePinTrack={socket.togglePinTrack}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
                       navigateTo("playlist");
@@ -403,6 +428,7 @@ export function App() {
                     onImportPlaylist={socket.importPlaylist}
                     onSetPlaylistSort={socket.setPlaylistSort}
                     onReorderPlaylists={socket.reorderPlaylists}
+                    onTogglePinPlaylist={socket.togglePinPlaylist}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
                       navigateTo("playlist");
@@ -421,6 +447,7 @@ export function App() {
                     playlist={activePlaylist}
                     onBack={() => navigateTo("library")}
                     onPlayPlaylist={handlePlayPlaylist}
+                    onTogglePinPlaylist={socket.togglePinPlaylist}
                     onRenamePlaylist={socket.renamePlaylist}
                     onSyncPlaylist={socket.syncPlaylist}
                     onDeletePlaylist={socket.deletePlaylist}
@@ -472,30 +499,63 @@ export function App() {
         </div>
       </div>
 
-      <PlayerBar
-        playerState={socket.playerState}
-        playbackAnchor={socket.playbackAnchor}
-        displayPosition={socket.displayPosition}
-        drawerOpen={nowPlayingOpen}
-        isCurrentLiked={Boolean(
-          socket.playerState?.current && likedTrackIds.has(socket.playerState.current.identifier)
-        )}
-        onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
-        onTogglePause={socket.togglePause}
-        onSkip={socket.skip}
-        onPrevious={socket.previous}
-        onSeek={socket.seek}
-        onVolume={socket.setVolume}
-        onRepeat={socket.setRepeat}
-        onShuffle={socket.shuffle}
-        onToggleAutoplay={socket.toggleAutoplay}
-        onSetFilter={socket.setFilter}
-        onStop={socket.stop}
-        onToggleLike={socket.toggleLike}
-        onOpenSaveModal={handleOpenSaveModal}
-        onOpenArtist={handleOpenArtist}
-        onTrackContextMenu={handleTrackContextMenu}
-      />
+      <div className={nowPlayingOpen ? "hidden lg:block" : ""}>
+        <PlayerBar
+          playerState={socket.playerState}
+          playbackAnchor={socket.playbackAnchor}
+          displayPosition={socket.displayPosition}
+          drawerOpen={nowPlayingOpen}
+          isCurrentLiked={Boolean(
+            socket.playerState?.current && likedTrackIds.has(socket.playerState.current.identifier)
+          )}
+          artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
+          onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
+          onTogglePause={socket.togglePause}
+          onSkip={socket.skip}
+          onPrevious={socket.previous}
+          onSeek={socket.seek}
+          onVolume={socket.setVolume}
+          onRepeat={socket.setRepeat}
+          onShuffle={socket.shuffle}
+          onToggleAutoplay={socket.toggleAutoplay}
+          onSetFilter={socket.setFilter}
+          onStop={socket.stop}
+          onToggleLike={socket.toggleLike}
+          onOpenSaveModal={handleOpenSaveModal}
+          onOpenArtist={handleOpenArtist}
+          onTrackContextMenu={handleTrackContextMenu}
+        />
+      </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      {!nowPlayingOpen && (
+        <nav className="pb-safe flex shrink-0 items-center justify-around border-t border-white/10 bg-[#030303] px-2 py-1.5 lg:hidden">
+          {(
+            [
+              { id: "home", label: "Home", icon: Home },
+              { id: "explore", label: "Explore", icon: Compass },
+              { id: "library", label: "Library", icon: Bookmark },
+              { id: "settings", label: "Settings", icon: Settings },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const active = activeView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => navigateTo(item.id)}
+                className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1 text-[10px] font-medium transition ${
+                  active ? "text-white" : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }

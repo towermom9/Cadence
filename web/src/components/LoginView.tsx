@@ -33,10 +33,8 @@ export function LoginView({ meta, errorCode }: Props) {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#09090b] px-4 py-12">
-      <div className="pointer-events-none absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-violet-600/20 blur-3xl" />
-
-      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#111116]/90 p-8 shadow-2xl backdrop-blur-xl">
+    <div className="ytm-ambient relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-12">
+      <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#121212]/95 p-8 shadow-2xl backdrop-blur-xl">
         <div className="space-y-2">
           <CadenceBanner className="h-8" />
           <div className="flex items-center gap-2.5 pt-1">
@@ -107,7 +105,11 @@ export function LoginView({ meta, errorCode }: Props) {
         <div className="mt-6 flex flex-col gap-2.5">
           <a
             href="/api/auth/login"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-500"
+            style={{
+              backgroundColor: "var(--cadence-accent)",
+              color: "var(--cadence-accent-fg)",
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:brightness-110"
           >
             <LogIn className="h-4 w-4" />
             Continue with Discord
@@ -127,14 +129,14 @@ export function LoginView({ meta, errorCode }: Props) {
         </div>
 
         {meta?.redirectUri && (
-          <div className="mt-5 rounded-xl border border-white/8 bg-[#09090b]/70 p-3 text-[11px] text-zinc-400">
+          <div className="mt-5 rounded-xl border border-white/8 bg-[#0b0b0b]/80 p-3 text-[11px] text-zinc-400">
             <p>
               If Discord says <span className="text-zinc-200">Invalid OAuth2 redirect_uri</span>,
               ensure this exact URL is saved under{" "}
               <strong className="text-zinc-200">Discord Developer Portal → OAuth2 → Redirects</strong>:
             </p>
-            <div className="mt-2 flex items-center gap-2 rounded-lg border border-white/8 bg-[#111116] px-2.5 py-1.5">
-              <code className="flex-1 truncate font-mono text-[11px] text-violet-200">
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-white/8 bg-[#121212] px-2.5 py-1.5">
+              <code className="flex-1 truncate font-mono text-[11px] text-zinc-200">
                 {meta.redirectUri}
               </code>
               <button

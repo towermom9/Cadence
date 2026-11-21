@@ -350,20 +350,72 @@ export function SettingsView({
             </div>
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-base font-semibold text-white">
-                  Now Playing Thumbnail ±10s Seek Overlay
+                  Now Playing Thumbnail ±{preferences.artworkSeekSeconds}s Seek Overlay
                 </h2>
                 <p className="mt-0.5 text-xs text-zinc-400">
-                  Show rewind 10s and forward 10s buttons beside play/pause when hovering the Now Playing cover.
+                  Show rewind {preferences.artworkSeekSeconds}s and forward{" "}
+                  {preferences.artworkSeekSeconds}s buttons beside play/pause when hovering the Now Playing cover.
                 </p>
               </div>
               <ThemeSwitch
                 checked={preferences.artworkSeekButtons}
                 onChange={(val) => onUpdatePreferences({ artworkSeekButtons: val })}
-                label="Toggle Artwork 10s Seek Buttons"
+                label="Toggle Artwork Seek Buttons"
+              />
+            </div>
+
+            <div
+              className={`space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4 transition-opacity ${
+                preferences.artworkSeekButtons ? "opacity-100" : "opacity-45"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-white">Seek Jump Interval</span>
+                <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                  {preferences.artworkSeekSeconds}s
+                </span>
+              </div>
+              <input
+                type="range"
+                min={5}
+                max={30}
+                step={5}
+                disabled={!preferences.artworkSeekButtons}
+                value={preferences.artworkSeekSeconds}
+                onChange={(e) =>
+                  onUpdatePreferences({ artworkSeekSeconds: Number(e.target.value) })
+                }
+                style={{ accentColor: "var(--cadence-accent)" }}
+                aria-label="Seek jump interval seconds"
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
+              />
+              <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
+                <span>5s</span>
+                <span>10s</span>
+                <span>15s</span>
+                <span>20s</span>
+                <span>25s</span>
+                <span>30s</span>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-white">Lyrics Auto-Scroll</h2>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Smoothly keep synced lyrics centered during playback (pauses temporarily while you scroll manually).
+                </p>
+              </div>
+              <ThemeSwitch
+                checked={preferences.lyricsAutoScroll}
+                onChange={(val) => onUpdatePreferences({ lyricsAutoScroll: val })}
+                label="Toggle Lyrics Auto-Scroll"
               />
             </div>
           </section>

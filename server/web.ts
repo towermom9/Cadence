@@ -15,10 +15,13 @@ import {
 } from "./auth";
 import type { CadenceBot } from "./bot";
 import type {
+  DailyRecommendationsDTO,
   SearchSuggestResponseDTO,
   SearchSource,
   TrackDTO,
+  UserPreferencesDTO,
 } from "@shared/types";
+import { cleanArtistTag } from "@shared/artists";
 import { config, VALID_SEARCH_SOURCES } from "./config";
 import type { CadenceDatabase } from "./db";
 import { registerSetupRoutes } from "./setup";
@@ -26,6 +29,48 @@ import type { CadenceWsHub } from "./ws";
 
 const DISCORD_OAUTH_AUTHORIZE = "https://discord.com/oauth2/authorize";
 const DISCORD_OAUTH_TOKEN = "https://discord.com/api/v10/oauth2/token";
+const PREFS_COOKIE_NAME = "cadence_prefs";
+const PREFS_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const DAILY_REC_TTL_MS = 20 * 60 * 1000;
+
+function writePrefsCookie(c: import("hono").Context, prefs: UserPreferencesDTO): void {
+  setCookie(c, PREFS_COOKIE_NAME, JSON.stringify(prefs), {
+    httpOnly: false,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: PREFS_COOKIE_MAX_AGE,
+    secure: config.isSecureCookie,
+  });
+}
+
+function readPrefsCookie(c: import("hono").Context): Partial<UserPreferencesDTO> | null {
+  try {
+    const raw = getCookie(c, PREFS_COOKIE_NAME);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as Partial<UserPreferencesDTO>;
+  } catch {
+    return null;
+  }
+}
+
+function hashSeed(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function normTitleKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
 
 const ALLOWED_ARTWORK_HOSTS = new Set([
   "yt3.googleusercontent.com",
@@ -70,6 +115,7 @@ export function createWebApp(
   const startedAt = Date.now();
   const webDistDir = resolve(process.cwd(), "web/dist");
   const indexHtmlPath = join(webDistDir, "index.html");
+  const dailyRecCache = new Map<string, { at: number; data: DailyRecommendationsDTO }>();
 
   app.get("/api/health", (c) => {
     return c.json({
@@ -182,6 +228,15 @@ export function createWebApp(
       return c.json({ authenticated: false, meta: bot.getBotMeta() }, 401);
     }
 
+    if (!db.hasStoredUserPreferences(session.user.id)) {
+      const cookiePrefs = readPrefsCookie(c);
+      if (cookiePrefs) {
+        db.updateUserPreferences(session.user.id, cookiePrefs);
+      }
+    }
+    const preferences = db.getUserPreferences(session.user.id);
+    writePrefsCookie(c, preferences);
+
     const oauthGuilds = await fetchDiscordUserGuilds(session.user.id, session.accessToken);
     const guilds = bot.getUserGuildContext(session.user.id, oauthGuilds);
 
@@ -190,7 +245,146 @@ export function createWebApp(
       user: session.user,
       meta: bot.getBotMeta(),
       guilds,
+      preferences,
     });
+  });
+
+  app.post("/api/preferences", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    let body: Partial<UserPreferencesDTO> = {};
+    try {
+      const raw = await c.req.json();
+      if (raw && typeof raw === "object") {
+        body = raw as Partial<UserPreferencesDTO>;
+      }
+    } catch {
+      return c.json({ error: "Invalid JSON payload" }, 400);
+    }
+
+    const preferences = db.updateUserPreferences(session.user.id, body);
+    writePrefsCookie(c, preferences);
+    return c.json({ preferences });
+  });
+
+  app.get("/api/recommendations", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const userId = session.user.id;
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const forceRefresh = c.req.query("refresh") === "1";
+    const cacheKey = `${userId}:${todayKey}`;
+
+    if (!forceRefresh) {
+      const cached = dailyRecCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < DAILY_REC_TTL_MS && cached.data.tracks.length > 0) {
+        return c.json(cached.data);
+      }
+    }
+
+    const history = db.getPlayHistory(userId, 50);
+    const liked = db.ensureLikedPlaylist(userId).tracks;
+    const pinned = db.getPinnedTracks(userId, 20).map((p) => p.track);
+
+    const pool: TrackDTO[] = [];
+    const seenPoolIds = new Set<string>();
+    for (const candidate of [...history.map((h) => h.track), ...pinned, ...liked]) {
+      if (candidate.isStream || !candidate.identifier || seenPoolIds.has(candidate.identifier)) {
+        continue;
+      }
+      seenPoolIds.add(candidate.identifier);
+      pool.push(candidate);
+    }
+
+    if (pool.length === 0) {
+      return c.json({
+        tracks: [],
+        basedOn: [],
+        date: todayKey,
+      } satisfies DailyRecommendationsDTO);
+    }
+
+    const requester = {
+      id: userId,
+      username: session.user.globalName || session.user.username,
+      avatarUrl: session.user.avatarUrl,
+    };
+
+    const seedOffset = forceRefresh
+      ? Math.floor(Math.random() * pool.length)
+      : hashSeed(`${userId}:${todayKey}`) % pool.length;
+
+    const chosenSeeds: TrackDTO[] = [];
+    const seenArtists = new Set<string>();
+    for (let i = 0; i < pool.length && chosenSeeds.length < 3; i++) {
+      const item = pool[(seedOffset + i) % pool.length];
+      const artistKey = cleanArtistTag(item.author).toLowerCase();
+      if (chosenSeeds.length === 0 || !artistKey || !seenArtists.has(artistKey)) {
+        chosenSeeds.push(item);
+        if (artistKey) seenArtists.add(artistKey);
+      }
+    }
+    if (chosenSeeds.length < Math.min(3, pool.length)) {
+      for (const item of pool) {
+        if (chosenSeeds.length >= 3) break;
+        if (!chosenSeeds.some((s) => s.identifier === item.identifier)) {
+          chosenSeeds.push(item);
+        }
+      }
+    }
+
+    const excludedIds = new Set<string>(history.slice(0, 8).map((h) => h.track.identifier));
+    for (const s of chosenSeeds) {
+      excludedIds.add(s.identifier);
+    }
+
+    const lists = await Promise.allSettled(
+      chosenSeeds.map((seed) => bot.music.getRelatedTracks(seed, requester, 12))
+    );
+
+    const fulfilledLists: TrackDTO[][] = [];
+    for (const outcome of lists) {
+      if (outcome.status === "fulfilled" && outcome.value.length > 0) {
+        fulfilledLists.push(outcome.value);
+      }
+    }
+
+    const picked: TrackDTO[] = [];
+    const seenIds = new Set<string>(excludedIds);
+    const seenTitles = new Set<string>(chosenSeeds.map((s) => normTitleKey(s.title)).filter(Boolean));
+    const maxLen = fulfilledLists.reduce((m, l) => Math.max(m, l.length), 0);
+
+    for (let i = 0; i < maxLen && picked.length < 10; i++) {
+      for (const list of fulfilledLists) {
+        const track = list[i];
+        if (!track || track.isStream || !track.identifier) continue;
+        if (seenIds.has(track.identifier)) continue;
+        const tKey = normTitleKey(track.title);
+        if (tKey && seenTitles.has(tKey)) continue;
+        seenIds.add(track.identifier);
+        if (tKey) seenTitles.add(tKey);
+        picked.push(track);
+        if (picked.length >= 10) break;
+      }
+    }
+
+    const basedOn = chosenSeeds.map((s) => s.title).slice(0, 3);
+    const payload: DailyRecommendationsDTO = {
+      tracks: picked,
+      basedOn,
+      date: todayKey,
+    };
+
+    if (picked.length > 0) {
+      dailyRecCache.set(cacheKey, { at: Date.now(), data: payload });
+    }
+    return c.json(payload);
   });
 
   app.get("/api/artwork", async (c) => {

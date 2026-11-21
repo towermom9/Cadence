@@ -136,6 +136,8 @@ export function trackToDTO(track: Track | UnresolvedTrack): TrackDTO {
   };
 }
 
+export type ControllerEventType = "trackStart" | "queueEnd" | "playerDestroy" | "stateChange";
+
 export class MusicService {
   readonly manager: LavalinkManager;
   private activeFilters = new Map<string, FilterPreset>();
@@ -143,10 +145,12 @@ export class MusicService {
   private autoplayMoods = new Map<string, AutoplayMood>();
   private autoplayGeneration = new Map<string, number>();
   private autoplayInFlight = new Set<string>();
+  private queueNames = new Map<string, string>();
   private recentSeeks = new Map<string, { target: number; at: number }>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
+  private onControllerEvent: (event: ControllerEventType, guildId: string) => void = () => {};
   private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
 
   constructor(
@@ -204,8 +208,19 @@ export class MusicService {
     this.onStateChange = handler;
   }
 
+  setControllerEventHandler(handler: (event: ControllerEventType, guildId: string) => void): void {
+    this.onControllerEvent = handler;
+  }
+
   setToastHandler(handler: (guildId: string, level: ToastLevel, message: string) => void): void {
     this.onGuildToast = handler;
+  }
+
+  private emitStateChange(guildId: string, withController = true): void {
+    this.onStateChange(guildId);
+    if (withController) {
+      this.onControllerEvent("stateChange", guildId);
+    }
   }
 
   private registerEvents(): void {
@@ -236,15 +251,20 @@ export class MusicService {
       this.autoplayMoods.delete(player.guildId);
       this.autoplayGeneration.delete(player.guildId);
       this.autoplayInFlight.delete(player.guildId);
+      this.queueNames.delete(player.guildId);
       this.recentSeeks.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
+      this.onControllerEvent("playerDestroy", player.guildId);
     });
 
     this.manager.on("trackStart", (player, track) => {
       this.clearInactivityTimer(player.guildId);
       this.recentSeeks.delete(player.guildId);
       if (track) {
+        if (!this.queueNames.has(player.guildId) && track.info.title) {
+          this.queueNames.set(player.guildId, track.info.title);
+        }
         const dto = trackToDTO(track);
         const requesterId = dto.requester?.id;
         if (requesterId && requesterId !== this.client.user?.id) {
@@ -270,6 +290,7 @@ export class MusicService {
       }
 
       this.onStateChange(player.guildId);
+      this.onControllerEvent("trackStart", player.guildId);
     });
 
     this.manager.on("trackEnd", (player) => {
@@ -302,20 +323,22 @@ export class MusicService {
     });
 
     this.manager.on("queueEnd", (player) => {
+      this.queueNames.delete(player.guildId);
       this.scheduleInactivityCheck(player.guildId);
       this.onStateChange(player.guildId);
+      this.onControllerEvent("queueEnd", player.guildId);
     });
 
     this.manager.on("playerPaused", (player) => {
-      this.onStateChange(player.guildId);
+      this.emitStateChange(player.guildId);
     });
 
     this.manager.on("playerResumed", (player) => {
-      this.onStateChange(player.guildId);
+      this.emitStateChange(player.guildId);
     });
 
     this.manager.on("playerClientUpdate", (_oldJson, player) => {
-      this.onStateChange(player.guildId);
+      this.emitStateChange(player.guildId);
     });
 
     this.manager.on("playerUpdate", (_oldJson, player) => {
@@ -380,7 +403,7 @@ export class MusicService {
       if (!existing.connected) {
         await existing.connect();
       }
-      if (textChannelId && !existing.textChannelId) {
+      if (textChannelId) {
         existing.textChannelId = textChannelId;
       }
       return existing;
@@ -669,6 +692,7 @@ export class MusicService {
     options?: {
       skipAutoplayPopulate?: boolean;
       previousTracks?: TrackDTO[];
+      queueName?: string;
     }
   ): Promise<{ added: number; playingNow: TrackDTO | null }> {
     if (dtos.length === 0) {
@@ -678,6 +702,7 @@ export class MusicService {
     const settings = this.db.getGuildSettings(guildId);
     const player = await this.ensurePlayer(guildId, voiceChannelId, textChannelId);
     this.clearInactivityTimer(guildId);
+    const wasIdle = !player.playing && !player.paused && !player.queue.current;
 
     let filtered = dtos;
     if (!settings.allowDuplicates && (mode === "end" || mode === "next")) {
@@ -699,6 +724,11 @@ export class MusicService {
 
     if (filtered.length === 0) {
       throw new Error("Duplicate tracks are disabled on this server.");
+    }
+
+    const requestedName = options?.queueName?.trim();
+    if (mode === "replace" || mode === "now" || wasIdle || !this.queueNames.has(guildId)) {
+      this.queueNames.set(guildId, requestedName || filtered[0].title);
     }
 
     const tracks = filtered.map((dto) => this.dtoToLavalinkTrack(dto, requester));
@@ -753,7 +783,7 @@ export class MusicService {
       void this.populateAutoplayQueue(guildId, mode === "replace", requester.id);
     }
 
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return {
       added: tracks.length,
       playingNow: player.queue.current ? trackToDTO(player.queue.current) : filtered[0] ?? null,
@@ -772,6 +802,7 @@ export class MusicService {
     this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
     await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId, {
       skipAutoplayPopulate: true,
+      queueName: `${seedTrack.title} Mix`,
     });
 
     const player = this.getPlayer(guildId);
@@ -798,7 +829,7 @@ export class MusicService {
       await player.queue.utils.save();
     }
 
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return { added: related.length };
   }
 
@@ -822,7 +853,7 @@ export class MusicService {
         await player.queue.splice(index, 1);
         await player.queue.add(target, 0);
         await player.queue.utils.save();
-        this.onStateChange(guildId);
+        this.emitStateChange(guildId);
         return "queued_next";
       }
 
@@ -835,7 +866,7 @@ export class MusicService {
           await player.queue.add(target);
         }
         await player.queue.utils.save();
-        this.onStateChange(guildId);
+        this.emitStateChange(guildId);
         return "queued_end";
       }
 
@@ -873,7 +904,7 @@ export class MusicService {
       }
     }
 
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return "played";
   }
 
@@ -898,7 +929,7 @@ export class MusicService {
 
     await player.play({ clientTrack: target, paused: false });
     await player.queue.utils.save();
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
   }
 
   async togglePause(guildId: string): Promise<boolean> {
@@ -910,7 +941,7 @@ export class MusicService {
     } else {
       await player.pause();
     }
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return player.paused;
   }
 
@@ -923,7 +954,7 @@ export class MusicService {
     } else if (!paused && player.paused) {
       await player.resume();
     }
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
   }
 
   async skip(guildId: string, amount = 1): Promise<void> {
@@ -942,7 +973,7 @@ export class MusicService {
     } else {
       await player.skip(amount > 1 ? amount : 0, false);
     }
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
   }
 
   async previous(guildId: string): Promise<void> {
@@ -955,8 +986,7 @@ export class MusicService {
     }
 
     if (player.queue.current?.info.isSeekable) {
-      await player.seek(0);
-      this.onStateChange(guildId);
+      await this.seek(guildId, 0);
       return;
     }
 
@@ -971,7 +1001,9 @@ export class MusicService {
     if (!player.queue.current.info.isSeekable) {
       throw new Error("Current track does not support seeking.");
     }
-    const clamped = Math.max(0, Math.min(positionMs, player.queue.current.info.duration || positionMs));
+    const clamped = Math.round(
+      Math.max(0, Math.min(positionMs, player.queue.current.info.duration || positionMs))
+    );
     this.recentSeeks.set(guildId, { target: clamped, at: Date.now() });
     await player.seek(clamped);
     this.onStateChange(guildId);
@@ -982,7 +1014,7 @@ export class MusicService {
     if (!player) throw new Error("No active player in this server.");
     const clamped = Math.max(0, Math.min(100, Math.round(volume)));
     await player.setVolume(clamped);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return clamped;
   }
 
@@ -990,7 +1022,7 @@ export class MusicService {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
     await player.setRepeatMode(mode);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return mode;
   }
 
@@ -1001,7 +1033,7 @@ export class MusicService {
       throw new Error("Need at least 2 queued tracks to shuffle.");
     }
     const count = await player.queue.shuffle();
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return count;
   }
 
@@ -1017,7 +1049,7 @@ export class MusicService {
     const target = player.queue.tracks[from];
     await player.queue.splice(from, 1);
     await player.queue.add(target, to);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
   }
 
   canRemoveTrack(guildId: string, userId: string, index: number): boolean {
@@ -1038,7 +1070,7 @@ export class MusicService {
     }
     const removed = trackToDTO(player.queue.tracks[index]);
     await player.queue.splice(index, 1);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return removed;
   }
 
@@ -1048,7 +1080,7 @@ export class MusicService {
     if (player.queue.tracks.length > 0) {
       await player.queue.splice(0, player.queue.tracks.length);
     }
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
   }
 
   async stop(guildId: string): Promise<void> {
@@ -1406,7 +1438,7 @@ export class MusicService {
     preferredUserId?: string
   ): Promise<boolean> {
     this.autoplayOverrides.set(guildId, enabled);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
 
     const player = this.getPlayer(guildId);
     if (player) {
@@ -1416,7 +1448,7 @@ export class MusicService {
         this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
         this.autoplayInFlight.delete(guildId);
         await this.clearAutoplayTracksFromQueue(player);
-        this.onStateChange(guildId);
+        this.emitStateChange(guildId);
       }
     }
 
@@ -1430,7 +1462,7 @@ export class MusicService {
   ): Promise<AutoplayMood> {
     this.autoplayMoods.set(guildId, mood);
     this.autoplayOverrides.set(guildId, true);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     await this.populateAutoplayQueue(guildId, true, preferredUserId);
     return mood;
   }
@@ -1482,7 +1514,7 @@ export class MusicService {
     }
 
     this.activeFilters.set(guildId, preset);
-    this.onStateChange(guildId);
+    this.emitStateChange(guildId);
     return preset;
   }
 
@@ -1635,6 +1667,7 @@ export class MusicService {
       return {
         guildId,
         guildName: guild?.name || "Unknown Server",
+        queueName: null,
         voiceChannelId: null,
         voiceChannelName: null,
         connected: false,
@@ -1671,6 +1704,9 @@ export class MusicService {
     return {
       guildId,
       guildName: guild?.name || "Unknown Server",
+      queueName:
+        this.queueNames.get(guildId) ??
+        (player.queue.current ? player.queue.current.info.title : null),
       voiceChannelId: vcId,
       voiceChannelName: vc?.name ?? null,
       connected: Boolean(player.connected),

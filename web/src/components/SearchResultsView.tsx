@@ -63,6 +63,7 @@ export function SearchResultsView({
   const topResult = searchResults.tracks[0];
   const songs = searchResults.tracks.slice(0, 25);
   const resultLabel = searchResults.playlistName || searchResults.query;
+  const playlistQueueName = searchResults.playlistName ?? undefined;
 
   return (
     <div className="space-y-8">
@@ -92,7 +93,7 @@ export function SearchResultsView({
             )}
             <button
               type="button"
-              onClick={() => onEnqueue(searchResults.tracks, "end", resultLabel)}
+              onClick={() => onEnqueue(searchResults.tracks, "end", playlistQueueName)}
               className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
             >
               <ListPlus className="h-4 w-4" />
@@ -107,7 +108,7 @@ export function SearchResultsView({
         <section className="space-y-3">
           <h3 className="text-lg font-bold text-white">Top result</h3>
           <div
-            onClick={() => onEnqueue([topResult], "now", resultLabel)}
+            onClick={() => onEnqueue([topResult], "now", playlistQueueName)}
             onContextMenu={(e) => onTrackContextMenu(e, topResult)}
             className="flex cursor-pointer flex-col gap-5 rounded-xl border border-white/10 bg-gradient-to-br from-[#242424] to-[#121212] p-5 transition hover:border-white/20 sm:flex-row sm:items-center"
           >
@@ -131,7 +132,7 @@ export function SearchResultsView({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEnqueue([topResult], "now", resultLabel);
+                    onEnqueue([topResult], "now", playlistQueueName);
                   }}
                   className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
                 >
@@ -142,7 +143,7 @@ export function SearchResultsView({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEnqueue([topResult], "end", resultLabel);
+                    onEnqueue([topResult], "end", playlistQueueName);
                   }}
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
                 >
@@ -173,7 +174,7 @@ export function SearchResultsView({
           {songs.map((track, idx) => (
             <div
               key={`${track.identifier}-${idx}`}
-              onClick={() => onEnqueue([track], "now", resultLabel)}
+              onClick={() => onEnqueue([track], "now", playlistQueueName)}
               onContextMenu={(e) => onTrackContextMenu(e, track)}
               className="relative flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
             >
@@ -200,7 +201,7 @@ export function SearchResultsView({
               >
                 <button
                   type="button"
-                  onClick={() => onEnqueue([track], "now", resultLabel)}
+                  onClick={() => onEnqueue([track], "now", playlistQueueName)}
                   title="Play now"
                   className="rounded-full p-2 text-zinc-200 transition hover:bg-white/12 hover:text-white"
                 >
@@ -208,7 +209,7 @@ export function SearchResultsView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onEnqueue([track], "next", resultLabel)}
+                  onClick={() => onEnqueue([track], "next", playlistQueueName)}
                   title="Play next"
                   className="rounded-full p-2 text-zinc-400 transition hover:bg-white/12 hover:text-white"
                 >
@@ -216,7 +217,7 @@ export function SearchResultsView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onEnqueue([track], "end", resultLabel)}
+                  onClick={() => onEnqueue([track], "end", playlistQueueName)}
                   title="Add to queue"
                   className="rounded-full p-2 text-zinc-400 transition hover:bg-white/12 hover:text-white"
                 >

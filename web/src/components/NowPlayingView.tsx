@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   ListPlus,
   Loader2,
   MoreVertical,
   Pause,
+  PhoneOff,
   Play,
   Plus,
   Radio,
   RefreshCw,
+  Repeat,
+  Repeat1,
   RotateCcw,
   RotateCw,
   Shuffle,
+  SkipBack,
+  SkipForward,
+  ThumbsUp,
   Trash2,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import type {
@@ -22,7 +30,9 @@ import type {
   EnqueueMode,
   LyricsDTO,
   PlayerStateDTO,
+  RepeatModeType,
   TrackDTO,
+  UserPreferencesDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
 import { ArtistLinks } from "./ArtistLinks";
@@ -52,12 +62,21 @@ interface Props {
   lyricsSubjectTrack: TrackDTO | null;
   relatedSubjectTrack: TrackDTO | null;
   activeTab: NowPlayingTab;
-  playSourceLabel: string;
   ambienceMode: boolean;
   showArtworkSeekButtons: boolean;
+  artworkSeekSeconds: number;
+  lyricsAutoScroll: boolean;
+  likedTrackIds: Set<string>;
   onTabChange: (tab: NowPlayingTab) => void;
+  onCloseMobile?: () => void;
   onTogglePause: () => void;
+  onSkip: () => void;
+  onPrevious: () => void;
+  onRepeat: (mode: RepeatModeType) => void;
+  onVolume: (vol: number) => void;
+  onStop: () => void;
   onSeek: (ms: number) => void;
+  onSeekBy: (deltaMs: number) => void;
   onPlayTrack: (index: number) => void;
   onPlayPrevious: (index: number) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
@@ -66,8 +85,10 @@ interface Props {
   onRemoveTrack: (index: number) => void;
   onShuffle: () => void;
   onClear: () => void;
+  onToggleLike: (track: TrackDTO) => void;
   onToggleAutoplay: (enabled: boolean) => void;
   onSetAutoplayMood: (mood: AutoplayMood) => void;
+  onUpdatePreferences: (patch: Partial<UserPreferencesDTO>) => void;
   onFetchLyrics: (title?: string, artist?: string, duration?: number) => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
@@ -181,12 +202,21 @@ export function NowPlayingView({
   lyricsSubjectTrack,
   relatedSubjectTrack,
   activeTab,
-  playSourceLabel,
   ambienceMode,
   showArtworkSeekButtons,
+  artworkSeekSeconds,
+  lyricsAutoScroll,
+  likedTrackIds,
   onTabChange,
+  onCloseMobile,
   onTogglePause,
+  onSkip,
+  onPrevious,
+  onRepeat,
+  onVolume,
+  onStop,
   onSeek,
+  onSeekBy,
   onPlayTrack,
   onPlayPrevious,
   onEnqueue,
@@ -195,8 +225,10 @@ export function NowPlayingView({
   onRemoveTrack,
   onShuffle,
   onClear,
+  onToggleLike,
   onToggleAutoplay,
   onSetAutoplayMood,
+  onUpdatePreferences,
   onFetchLyrics,
   onOpenSaveModal,
   onOpenArtist,
@@ -204,12 +236,29 @@ export function NowPlayingView({
 }: Props) {
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [userScrolledAway, setUserScrolledAway] = useState(false);
+  const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
+  const [mobileScrub, setMobileScrub] = useState<number | null>(null);
+  const isDraggingMobileVolRef = useRef(false);
+
+  const lyricsContainerRef = useRef<HTMLDivElement>(null);
+  const lyricLineRefs = useRef<(HTMLElement | null)[]>([]);
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const current = playerState?.current ?? null;
   const queue = playerState?.queue ?? [];
   const autoplayEnabled = Boolean(playerState?.autoplay);
   const autoplayMood = playerState?.autoplayMood ?? "all";
   const privileged = Boolean(playerState?.isPrivileged);
+  const stepSeconds = Math.max(5, Math.min(30, Math.round(artworkSeekSeconds || 10)));
+  const resolvedQueueName =
+    playerState?.queueName || current?.title || playerState?.guildName || "Queue";
+
+  useEffect(() => {
+    if (!isDraggingMobileVolRef.current && typeof playerState?.volume === "number") {
+      setMobileVolume(playerState.volume);
+    }
+  }, [playerState?.volume]);
 
   const previousEntries = useMemo(
     () =>
@@ -271,6 +320,65 @@ export function NowPlayingView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, current?.identifier, lyricsSubjectTrack?.identifier]);
 
+  // Reset manual scroll pause when track or tab changes
+  useEffect(() => {
+    setUserScrolledAway(false);
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
+    }
+  }, [activeTab, activeLyricsTrack?.identifier]);
+
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    };
+  }, []);
+
+  const scrollActiveLyricIntoView = useCallback(
+    (index: number, behavior: ScrollBehavior = "smooth") => {
+      const container = lyricsContainerRef.current;
+      const lineEl = lyricLineRefs.current[index];
+      if (!container || !lineEl) return;
+      const containerRect = container.getBoundingClientRect();
+      const lineRect = lineEl.getBoundingClientRect();
+      const offsetInContainer = lineRect.top - containerRect.top + container.scrollTop;
+      const targetTop = Math.max(
+        0,
+        offsetInContainer - container.clientHeight * 0.36 + lineEl.clientHeight / 2
+      );
+      container.scrollTo({ top: targetTop, behavior });
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (
+      activeTab !== "lyrics" ||
+      !lyricsAutoScroll ||
+      userScrolledAway ||
+      activeSyncedIndex < 0
+    ) {
+      return;
+    }
+    scrollActiveLyricIntoView(activeSyncedIndex, "smooth");
+  }, [
+    activeSyncedIndex,
+    activeTab,
+    lyricsAutoScroll,
+    scrollActiveLyricIntoView,
+    userScrolledAway,
+  ]);
+
+  const handleManualLyricsScroll = useCallback(() => {
+    if (!lyricsAutoScroll) return;
+    setUserScrolledAway(true);
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      setUserScrolledAway(false);
+    }, 5000);
+  }, [lyricsAutoScroll]);
+
   const loadRelated = useCallback(async (seed: TrackDTO, force = false) => {
     if (!force && relatedCache[seed.identifier]) return;
     setRelatedLoading(true);
@@ -317,18 +425,61 @@ export function NowPlayingView({
   const relatedTracks = activeRelatedTrack ? relatedCache[activeRelatedTrack.identifier] ?? [] : [];
   const duration = current?.duration || 0;
   const canSeekCurrent = Boolean(current && !current.isStream && duration > 0);
+  const clampedMobilePos =
+    mobileScrub !== null
+      ? mobileScrub
+      : duration > 0
+        ? Math.min(duration, Math.max(0, displayPosition))
+        : 0;
+  const commitMobileSeek = () => {
+    if (mobileScrub === null) return;
+    const target = Math.round(mobileScrub);
+    setMobileScrub(null);
+    onSeek(target);
+  };
+  const cycleRepeat = () => {
+    const mode = playerState?.repeatMode ?? "off";
+    const next: RepeatModeType = mode === "off" ? "queue" : mode === "queue" ? "track" : "off";
+    onRepeat(next);
+  };
 
   return (
-    <div className="relative mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
+    <div className="relative mx-auto flex min-h-0 w-full max-w-7xl flex-col gap-5 pb-4 lg:grid lg:h-full lg:grid-cols-12 lg:gap-10 lg:pb-0">
       {ambienceMode && current && (
         <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
           <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
         </div>
       )}
 
-      {/* Left Clean Artwork Column (click to Play / Pause + toggleable +/-10s seek) */}
-      <div className="relative z-10 flex min-h-0 flex-col items-center justify-center lg:col-span-7">
-        <div className="flex w-full max-w-[460px] flex-col items-center">
+      {/* Mobile Now Playing Header (< lg) */}
+      <div className="relative z-10 flex shrink-0 items-center justify-between gap-2 lg:hidden">
+        <button
+          type="button"
+          onClick={onCloseMobile}
+          aria-label="Minimize Now Playing"
+          className="rounded-full bg-white/[0.06] p-2 text-zinc-200 hover:bg-white/15"
+        >
+          <ChevronDown className="h-5 w-5" />
+        </button>
+        <div className="min-w-0 text-center">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-400">Playing from</p>
+          <p className="truncate text-xs font-semibold text-white">{resolvedQueueName}</p>
+        </div>
+        <button
+          type="button"
+          disabled={!playerState?.connected || !privileged}
+          onClick={onStop}
+          title="Disconnect"
+          aria-label="Disconnect voice"
+          className="rounded-full bg-white/[0.06] p-2 text-zinc-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-35"
+        >
+          <PhoneOff className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Left Clean Artwork Column (click to Play / Pause + configurable +/-Ns seek) */}
+      <div className="relative z-10 flex min-h-0 shrink-0 flex-col items-center justify-center lg:col-span-7">
+        <div className="flex w-full max-w-[340px] flex-col items-center sm:max-w-[400px] lg:max-w-[460px]">
           <div
             role={current ? "button" : undefined}
             tabIndex={current ? 0 : undefined}
@@ -367,7 +518,7 @@ export function NowPlayingView({
             />
             {current && (
               <div
-                className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-5 transition-opacity duration-150 ${
+                className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-4 transition-opacity duration-150 sm:gap-5 ${
                   playerState?.paused
                     ? "bg-black/35 opacity-100"
                     : "bg-black/25 opacity-0 group-hover:opacity-100"
@@ -376,20 +527,23 @@ export function NowPlayingView({
                 {showArtworkSeekButtons && canSeekCurrent && (
                   <button
                     type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSeek(Math.max(0, displayPosition - 10_000));
+                      onSeekBy(-stepSeconds * 1000);
                     }}
-                    title="Rewind 10 seconds"
-                    aria-label="Rewind 10 seconds"
-                    className="pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/85"
+                    title={`Rewind ${stepSeconds} seconds`}
+                    aria-label={`Rewind ${stepSeconds} seconds`}
+                    className="pointer-events-auto relative flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/70 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/90"
                   >
-                    <RotateCcw className="h-5 w-5" />
-                    <span className="mt-0.5 text-[9px] font-bold">10</span>
+                    <RotateCcw className="h-4 w-4" />
+                    <span className="mt-0.5 text-[10px] font-bold leading-none">
+                      {stepSeconds}s
+                    </span>
                   </button>
                 )}
 
-                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs">
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/70 text-white shadow-xl backdrop-blur-xs">
                   {playerState?.paused ? (
                     <Play className="ml-1 h-8 w-8 fill-current" />
                   ) : (
@@ -400,40 +554,212 @@ export function NowPlayingView({
                 {showArtworkSeekButtons && canSeekCurrent && (
                   <button
                     type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSeek(Math.min(duration, displayPosition + 10_000));
+                      onSeekBy(stepSeconds * 1000);
                     }}
-                    title="Forward 10 seconds"
-                    aria-label="Forward 10 seconds"
-                    className="pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/85"
+                    title={`Forward ${stepSeconds} seconds`}
+                    aria-label={`Forward ${stepSeconds} seconds`}
+                    className="pointer-events-auto relative flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/70 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/90"
                   >
-                    <RotateCw className="h-5 w-5" />
-                    <span className="mt-0.5 text-[9px] font-bold">10</span>
+                    <RotateCw className="h-4 w-4" />
+                    <span className="mt-0.5 text-[10px] font-bold leading-none">
+                      {stepSeconds}s
+                    </span>
                   </button>
                 )}
               </div>
             )}
           </div>
 
-          <div className="mt-4 w-full text-center lg:hidden">
+          {/* Mobile Full Controls (< lg) */}
+          <div className="mt-4 w-full space-y-3 lg:hidden">
             {current ? (
               <>
-                <h2 className="truncate text-lg font-bold text-white">{current.title}</h2>
-                <p className="mt-0.5 truncate text-xs text-zinc-400">
-                  <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
-                  <span> • {sourceLabel(current.sourceName)}</span>
-                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1 text-left">
+                    <h2 className="truncate text-lg font-bold text-white">{current.title}</h2>
+                    <p className="mt-0.5 truncate text-xs text-zinc-400">
+                      <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
+                      <span> • {sourceLabel(current.sourceName)}</span>
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={current.isStream}
+                      onClick={() => onToggleLike(current)}
+                      title={
+                        likedTrackIds.has(current.identifier)
+                          ? "Remove from Liked Music"
+                          : "Save to Liked Music"
+                      }
+                      className={`rounded-full p-2 transition hover:bg-white/10 disabled:opacity-35 ${
+                        likedTrackIds.has(current.identifier) ? "text-white" : "text-zinc-400"
+                      }`}
+                    >
+                      <ThumbsUp
+                        className={`h-4 w-4 ${
+                          likedTrackIds.has(current.identifier) ? "fill-current" : ""
+                        }`}
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenSaveModal([current])}
+                      title="Save to playlist"
+                      className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <ListPlus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mobile seek slider */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(1, duration)}
+                    value={clampedMobilePos}
+                    disabled={!canSeekCurrent}
+                    onChange={(e) => setMobileScrub(Number(e.target.value))}
+                    onPointerUp={commitMobileSeek}
+                    onTouchEnd={commitMobileSeek}
+                    onMouseUp={commitMobileSeek}
+                    onBlur={commitMobileSeek}
+                    onKeyUp={(e) => {
+                      if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") {
+                        commitMobileSeek();
+                      }
+                    }}
+                    aria-label="Seek track position"
+                    style={{ accentColor: "var(--cadence-accent)" }}
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:opacity-40"
+                  />
+                  <div className="flex items-center justify-between text-[11px] tabular-nums text-zinc-400">
+                    <span>{current.isStream ? "LIVE" : formatMs(clampedMobilePos)}</span>
+                    <span>{current.isStream ? "LIVE" : formatMs(duration)}</span>
+                  </div>
+                </div>
+
+                {/* Mobile transport buttons */}
+                <div className="flex items-center justify-between px-2">
+                  <button
+                    type="button"
+                    onClick={onShuffle}
+                    disabled={queue.length < 2}
+                    title="Shuffle queue"
+                    className="rounded-full p-2 text-zinc-300 hover:bg-white/10 hover:text-white disabled:opacity-35"
+                  >
+                    <Shuffle className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onPrevious}
+                    title="Previous"
+                    className="rounded-full p-2.5 text-zinc-100 hover:bg-white/10"
+                  >
+                    <SkipBack className="h-5 w-5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onTogglePause}
+                    title={playerState?.paused ? "Play" : "Pause"}
+                    className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
+                  >
+                    {playerState?.paused ? (
+                      <Play className="ml-0.5 h-6 w-6 fill-current" />
+                    ) : (
+                      <Pause className="h-6 w-6 fill-current" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSkip}
+                    title="Skip"
+                    className="rounded-full p-2.5 text-zinc-100 hover:bg-white/10"
+                  >
+                    <SkipForward className="h-5 w-5 fill-current" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cycleRepeat}
+                    title={`Repeat: ${playerState?.repeatMode ?? "off"}`}
+                    className={`rounded-full p-2 hover:bg-white/10 ${
+                      playerState?.repeatMode !== "off" ? "text-white" : "text-zinc-400"
+                    }`}
+                  >
+                    {playerState?.repeatMode === "track" ? (
+                      <Repeat1 className="h-4 w-4" />
+                    ) : (
+                      <Repeat className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Mobile volume slider */}
+                <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                  <button
+                    type="button"
+                    disabled={!privileged}
+                    onClick={() => {
+                      const next = mobileVolume === 0 ? 100 : 0;
+                      setMobileVolume(next);
+                      onVolume(next);
+                    }}
+                    className="text-zinc-300 disabled:opacity-40"
+                    aria-label="Toggle mute"
+                  >
+                    {mobileVolume === 0 ? (
+                      <VolumeX className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={mobileVolume}
+                    disabled={!privileged}
+                    onPointerDown={() => {
+                      isDraggingMobileVolRef.current = true;
+                    }}
+                    onPointerUp={() => {
+                      isDraggingMobileVolRef.current = false;
+                      onVolume(mobileVolume);
+                    }}
+                    onTouchEnd={() => {
+                      isDraggingMobileVolRef.current = false;
+                      onVolume(mobileVolume);
+                    }}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setMobileVolume(val);
+                      onVolume(val);
+                    }}
+                    style={{ accentColor: "var(--cadence-accent)" }}
+                    aria-label="Mobile volume slider"
+                    className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
+                  />
+                  <span className="w-9 text-right text-xs tabular-nums text-zinc-300">
+                    {mobileVolume}%
+                  </span>
+                </div>
               </>
             ) : (
-              <p className="text-sm text-zinc-400">Pick a track to start playing in Discord.</p>
+              <p className="text-center text-sm text-zinc-400">
+                Pick a track to start playing in Discord.
+              </p>
             )}
           </div>
         </div>
       </div>
 
       {/* Right Queue / Lyrics / Related Column */}
-      <div className="relative z-10 flex min-h-0 flex-col lg:col-span-5">
+      <div className="relative z-10 flex min-h-[380px] flex-1 flex-col lg:col-span-5 lg:min-h-0">
         <div className="flex shrink-0 items-center border-b border-white/10">
           {(
             [
@@ -468,7 +794,7 @@ export function NowPlayingView({
               <div className="min-w-0">
                 <p className="text-[11px] text-zinc-400">Playing from</p>
                 <p className="truncate text-sm font-semibold text-white">
-                  {playSourceLabel || playerState?.guildName || "Queue"}
+                  {resolvedQueueName}
                 </p>
               </div>
 
@@ -516,170 +842,228 @@ export function NowPlayingView({
               )}
 
               {/* Previous tracks in queue timeline */}
-              {previousEntries.map(({ track, prevIndex }) => (
-                <div
-                  key={`prev-${track.identifier}-${prevIndex}`}
-                  onClick={() => onPlayPrevious(prevIndex)}
-                  onContextMenu={(e) => onTrackContextMenu(e, track)}
-                  className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
-                >
-                  <TrackArtwork
-                    track={track}
-                    className="h-10 w-10 shrink-0 rounded"
-                    iconClassName="h-4 w-4"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
-                    <p className="truncate text-xs text-zinc-400">
-                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
-                    {track.isStream ? "LIVE" : formatMs(track.duration)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTrackContextMenu(e, track);
-                    }}
-                    title="More options"
-                    className="hidden rounded-full p-1 text-zinc-300 hover:bg-white/10 hover:text-white group-hover:inline-flex"
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-
-              {/* Currently playing highlighted row */}
-              {current && (
-                <div
-                  onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
-                  className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
-                >
-                  <button
-                    type="button"
-                    onClick={onTogglePause}
-                    title={playerState?.paused ? "Play" : "Pause"}
-                    className="group/thumb relative h-10 w-10 shrink-0 overflow-hidden rounded"
+              {previousEntries.map(({ track, prevIndex }) => {
+                const liked = likedTrackIds.has(track.identifier);
+                return (
+                  <div
+                    key={`prev-${track.identifier}-${prevIndex}`}
+                    onClick={() => onPlayPrevious(prevIndex)}
+                    onContextMenu={(e) => onTrackContextMenu(e, track)}
+                    className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
                   >
                     <TrackArtwork
-                      track={current}
-                      className="h-10 w-10"
+                      track={track}
+                      className="h-10 w-10 shrink-0 rounded"
                       iconClassName="h-4 w-4"
                     />
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                      {playerState?.paused ? (
-                        <Play className="ml-0.5 h-4 w-4 fill-current text-white" />
-                      ) : (
-                        <>
-                          <Volume2 className="h-4 w-4 text-white group-hover/thumb:hidden" />
-                          <Pause className="hidden h-4 w-4 fill-current text-white group-hover/thumb:block" />
-                        </>
-                      )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
+                      <p className="truncate text-xs text-zinc-400">
+                        <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                      </p>
                     </div>
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-white">{current.title}</p>
-                    <p className="truncate text-xs text-zinc-300">
-                      <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
-                    </p>
+                    <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                      {track.isStream ? "LIVE" : formatMs(track.duration)}
+                    </span>
+                    <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                      {!track.isStream && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLike(track);
+                          }}
+                          title={liked ? "Remove from Liked Music" : "Save to Liked Music"}
+                          className={`rounded-full p-1 transition hover:bg-white/10 ${
+                            liked ? "text-white" : "text-zinc-300 hover:text-white"
+                          }`}
+                        >
+                          <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTrackContextMenu(e, track);
+                        }}
+                        title="More options"
+                        className="rounded-full p-1 text-zinc-300 hover:bg-white/10 hover:text-white"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                  <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
-                    {current.isStream ? "LIVE" : formatMs(current.duration)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTrackContextMenu(e, current, { isCurrent: true });
-                    }}
-                    title="More options"
-                    className="hidden rounded-full p-1 text-zinc-200 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                );
+              })}
+
+              {/* Currently playing highlighted row */}
+              {current && (() => {
+                const liked = likedTrackIds.has(current.identifier);
+                return (
+                  <div
+                    onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
+                    className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
                   >
-                    <MoreVertical className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-
-              {/* User-queued upcoming tracks */}
-              {manualEntries.map(({ track, queueIndex }) => (
-                <div
-                  key={`q-${track.identifier}-${queueIndex}`}
-                  onClick={() => onPlayTrack(queueIndex)}
-                  onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
-                  className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
-                >
-                  <TrackArtwork
-                    track={track}
-                    className="h-10 w-10 shrink-0 rounded"
-                    iconClassName="h-4 w-4"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-white">{track.title}</p>
-                    <p className="truncate text-xs text-zinc-400">
-                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
-                    </p>
-                  </div>
-
-                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
-                    {track.isStream ? "LIVE" : formatMs(track.duration)}
-                  </span>
-
-                  <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                    {privileged && (
-                      <>
-                        <button
-                          type="button"
-                          disabled={queueIndex === 0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveTrack(queueIndex, queueIndex - 1);
-                          }}
-                          title="Move up"
-                          className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                        >
-                          <ArrowUp className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={queueIndex === queue.length - 1}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onMoveTrack(queueIndex, queueIndex + 1);
-                          }}
-                          title="Move down"
-                          className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                        >
-                          <ArrowDown className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveTrack(queueIndex);
-                          }}
-                          title="Remove from queue"
-                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </>
-                    )}
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onTrackContextMenu(e, track, { queueIndex });
-                      }}
-                      title="More options"
-                      className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                      onClick={onTogglePause}
+                      title={playerState?.paused ? "Play" : "Pause"}
+                      className="group/thumb relative h-10 w-10 shrink-0 overflow-hidden rounded"
                     >
-                      <MoreVertical className="h-3.5 w-3.5" />
+                      <TrackArtwork
+                        track={current}
+                        className="h-10 w-10"
+                        iconClassName="h-4 w-4"
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                        {playerState?.paused ? (
+                          <Play className="ml-0.5 h-4 w-4 fill-current text-white" />
+                        ) : (
+                          <>
+                            <Volume2 className="h-4 w-4 text-white group-hover/thumb:hidden" />
+                            <Pause className="hidden h-4 w-4 fill-current text-white group-hover/thumb:block" />
+                          </>
+                        )}
+                      </div>
                     </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-white">{current.title}</p>
+                      <p className="truncate text-xs text-zinc-300">
+                        <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
+                      {current.isStream ? "LIVE" : formatMs(current.duration)}
+                    </span>
+                    <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                      {!current.isStream && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLike(current);
+                          }}
+                          title={liked ? "Remove from Liked Music" : "Save to Liked Music"}
+                          className={`rounded-full p-1 transition hover:bg-white/10 ${
+                            liked ? "text-white" : "text-zinc-200 hover:text-white"
+                          }`}
+                        >
+                          <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTrackContextMenu(e, current, { isCurrent: true });
+                        }}
+                        title="More options"
+                        className="rounded-full p-1 text-zinc-200 hover:bg-white/10 hover:text-white"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })()}
+
+              {/* User-queued upcoming tracks */}
+              {manualEntries.map(({ track, queueIndex }) => {
+                const liked = likedTrackIds.has(track.identifier);
+                return (
+                  <div
+                    key={`q-${track.identifier}-${queueIndex}`}
+                    onClick={() => onPlayTrack(queueIndex)}
+                    onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
+                    className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                  >
+                    <TrackArtwork
+                      track={track}
+                      className="h-10 w-10 shrink-0 rounded"
+                      iconClassName="h-4 w-4"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                      <p className="truncate text-xs text-zinc-400">
+                        <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                      {track.isStream ? "LIVE" : formatMs(track.duration)}
+                    </span>
+
+                    <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                      {!track.isStream && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLike(track);
+                          }}
+                          title={liked ? "Remove from Liked Music" : "Save to Liked Music"}
+                          className={`rounded-full p-1 transition hover:bg-white/10 ${
+                            liked ? "text-white" : "text-zinc-300 hover:text-white"
+                          }`}
+                        >
+                          <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+                        </button>
+                      )}
+                      {privileged && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={queueIndex === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveTrack(queueIndex, queueIndex - 1);
+                            }}
+                            title="Move up"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={queueIndex === queue.length - 1}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveTrack(queueIndex, queueIndex + 1);
+                            }}
+                            title="Move down"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveTrack(queueIndex);
+                            }}
+                            title="Remove from queue"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTrackContextMenu(e, track, { queueIndex });
+                        }}
+                        title="More options"
+                        className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                      >
+                        <MoreVertical className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
 
               {/* YouTube Music Autoplay Switch Section */}
               <div className="mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5">
@@ -743,55 +1127,73 @@ export function NowPlayingView({
               {/* Autoplay Upcoming Track List */}
               {autoplayEnabled && (
                 autoplayEntries.length > 0 ? (
-                  autoplayEntries.map(({ track, queueIndex }) => (
-                    <div
-                      key={`auto-${track.identifier}-${queueIndex}`}
-                      onClick={() => onPlayTrack(queueIndex)}
-                      onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
-                      className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
-                    >
-                      <TrackArtwork
-                        track={track}
-                        className="h-10 w-10 shrink-0 rounded"
-                        iconClassName="h-4 w-4"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-white">{track.title}</p>
-                        <p className="truncate text-xs text-zinc-400">
-                          <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
-                        </p>
-                      </div>
+                  autoplayEntries.map(({ track, queueIndex }) => {
+                    const liked = likedTrackIds.has(track.identifier);
+                    return (
+                      <div
+                        key={`auto-${track.identifier}-${queueIndex}`}
+                        onClick={() => onPlayTrack(queueIndex)}
+                        onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
+                        className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                      >
+                        <TrackArtwork
+                          track={track}
+                          className="h-10 w-10 shrink-0 rounded"
+                          iconClassName="h-4 w-4"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                          <p className="truncate text-xs text-zinc-400">
+                            <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                          </p>
+                        </div>
 
-                      <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
-                        {track.isStream ? "LIVE" : formatMs(track.duration)}
-                      </span>
+                        <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                          {track.isStream ? "LIVE" : formatMs(track.duration)}
+                        </span>
 
-                      <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveTrack(queueIndex);
-                          }}
-                          title="Remove suggestion"
-                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onTrackContextMenu(e, track, { queueIndex });
-                          }}
-                          title="More options"
-                          className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                        >
-                          <MoreVertical className="h-3.5 w-3.5" />
-                        </button>
+                        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                          {!track.isStream && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onToggleLike(track);
+                              }}
+                              title={liked ? "Remove from Liked Music" : "Save to Liked Music"}
+                              className={`rounded-full p-1 transition hover:bg-white/10 ${
+                                liked ? "text-white" : "text-zinc-300 hover:text-white"
+                              }`}
+                            >
+                              <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveTrack(queueIndex);
+                            }}
+                            title="Remove suggestion"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTrackContextMenu(e, track, { queueIndex });
+                            }}
+                            title="More options"
+                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : current ? (
                   <div className="flex items-center gap-2 px-2.5 py-3 text-xs text-zinc-400">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-300" />
@@ -805,7 +1207,12 @@ export function NowPlayingView({
 
         {/* LYRICS */}
         {activeTab === "lyrics" && (
-          <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+          <div
+            ref={lyricsContainerRef}
+            onWheel={handleManualLyricsScroll}
+            onTouchMove={handleManualLyricsScroll}
+            className="max-h-[65vh] min-h-0 flex-1 overflow-y-auto pt-4 pr-1 lg:max-h-none"
+          >
             {!activeLyricsTrack ? (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                 Play a track to load lyrics.
@@ -816,26 +1223,60 @@ export function NowPlayingView({
                 Searching lyrics for &ldquo;{activeLyricsTrack.title}&rdquo;...
               </div>
             ) : parsedSynced.length > 0 ? (
-              <div className="space-y-4 pb-6">
-                <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+              <div className="space-y-4 pb-8">
+                <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 bg-black/50 py-1.5 text-xs text-zinc-400 backdrop-blur-md">
                   <span className="truncate">
                     {activeLyricsTrack.title} • {lyricsState.lyrics?.source}
                     {canSeekLyrics ? " • Click any line to jump" : ""}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onFetchLyrics(
-                        activeLyricsTrack.title,
-                        activeLyricsTrack.author,
-                        activeLyricsTrack.duration
-                      )
-                    }
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-3 py-1 text-zinc-200 hover:bg-white/12"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Refresh
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {userScrolledAway && lyricsAutoScroll && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserScrolledAway(false);
+                          if (activeSyncedIndex >= 0) {
+                            scrollActiveLyricIntoView(activeSyncedIndex, "smooth");
+                          }
+                        }}
+                        style={{
+                          backgroundColor: "var(--cadence-accent)",
+                          color: "var(--cadence-accent-fg)",
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow transition hover:brightness-110"
+                      >
+                        Resume scroll
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdatePreferences({ lyricsAutoScroll: !lyricsAutoScroll })
+                      }
+                      title="Toggle lyrics auto-scroll"
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+                        lyricsAutoScroll
+                          ? "bg-white/15 text-white"
+                          : "bg-white/[0.06] text-zinc-400 hover:text-white"
+                      }`}
+                    >
+                      Auto-scroll: {lyricsAutoScroll ? "On" : "Off"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onFetchLyrics(
+                          activeLyricsTrack.title,
+                          activeLyricsTrack.author,
+                          activeLyricsTrack.duration
+                        )
+                      }
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-3 py-1 text-zinc-200 hover:bg-white/12"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Refresh
+                    </button>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   {parsedSynced.map((line, i) => {
@@ -865,6 +1306,9 @@ export function NowPlayingView({
                       return (
                         <div
                           key={`${line.timeMs}-${i}`}
+                          ref={(el) => {
+                            lyricLineRefs.current[i] = el;
+                          }}
                           className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-base leading-relaxed text-zinc-400"
                         >
                           {renderLineContent()}
@@ -877,8 +1321,14 @@ export function NowPlayingView({
                     return (
                       <button
                         key={`${line.timeMs}-${i}`}
+                        ref={(el) => {
+                          lyricLineRefs.current[i] = el;
+                        }}
                         type="button"
-                        onClick={() => onSeek(line.timeMs)}
+                        onClick={() => {
+                          setUserScrolledAway(false);
+                          onSeek(line.timeMs);
+                        }}
                         title={`Jump to ${formatMs(line.timeMs)}`}
                         className={`group/line flex w-full items-baseline justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-base leading-relaxed transition ${
                           activeLine
@@ -982,55 +1432,71 @@ export function NowPlayingView({
                       No related suggestions available for this track yet.
                     </div>
                   ) : (
-                    relatedTracks.map((track, idx) => (
-                      <div
-                        key={`rel-${track.identifier}-${idx}`}
-                        onClick={() =>
-                          onEnqueue([track], "now", `Related • ${activeRelatedTrack.title}`)
-                        }
-                        onContextMenu={(e) => onTrackContextMenu(e, track)}
-                        className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
-                      >
-                        <TrackArtwork
-                          track={track}
-                          className="h-10 w-10 shrink-0 rounded"
-                          iconClassName="h-4 w-4"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-white">{track.title}</p>
-                          <p className="truncate text-xs text-zinc-400">
-                            <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
-                          </p>
+                    relatedTracks.map((track, idx) => {
+                      const liked = likedTrackIds.has(track.identifier);
+                      return (
+                        <div
+                          key={`rel-${track.identifier}-${idx}`}
+                          onClick={() => onEnqueue([track], "now")}
+                          onContextMenu={(e) => onTrackContextMenu(e, track)}
+                          className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                        >
+                          <TrackArtwork
+                            track={track}
+                            className="h-10 w-10 shrink-0 rounded"
+                            iconClassName="h-4 w-4"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                            <p className="truncate text-xs text-zinc-400">
+                              <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                            {track.isStream ? "LIVE" : formatMs(track.duration)}
+                          </span>
+                          <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                            {!track.isStream && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onToggleLike(track);
+                                }}
+                                title={liked ? "Remove from Liked Music" : "Save to Liked Music"}
+                                className={`rounded-full p-1 transition hover:bg-white/10 ${
+                                  liked ? "text-white" : "text-zinc-300 hover:text-white"
+                                }`}
+                              >
+                                <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEnqueue([track], "end");
+                              }}
+                              title="Add to queue"
+                              className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onTrackContextMenu(e, track);
+                              }}
+                              title="More options"
+                              className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </div>
-                        <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
-                          {track.isStream ? "LIVE" : formatMs(track.duration)}
-                        </span>
-                        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEnqueue([track], "end", `Related • ${activeRelatedTrack.title}`);
-                            }}
-                            title="Add to queue"
-                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onTrackContextMenu(e, track);
-                            }}
-                            title="More options"
-                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                          >
-                            <MoreVertical className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </>

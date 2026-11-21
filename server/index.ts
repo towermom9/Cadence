@@ -20,6 +20,10 @@ async function main() {
     wsHub.broadcastToast(guildId, level, message);
   });
 
+  bot.setUserPlaylistsChangeHandler((userId) => {
+    wsHub.notifyPlaylistsChanged(userId);
+  });
+
   const app = createWebApp(bot, db, wsHub);
 
   const server = Bun.serve({

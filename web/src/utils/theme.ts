@@ -1,5 +1,6 @@
 import type {
   BackgroundMode,
+  SearchSource,
   ThemeAccentId,
   UserPreferencesDTO,
 } from "@shared/types";
@@ -56,18 +57,103 @@ export const DEFAULT_PREFERENCES: UserPreferencesDTO = {
   backgroundMode: "dark",
   ambienceMode: true,
   artworkSeekButtons: true,
+  artworkSeekSeconds: 10,
+  lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
 };
 
 const STORAGE_KEY = "cadence:prefs";
+const PREFS_COOKIE_KEY = "cadence_prefs";
+const UI_STORAGE_KEY = "cadence:ui";
+const UI_COOKIE_KEY = "cadence_ui";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+
+const VALID_THEME_SET = new Set<ThemeAccentId>(THEME_ACCENTS.map((a) => a.id));
+const VALID_BG_SET = new Set<BackgroundMode>(["amoled", "dark", "elevated"]);
+const VALID_SEARCH_SOURCES = new Set<SearchSource>([
+  "auto",
+  "ytsearch",
+  "ytmsearch",
+  "spsearch",
+  "dzsearch",
+  "scsearch",
+]);
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${name}=`;
+  const parts = document.cookie.split(";");
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) {
+      const raw = trimmed.slice(prefix.length);
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
+    }
+  }
+  return null;
+}
+
+function writeCookie(name: string, value: string): void {
+  if (typeof document === "undefined") return;
+  const secureAttr =
+    typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secureAttr}`;
+}
+
+function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined): UserPreferencesDTO {
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULT_PREFERENCES };
+  }
+  const seekSecs =
+    typeof raw.artworkSeekSeconds === "number" && Number.isFinite(raw.artworkSeekSeconds)
+      ? Math.max(5, Math.min(30, Math.round(raw.artworkSeekSeconds)))
+      : DEFAULT_PREFERENCES.artworkSeekSeconds;
+  return {
+    playlistSort: raw.playlistSort ?? DEFAULT_PREFERENCES.playlistSort,
+    themeAccent:
+      raw.themeAccent && VALID_THEME_SET.has(raw.themeAccent)
+        ? raw.themeAccent
+        : DEFAULT_PREFERENCES.themeAccent,
+    backgroundMode:
+      raw.backgroundMode && VALID_BG_SET.has(raw.backgroundMode)
+        ? raw.backgroundMode
+        : DEFAULT_PREFERENCES.backgroundMode,
+    ambienceMode:
+      typeof raw.ambienceMode === "boolean"
+        ? raw.ambienceMode
+        : DEFAULT_PREFERENCES.ambienceMode,
+    artworkSeekButtons:
+      typeof raw.artworkSeekButtons === "boolean"
+        ? raw.artworkSeekButtons
+        : DEFAULT_PREFERENCES.artworkSeekButtons,
+    artworkSeekSeconds: seekSecs,
+    lyricsAutoScroll:
+      typeof raw.lyricsAutoScroll === "boolean"
+        ? raw.lyricsAutoScroll
+        : DEFAULT_PREFERENCES.lyricsAutoScroll,
+    autoplayClickBehavior:
+      raw.autoplayClickBehavior ?? DEFAULT_PREFERENCES.autoplayClickBehavior,
+  };
+}
 
 export function loadCachedPreferences(): UserPreferencesDTO {
   if (typeof window === "undefined") return { ...DEFAULT_PREFERENCES };
   try {
+    const cookieRaw = readCookie(PREFS_COOKIE_KEY);
+    if (cookieRaw) {
+      return sanitizePreferences(JSON.parse(cookieRaw) as Partial<UserPreferencesDTO>);
+    }
+  } catch {
+    // Fall back to localStorage below
+  }
+  try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_PREFERENCES };
-    const parsed = JSON.parse(raw) as Partial<UserPreferencesDTO>;
-    return { ...DEFAULT_PREFERENCES, ...parsed };
+    return sanitizePreferences(JSON.parse(raw) as Partial<UserPreferencesDTO>);
   } catch {
     return { ...DEFAULT_PREFERENCES };
   }
@@ -75,11 +161,74 @@ export function loadCachedPreferences(): UserPreferencesDTO {
 
 export function saveCachedPreferences(prefs: UserPreferencesDTO): void {
   if (typeof window === "undefined") return;
+  const clean = sanitizePreferences(prefs);
+  const serialized = JSON.stringify(clean);
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    writeCookie(PREFS_COOKIE_KEY, serialized);
+  } catch {
+    // Ignore cookie errors
+  }
+  try {
+    window.localStorage.setItem(STORAGE_KEY, serialized);
   } catch {
     // Ignore localStorage quota or private mode issues
   }
+}
+
+export interface UiPrefs {
+  selectedGuildId: string | null;
+  searchSource: SearchSource;
+}
+
+export function loadUiPrefs(): UiPrefs {
+  const defaults: UiPrefs = { selectedGuildId: null, searchSource: "auto" };
+  if (typeof window === "undefined") return defaults;
+  let parsed: Partial<UiPrefs> | null = null;
+  try {
+    const cookieRaw = readCookie(UI_COOKIE_KEY);
+    if (cookieRaw) parsed = JSON.parse(cookieRaw) as Partial<UiPrefs>;
+  } catch {
+    parsed = null;
+  }
+  if (!parsed) {
+    try {
+      const storageRaw = window.localStorage.getItem(UI_STORAGE_KEY);
+      if (storageRaw) parsed = JSON.parse(storageRaw) as Partial<UiPrefs>;
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!parsed) return defaults;
+  return {
+    selectedGuildId:
+      typeof parsed.selectedGuildId === "string" && parsed.selectedGuildId.length > 0
+        ? parsed.selectedGuildId
+        : null,
+    searchSource:
+      parsed.searchSource && VALID_SEARCH_SOURCES.has(parsed.searchSource)
+        ? parsed.searchSource
+        : "auto",
+  };
+}
+
+export function saveUiPrefs(patch: Partial<UiPrefs>): UiPrefs {
+  const next: UiPrefs = {
+    ...loadUiPrefs(),
+    ...patch,
+  };
+  if (typeof window === "undefined") return next;
+  const serialized = JSON.stringify(next);
+  try {
+    writeCookie(UI_COOKIE_KEY, serialized);
+  } catch {
+    // Ignore cookie errors
+  }
+  try {
+    window.localStorage.setItem(UI_STORAGE_KEY, serialized);
+  } catch {
+    // Ignore localStorage quota issues
+  }
+  return next;
 }
 
 function loadImg(src: string): Promise<HTMLImageElement> {

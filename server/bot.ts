@@ -8,16 +8,17 @@ import {
   EmbedBuilder,
   Events,
   GatewayIntentBits,
+  type MessageActionRowComponentBuilder,
   MessageFlags,
   PermissionsBitField,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
   type Interaction,
   type Message,
   type StringSelectMenuInteraction,
-  StringSelectMenuBuilder,
 } from "discord.js";
 import type {
   AppMetaDTO,
@@ -31,7 +32,7 @@ import type {
 import type { SearchPlatform } from "lavalink-client";
 import { config } from "./config";
 import type { CadenceDatabase } from "./db";
-import { fetchLyrics } from "./lyrics";
+import { fetchLyrics, stripEnhancedLrcTags } from "./lyrics";
 import { MusicService, trackToDTO, userToRequester } from "./music";
 
 export interface DiscordOAuthGuild {
@@ -42,7 +43,26 @@ export interface DiscordOAuthGuild {
   permissions: string;
 }
 
-const BRAND_COLOR = 0x7c5cff;
+const BRAND_COLOR = 0xff0033;
+const INACTIVE_COLOR = 0xb3b3b3;
+
+function getSourceColor(sourceName: string): number {
+  switch (sourceName.toLowerCase().trim()) {
+    case "youtube":
+    case "youtubemusic":
+      return 0xff0000;
+    case "spotify":
+      return 0x1db954;
+    case "soundcloud":
+      return 0xff7700;
+    case "deezer":
+      return 0xa238ff;
+    case "applemusic":
+      return 0xe298c4;
+    default:
+      return 0xb3b3b3;
+  }
+}
 
 const SEARCH_SOURCES: { name: string; value: SearchSource }[] = [
   { name: "Auto (URL or Default)", value: "auto" },
@@ -82,8 +102,14 @@ export class CadenceBot {
   music!: MusicService;
   private ready = false;
   private pendingSearchCache = new Map<string, TrackDTO[]>();
+  private controllerMessages = new Map<string, { channelId: string; messageId: string }>();
+  private controllerTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private controllerQueues = new Map<string, Promise<void>>();
+  private lastNonZeroVolume = new Map<string, number>();
+  private buttonCooldowns = new Map<string, number>();
   private onGuildStateChange: (guildId: string) => void;
   private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
+  private onUserPlaylistsChange: (userId: string) => void = () => {};
 
   constructor(
     private db: CadenceDatabase,
@@ -117,11 +143,33 @@ export class CadenceBot {
       }
     );
 
+    this.music.setControllerEventHandler((event, guildId) => {
+      if (event === "trackStart") {
+        void this.invokeController(guildId, { repostIfStale: true });
+      } else if (event === "stateChange") {
+        this.scheduleControllerUpdate(guildId);
+      } else if (event === "queueEnd") {
+        void this.invokeController(guildId, { repostIfStale: false });
+      } else if (event === "playerDestroy") {
+        void this.deleteControllerMessage(guildId);
+      }
+    });
+
     this.registerDiscordListeners();
+  }
+
+  private clearControllerState(): void {
+    for (const timer of this.controllerTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.controllerTimers.clear();
+    this.controllerMessages.clear();
+    this.controllerQueues.clear();
   }
 
   private async resetClient(): Promise<void> {
     this.ready = false;
+    this.clearControllerState();
     await this.music.destroy().catch(() => {});
     await this.client.destroy().catch(() => {});
     this.initClientAndMusic();
@@ -130,6 +178,10 @@ export class CadenceBot {
   setStateChangeHandler(handler: (guildId: string) => void): void {
     this.onGuildStateChange = handler;
     this.music.setStateChangeHandler(handler);
+  }
+
+  setUserPlaylistsChangeHandler(handler: (userId: string) => void): void {
+    this.onUserPlaylistsChange = handler;
   }
 
   setToastHandler(handler: (guildId: string, level: ToastLevel, message: string) => void): void {
@@ -334,6 +386,10 @@ export class CadenceBot {
   }
 
   async stop(): Promise<void> {
+    for (const guildId of [...this.controllerMessages.keys()]) {
+      await this.deleteControllerMessage(guildId).catch(() => {});
+    }
+    this.clearControllerState();
     await this.music.destroy();
     this.ready = false;
     this.client.destroy();
@@ -583,58 +639,328 @@ export class CadenceBot {
     console.log(`[Bot] Synced ${builders.length} slash commands.`);
   }
 
-  private buildNowPlayingPayload(guildId: string) {
+  private scheduleControllerUpdate(guildId: string): void {
+    if (!this.controllerMessages.has(guildId)) return;
+    const existingTimer = this.controllerTimers.get(guildId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      this.controllerTimers.delete(guildId);
+      void this.invokeController(guildId, { repostIfStale: false });
+    }, 350);
+    this.controllerTimers.set(guildId, timer);
+  }
+
+  private enqueueControllerTask(guildId: string, fn: () => Promise<void>): Promise<void> {
+    const prev = this.controllerQueues.get(guildId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => {})
+      .then(fn)
+      .finally(() => {
+        if (this.controllerQueues.get(guildId) === next) {
+          this.controllerQueues.delete(guildId);
+        }
+      });
+    this.controllerQueues.set(guildId, next);
+    return next;
+  }
+
+  private async deleteControllerMessage(guildId: string): Promise<void> {
+    const pendingTimer = this.controllerTimers.get(guildId);
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      this.controllerTimers.delete(guildId);
+    }
+    await this.enqueueControllerTask(guildId, async () => {
+      const ref = this.controllerMessages.get(guildId);
+      this.controllerMessages.delete(guildId);
+      if (!ref) return;
+      try {
+        const ch =
+          this.client.channels.cache.get(ref.channelId) ??
+          (await this.client.channels.fetch(ref.channelId).catch(() => null));
+        if (ch && ch.isTextBased() && "messages" in ch) {
+          const msg = await ch.messages.fetch(ref.messageId).catch(() => null);
+          if (msg) await msg.delete().catch(() => {});
+        }
+      } catch {
+        // Ignore missing permissions or already-deleted messages
+      }
+    });
+  }
+
+  private async invokeController(
+    guildId: string,
+    opts: { repostIfStale?: boolean; forceChannelId?: string; forcePost?: boolean } = {}
+  ): Promise<void> {
+    await this.enqueueControllerTask(guildId, async () => {
+      const player = this.music.getPlayer(guildId);
+      const existing = this.controllerMessages.get(guildId);
+      const targetChannelId = opts.forceChannelId || player?.textChannelId || existing?.channelId;
+      if (!targetChannelId) return;
+
+      const ch =
+        this.client.channels.cache.get(targetChannelId) ??
+        (await this.client.channels.fetch(targetChannelId).catch(() => null));
+      if (!ch || !ch.isTextBased() || !("send" in ch) || !("messages" in ch)) return;
+
+      const state = this.music.serializePlayer(guildId);
+      if (!state.current && !existing && !opts.forcePost) {
+        return;
+      }
+
+      const payload = this.buildNowPlayingPayload(guildId);
+
+      // Move to new channel cleanly if commanded from another channel
+      if (existing && existing.channelId !== targetChannelId) {
+        try {
+          const oldCh =
+            this.client.channels.cache.get(existing.channelId) ??
+            (await this.client.channels.fetch(existing.channelId).catch(() => null));
+          if (oldCh && oldCh.isTextBased() && "messages" in oldCh) {
+            const oldMsg = await oldCh.messages.fetch(existing.messageId).catch(() => null);
+            if (oldMsg) await oldMsg.delete().catch(() => {});
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+        this.controllerMessages.delete(guildId);
+      }
+
+      const currentRef = this.controllerMessages.get(guildId);
+      if (currentRef) {
+        let shouldRepost = Boolean(opts.forcePost);
+        if (!shouldRepost && opts.repostIfStale) {
+          try {
+            const recent = await ch.messages.fetch({ limit: 5 });
+            shouldRepost = !recent.has(currentRef.messageId);
+          } catch {
+            shouldRepost = false;
+          }
+        }
+
+        if (shouldRepost) {
+          const oldMsg = await ch.messages.fetch(currentRef.messageId).catch(() => null);
+          if (oldMsg) await oldMsg.delete().catch(() => {});
+          this.controllerMessages.delete(guildId);
+          const sent = await ch.send(payload).catch(() => null);
+          if (sent) {
+            this.controllerMessages.set(guildId, { channelId: ch.id, messageId: sent.id });
+          }
+          return;
+        }
+
+        const existingMsg = await ch.messages.fetch(currentRef.messageId).catch(() => null);
+        if (existingMsg) {
+          await existingMsg.edit(payload).catch(() => {});
+          return;
+        }
+        this.controllerMessages.delete(guildId);
+      }
+
+      if (state.current || opts.forcePost) {
+        const sent = await ch.send(payload).catch(() => null);
+        if (sent) {
+          this.controllerMessages.set(guildId, { channelId: ch.id, messageId: sent.id });
+        }
+      }
+    });
+  }
+
+  private buildNowPlayingPayload(guildId: string): {
+    embeds: EmbedBuilder[];
+    components: ActionRowBuilder<MessageActionRowComponentBuilder>[];
+  } {
     const state = this.music.serializePlayer(guildId);
     const track = state.current;
+    const settings = this.db.getGuildSettings(guildId);
+    const botAvatarUrl = this.client.user?.displayAvatarURL({ size: 128 }) ?? undefined;
 
-    const embed = new EmbedBuilder().setColor(BRAND_COLOR);
     if (!track) {
-      embed.setTitle("Cadence Player").setDescription("Nothing is playing right now.");
-      return { embeds: [embed], components: [] };
+      const inactiveEmbed = new EmbedBuilder()
+        .setColor(INACTIVE_COLOR)
+        .setTitle("There are no songs playing right now")
+        .setDescription(
+          `Use \`/play\` or open the [Cadence Dashboard](${config.dashboardUrl}) to queue music.`
+        );
+      if (botAvatarUrl) {
+        inactiveEmbed.setAuthor({
+          name: `Music Controller | ${state.guildName}`,
+          iconURL: botAvatarUrl,
+        });
+      }
+
+      const linkRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder()
+          .setLabel("Open Dashboard")
+          .setStyle(ButtonStyle.Link)
+          .setURL(config.dashboardUrl)
+      );
+      return { embeds: [inactiveEmbed], components: [linkRow] };
     }
 
-    embed
-      .setAuthor({ name: state.paused ? "Paused" : "Now Playing" })
-      .setTitle(track.title)
-      .setURL(track.uri || config.dashboardUrl)
+    const djLabel = settings.djRoleId
+      ? `<@&${settings.djRoleId}>`
+      : track.requester
+        ? `<@${track.requester.id}>`
+        : "Auto";
+    const requesterMention = track.requester ? `<@${track.requester.id}>` : "Autoplay";
+    const durationLabel = track.isStream ? "LIVE" : formatDuration(track.duration);
+    const loopLabel =
+      state.repeatMode === "track" ? "Track" : state.repeatMode === "queue" ? "Queue" : "Off";
+
+    const footerParts = [
+      `Queue Length: ${state.queue.length}`,
+      `Duration: ${durationLabel}`,
+      `Volume: ${state.volume}%`,
+    ];
+    if (state.paused) footerParts.push("Paused");
+    if (loopLabel !== "Off") footerParts.push(`Repeat: ${loopLabel}`);
+    if (state.autoplay) footerParts.push("Autoplay: On");
+    if (state.activeFilter !== "none") footerParts.push(`Filter: ${state.activeFilter}`);
+
+    const safeTitle = track.title.replace(/```/g, "'''").slice(0, 180);
+    const embed = new EmbedBuilder()
+      .setColor(getSourceColor(track.sourceName))
+      .setAuthor({
+        name: `Music Controller | ${state.voiceChannelName || state.guildName}`,
+        iconURL: botAvatarUrl,
+      })
       .setDescription(
-        `**Artist:** ${track.author}\n**Duration:** ${
-          track.isStream ? "LIVE" : `${formatDuration(state.position)} / ${formatDuration(track.duration)}`
-        }\n**Source:** ${track.sourceName} • **Volume:** ${state.volume}% • **Loop:** ${state.repeatMode}`
-      );
+        `**Now Playing:**\n\`\`\`${safeTitle}\`\`\`\n**Artist:** ${track.author}\n**Link:** [Click Me](${track.uri || config.dashboardUrl}) | **Requester:** ${requesterMention} | **DJ:** ${djLabel}`
+      )
+      .setFooter({ text: footerParts.join(" | ") });
 
     if (track.artworkUrl) {
-      embed.setThumbnail(track.artworkUrl);
-    }
-    if (track.requester) {
-      embed.setFooter({
-        text: `Requested by ${track.requester.username} • ${state.queue.length} in queue`,
-        iconURL: track.requester.avatarUrl ?? undefined,
-      });
+      embed.setImage(track.artworkUrl);
     }
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("cadence:prev").setLabel("Prev").setStyle(ButtonStyle.Secondary),
+    const row1 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("cadence:back")
+        .setEmoji("⏮️")
+        .setLabel("Back")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(state.previous.length === 0 && track.isStream),
       new ButtonBuilder()
         .setCustomId("cadence:pause")
+        .setEmoji(state.paused ? "▶️" : "⏸️")
         .setLabel(state.paused ? "Resume" : "Pause")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("cadence:skip").setLabel("Skip").setStyle(ButtonStyle.Secondary),
+        .setStyle(state.paused ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId("cadence:loop")
-        .setLabel(`Loop: ${state.repeatMode}`)
+        .setCustomId("cadence:skip")
+        .setEmoji("⏭️")
+        .setLabel("Skip")
         .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("cadence:stop").setLabel("Stop").setStyle(ButtonStyle.Danger)
+      new ButtonBuilder()
+        .setCustomId("cadence:stop")
+        .setEmoji("⏹️")
+        .setLabel("Leave")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("cadence:fav")
+        .setEmoji("❤️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(track.isStream)
     );
 
-    const linkRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder()
-        .setLabel("Open Dashboard")
+        .setCustomId("cadence:loop")
+        .setEmoji(state.repeatMode === "track" ? "🔂" : "🔁")
+        .setLabel(`Loop: ${loopLabel}`)
+        .setStyle(state.repeatMode !== "off" ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("cadence:shuffle")
+        .setEmoji("🔀")
+        .setLabel("Shuffle")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(state.queue.length < 2),
+      new ButtonBuilder()
+        .setCustomId("cadence:autoplay")
+        .setEmoji("♾️")
+        .setLabel("Autoplay")
+        .setStyle(state.autoplay ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("cadence:voldown")
+        .setEmoji("🔉")
+        .setLabel("-10%")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(state.volume <= 0),
+      new ButtonBuilder()
+        .setCustomId("cadence:volup")
+        .setEmoji("🔊")
+        .setLabel("+10%")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(state.volume >= 100)
+    );
+
+    const row3 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId("cadence:rewind")
+        .setEmoji("⏪")
+        .setLabel("-10s")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(track.isStream),
+      new ButtonBuilder()
+        .setCustomId("cadence:forward")
+        .setEmoji("⏩")
+        .setLabel("+10s")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(track.isStream),
+      new ButtonBuilder()
+        .setCustomId("cadence:mute")
+        .setEmoji(state.volume === 0 ? "🔊" : "🔇")
+        .setLabel(state.volume === 0 ? "Unmute" : "Mute")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("cadence:lyrics")
+        .setEmoji("🎤")
+        .setLabel("Lyrics")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setEmoji("🌐")
+        .setLabel("Dashboard")
         .setStyle(ButtonStyle.Link)
         .setURL(config.dashboardUrl)
     );
 
-    return { embeds: [embed], components: [row, linkRow] };
+    const components: ActionRowBuilder<MessageActionRowComponentBuilder>[] = [row1, row2, row3];
+
+    if (state.queue.length > 0) {
+      const tracksSelect = new StringSelectMenuBuilder()
+        .setCustomId("cadence:tracks")
+        .setPlaceholder("Select a song to skip to ...")
+        .addOptions(
+          state.queue.slice(0, 15).map((t, i) => ({
+            label: `${i + 1}. ${t.title}`.slice(0, 100),
+            description: `${t.author} · ${t.isStream ? "LIVE" : formatDuration(t.duration)}`.slice(0, 100),
+            value: String(i),
+          }))
+        );
+      components.push(
+        new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(tracksSelect)
+      );
+    }
+
+    const effectsSelect = new StringSelectMenuBuilder()
+      .setCustomId("cadence:effects")
+      .setPlaceholder(
+        state.activeFilter !== "none"
+          ? `Filter: ${state.activeFilter} (change...)`
+          : "Select a filter to apply ..."
+      )
+      .addOptions(
+        FILTER_CHOICES.map((f) => ({
+          label: f.name,
+          value: f.value,
+          default: state.activeFilter === f.value,
+        }))
+      );
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(effectsSelect)
+    );
+
+    return { embeds: [embed], components };
   }
 
   private async replyError(interaction: ChatInputCommandInteraction, message: string): Promise<void> {
@@ -675,7 +1001,7 @@ export class CadenceBot {
       return;
     }
     if (interaction.isStringSelectMenu()) {
-      await this.handleSearchSelect(interaction);
+      await this.handleSelectMenu(interaction);
       return;
     }
     if (!interaction.isChatInputCommand()) return;
@@ -707,7 +1033,8 @@ export class CadenceBot {
             toQueue,
             "end",
             requester,
-            interaction.channelId
+            interaction.channelId,
+            playlistName ? { queueName: playlistName } : undefined
           );
 
           if (playlistName) {
@@ -716,11 +1043,14 @@ export class CadenceBot {
             );
           } else {
             const first = toQueue[0];
-            await interaction.editReply({
-              content: `Queued **${first.title}** by *${first.author}* (\`${formatDuration(first.duration)}\`).`,
-              ...this.buildNowPlayingPayload(guildId),
-            });
+            await interaction.editReply(
+              `Queued **${first.title}** by *${first.author}* (\`${formatDuration(first.duration)}\`).`
+            );
           }
+          void this.invokeController(guildId, {
+            repostIfStale: true,
+            forceChannelId: interaction.channelId,
+          });
           return;
         }
 
@@ -827,7 +1157,13 @@ export class CadenceBot {
         }
 
         case "nowplaying": {
-          await interaction.reply(this.buildNowPlayingPayload(guildId));
+          await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+          await this.invokeController(guildId, {
+            repostIfStale: true,
+            forceChannelId: interaction.channelId,
+            forcePost: true,
+          });
+          await interaction.editReply("Refreshed the music controller below.");
           return;
         }
 
@@ -1026,7 +1362,8 @@ export class CadenceBot {
         playlist.tracks,
         "end",
         userToRequester(member),
-        interaction.channelId
+        interaction.channelId,
+        { queueName: playlist.name }
       );
       await interaction.editReply(`Queued **${res.added}** tracks from **${playlist.name}**.`);
       return;
@@ -1095,6 +1432,60 @@ export class CadenceBot {
     this.onGuildStateChange(guildId);
   }
 
+  private async handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (!interaction.guild || !interaction.member) return;
+
+    if (interaction.customId.startsWith("cadence:pick:")) {
+      await this.handleSearchSelect(interaction);
+      return;
+    }
+
+    const guildId = interaction.guild.id;
+    const member = interaction.member as GuildMember;
+
+    if (interaction.customId === "cadence:tracks") {
+      try {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const index = Number.parseInt(interaction.values[0] || "", 10);
+        if (Number.isNaN(index) || index < 0) {
+          throw new Error("Selected track is no longer in the queue.");
+        }
+        await this.music.playTrack(guildId, index);
+        await interaction.update(this.buildNowPlayingPayload(guildId)).catch(() => {});
+      } catch (error) {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction
+            .reply({
+              content: error instanceof Error ? error.message : "Failed to jump to track.",
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch(() => {});
+        }
+      }
+      return;
+    }
+
+    if (interaction.customId === "cadence:effects") {
+      try {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const preset = (interaction.values[0] || "none") as FilterPreset;
+        await this.music.applyFilter(guildId, preset);
+        await interaction.update(this.buildNowPlayingPayload(guildId)).catch(() => {});
+      } catch (error) {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction
+            .reply({
+              content: error instanceof Error ? error.message : "Failed to apply audio effect.",
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch(() => {});
+        }
+      }
+    }
+  }
+
   private async handleSearchSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     if (!interaction.customId.startsWith("cadence:pick:") || !interaction.guild || !interaction.member) {
       return;
@@ -1124,6 +1515,10 @@ export class CadenceBot {
         content: `Queued **${picked.title}** by *${picked.author}*.`,
         components: [],
       });
+      void this.invokeController(interaction.guild.id, {
+        repostIfStale: true,
+        forceChannelId: interaction.channelId,
+      });
     } catch (error) {
       await interaction.reply({
         content: error instanceof Error ? error.message : "Failed to queue track.",
@@ -1139,11 +1534,75 @@ export class CadenceBot {
 
     const guildId = interaction.guild.id;
     const member = interaction.member as GuildMember;
+    const cooldownKey = `${guildId}:${member.id}`;
+    const now = Date.now();
+    const lastPressed = this.buttonCooldowns.get(cooldownKey) ?? 0;
+    if (now - lastPressed < 1000) {
+      await interaction
+        .reply({
+          content: "Slow down a bit — try again in a second.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+      return;
+    }
+    this.buttonCooldowns.set(cooldownKey, now);
+
+    // Track message ID so external edits know the controller message
+    if (interaction.message?.id) {
+      this.controllerMessages.set(guildId, {
+        channelId: interaction.channelId,
+        messageId: interaction.message.id,
+      });
+    }
 
     try {
+      if (interaction.customId === "cadence:fav") {
+        const state = this.music.serializePlayer(guildId);
+        if (!state.current) {
+          throw new Error("Nothing is playing right now.");
+        }
+        const res = this.db.toggleLikedTrack(member.id, state.current);
+        this.onUserPlaylistsChange(member.id);
+        await interaction.reply({
+          content: res.liked
+            ? `❤️ Added **${state.current.title}** to your **Liked Music** playlist.`
+            : `💔 Removed **${state.current.title}** from your **Liked Music** playlist.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.customId === "cadence:lyrics") {
+        const state = this.music.serializePlayer(guildId);
+        if (!state.current) {
+          throw new Error("Nothing is playing right now.");
+        }
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const lyrics = await fetchLyrics(
+          state.current.title,
+          state.current.author,
+          state.current.duration,
+          this.music.getPlayer(guildId)
+        );
+        const cleanPlain = stripEnhancedLrcTags(lyrics?.plainLyrics);
+        if (!lyrics || !cleanPlain) {
+          await interaction.editReply(`No lyrics found for **${state.current.title}**.`);
+          return;
+        }
+        const embed = new EmbedBuilder()
+          .setColor(getSourceColor(state.current.sourceName))
+          .setTitle(`${lyrics.title} — ${lyrics.artist}`)
+          .setDescription(cleanPlain.slice(0, 3900))
+          .setFooter({ text: `Source: ${lyrics.source}` });
+        await interaction.editReply({ embeds: [embed] });
+        return;
+      }
+
       this.requireSameVoice(guildId, member);
 
       switch (interaction.customId) {
+        case "cadence:back":
         case "cadence:prev":
           await this.music.previous(guildId);
           break;
@@ -1161,23 +1620,86 @@ export class CadenceBot {
           await this.music.setRepeatMode(guildId, next);
           break;
         }
+        case "cadence:shuffle": {
+          this.requirePrivileged(guildId, member.id);
+          await this.music.shuffle(guildId);
+          break;
+        }
+        case "cadence:autoplay": {
+          this.requirePrivileged(guildId, member.id);
+          const next = !this.music.isAutoplayEnabled(guildId);
+          await this.music.toggleAutoplay(guildId, next, member.id);
+          break;
+        }
+        case "cadence:voldown": {
+          this.requirePrivileged(guildId, member.id);
+          const cur = this.music.getPlayer(guildId)?.volume ?? 100;
+          const next = Math.max(0, cur - 10);
+          if (next > 0) this.lastNonZeroVolume.set(guildId, next);
+          await this.music.setVolume(guildId, next);
+          break;
+        }
+        case "cadence:volup": {
+          this.requirePrivileged(guildId, member.id);
+          const cur = this.music.getPlayer(guildId)?.volume ?? 100;
+          const next = Math.min(100, cur + 10);
+          if (next > 0) this.lastNonZeroVolume.set(guildId, next);
+          await this.music.setVolume(guildId, next);
+          break;
+        }
+        case "cadence:mute": {
+          this.requirePrivileged(guildId, member.id);
+          const cur = this.music.getPlayer(guildId)?.volume ?? 100;
+          if (cur > 0) {
+            this.lastNonZeroVolume.set(guildId, cur);
+            await this.music.setVolume(guildId, 0);
+          } else {
+            const restore = this.lastNonZeroVolume.get(guildId) ?? this.db.getGuildSettings(guildId).defaultVolume;
+            await this.music.setVolume(guildId, restore > 0 ? restore : 100);
+          }
+          break;
+        }
+        case "cadence:rewind": {
+          this.requirePrivileged(guildId, member.id);
+          const state = this.music.serializePlayer(guildId);
+          await this.music.seek(guildId, Math.max(0, state.position - 10_000));
+          break;
+        }
+        case "cadence:forward": {
+          this.requirePrivileged(guildId, member.id);
+          const state = this.music.serializePlayer(guildId);
+          const dur = state.current?.duration || state.position + 10_000;
+          await this.music.seek(guildId, Math.min(dur, state.position + 10_000));
+          break;
+        }
         case "cadence:stop":
           this.requirePrivileged(guildId, member.id);
+          await interaction
+            .update({
+              content: "Stopped playback and disconnected.",
+              embeds: [],
+              components: [],
+            })
+            .catch(() => {});
+          this.controllerMessages.delete(guildId);
           await this.music.stop(guildId);
-          await interaction.update({
-            content: "Stopped playback and disconnected.",
-            embeds: [],
-            components: [],
-          });
           return;
       }
 
-      await interaction.update(this.buildNowPlayingPayload(guildId));
+      await interaction.update(this.buildNowPlayingPayload(guildId)).catch(() => {});
     } catch (error) {
-      await interaction.reply({
-        content: error instanceof Error ? error.message : "Action failed.",
-        flags: MessageFlags.Ephemeral,
-      }).catch(() => {});
+      if (interaction.deferred) {
+        await interaction
+          .editReply({ content: error instanceof Error ? error.message : "Action failed." })
+          .catch(() => {});
+      } else if (!interaction.replied) {
+        await interaction
+          .reply({
+            content: error instanceof Error ? error.message : "Action failed.",
+            flags: MessageFlags.Ephemeral,
+          })
+          .catch(() => {});
+      }
     }
   }
 
@@ -1211,12 +1733,24 @@ export class CadenceBot {
           return;
         }
         const toQueue = playlistName ? tracks : [tracks[0]];
-        const res = await this.music.enqueue(guildId, vcId, toQueue, "end", requester, message.channelId);
+        const res = await this.music.enqueue(
+          guildId,
+          vcId,
+          toQueue,
+          "end",
+          requester,
+          message.channelId,
+          playlistName ? { queueName: playlistName } : undefined
+        );
         await message.reply(
           playlistName
             ? `Queued **${res.added}** tracks from **${playlistName}**.`
             : `Queued **${toQueue[0].title}** by *${toQueue[0].author}*.`
         );
+        void this.invokeController(guildId, {
+          repostIfStale: true,
+          forceChannelId: message.channelId,
+        });
       } else if (cmd === "skip" || cmd === "s") {
         this.requireSameVoice(guildId, member);
         await this.music.skip(guildId, 1);
@@ -1248,7 +1782,11 @@ export class CadenceBot {
           `**Now Playing:** ${state.current?.title || "Nothing"}\n${upcoming || "*No upcoming tracks*"}`
         );
       } else if (cmd === "np" || cmd === "nowplaying") {
-        await message.reply(this.buildNowPlayingPayload(guildId));
+        await this.invokeController(guildId, {
+          repostIfStale: true,
+          forceChannelId: message.channelId,
+          forcePost: true,
+        });
       }
     } catch (error) {
       await message.reply(error instanceof Error ? error.message : "Command failed.").catch(() => {});

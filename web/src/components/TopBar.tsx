@@ -27,6 +27,7 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { formatMs } from "../utils/format";
+import { loadUiPrefs, saveUiPrefs } from "../utils/theme";
 import { ArtistLinks } from "./ArtistLinks";
 import { MobileMenuButton } from "./Sidebar";
 import { TrackArtwork } from "./TrackArtwork";
@@ -71,7 +72,7 @@ export function TopBar({
   onLogout,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<SearchSource>("auto");
+  const [source, setSource] = useState<SearchSource>(() => loadUiPrefs().searchSource);
   const [openMenu, setOpenMenu] = useState<"cast" | "user" | null>(null);
 
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -163,7 +164,7 @@ export function TopBar({
       if (track) {
         setSuggestOpen(false);
         setActiveIndex(-1);
-        onPlayTrack(track, query.trim());
+        onPlayTrack(track);
         return;
       }
     }
@@ -267,9 +268,13 @@ export function TopBar({
             <span className="h-4 w-px bg-white/15" />
             <select
               value={source}
-              onChange={(e) => setSource(e.target.value as SearchSource)}
+              onChange={(e) => {
+                const next = e.target.value as SearchSource;
+                setSource(next);
+                saveUiPrefs({ searchSource: next });
+              }}
               aria-label="Search source"
-              className="cursor-pointer bg-transparent pr-1 text-xs font-medium text-zinc-300 outline-none [&>option]:bg-[#181818]"
+              className="max-w-24 cursor-pointer bg-transparent pr-0.5 text-xs font-medium text-zinc-300 outline-none sm:max-w-none sm:pr-1 [&>option]:bg-[#181818]"
             >
               {SEARCH_SOURCES.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -322,7 +327,7 @@ export function TopBar({
                         onClick={() => {
                           setSuggestOpen(false);
                           setActiveIndex(-1);
-                          onPlayTrack(track, query.trim());
+                          onPlayTrack(track);
                         }}
                         onContextMenu={(e) => {
                           setSuggestOpen(false);
@@ -362,11 +367,11 @@ export function TopBar({
       </div>
 
       {/* Right controls: Discord Server Pill (logo + name) + User Avatar */}
-      <div className="relative flex items-center gap-2.5">
+      <div className="relative flex items-center gap-2">
         <button
           type="button"
           onClick={() => setOpenMenu((m) => (m === "cast" ? null : "cast"))}
-          className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] py-1 pl-1.5 pr-3 text-xs font-medium text-zinc-100 transition hover:border-white/30 hover:bg-white/10"
+          className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] p-1 text-xs font-medium text-zinc-100 transition hover:border-white/30 hover:bg-white/10 sm:py-1 sm:pl-1.5 sm:pr-3"
           title={currentGuild ? `Server: ${currentGuild.name}` : "Select Discord server"}
           aria-label="Switch Discord server"
         >
@@ -391,7 +396,7 @@ export function TopBar({
               <Disc3 className="h-3.5 w-3.5" />
             </div>
           )}
-          <span className="max-w-28 truncate sm:max-w-40">
+          <span className="hidden max-w-28 truncate sm:inline sm:max-w-40">
             {currentGuild ? currentGuild.name : "Select Server"}
           </span>
         </button>
@@ -404,7 +409,7 @@ export function TopBar({
           }}
           title="Settings"
           aria-label="Settings"
-          className="rounded-full border border-white/12 bg-white/[0.04] p-2 text-zinc-300 transition hover:border-white/30 hover:bg-white/10 hover:text-white"
+          className="hidden rounded-full border border-white/12 bg-white/[0.04] p-2 text-zinc-300 transition hover:border-white/30 hover:bg-white/10 hover:text-white lg:inline-flex"
         >
           <Settings className="h-4 w-4" />
         </button>

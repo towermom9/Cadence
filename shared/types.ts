@@ -44,6 +44,8 @@ export interface UserPreferencesDTO {
   backgroundMode: BackgroundMode;
   ambienceMode: boolean;
   artworkSeekButtons: boolean;
+  artworkSeekSeconds: number;
+  lyricsAutoScroll: boolean;
   autoplayClickBehavior: AutoplayClickBehavior;
 }
 
@@ -85,6 +87,7 @@ export interface ListenerDTO {
 export interface PlayerStateDTO {
   guildId: string;
   guildName: string;
+  queueName: string | null;
   voiceChannelId: string | null;
   voiceChannelName: string | null;
   connected: boolean;
@@ -134,9 +137,21 @@ export interface PlaylistDTO {
   lastSyncedAt?: number | null;
   lastPlayedAt?: number | null;
   isLiked?: boolean;
+  isPinned?: boolean;
   sortOrder?: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface PinnedTrackDTO {
+  track: TrackDTO;
+  pinnedAt: number;
+}
+
+export interface DailyRecommendationsDTO {
+  tracks: TrackDTO[];
+  basedOn: string[];
+  date: string;
 }
 
 export interface HistoryEntryDTO {
@@ -229,7 +244,7 @@ export interface SearchSuggestResponseDTO {
 export type WsClientMessage =
   | { type: "selectGuild"; guildId: string }
   | { type: "search"; query: string; source: SearchSource }
-  | { type: "enqueue"; guildId: string; tracks: TrackDTO[]; mode: EnqueueMode }
+  | { type: "enqueue"; guildId: string; tracks: TrackDTO[]; mode: EnqueueMode; queueName?: string }
   | { type: "startMix"; guildId: string; track: TrackDTO }
   | { type: "playTrack"; guildId: string; index: number }
   | { type: "playPrevious"; guildId: string; index: number }
@@ -262,10 +277,12 @@ export type WsClientMessage =
   | { type: "syncPlaylist"; playlistId: string; url?: string }
   | { type: "renamePlaylist"; playlistId: string; name: string }
   | { type: "deletePlaylist"; playlistId: string }
+  | { type: "togglePinPlaylist"; playlistId: string }
   | { type: "addTrackToPlaylist"; playlistId: string; track: TrackDTO }
   | { type: "addTracksToPlaylist"; playlistId: string; tracks: TrackDTO[] }
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
   | { type: "toggleLike"; track: TrackDTO }
+  | { type: "togglePinTrack"; track: TrackDTO }
   | {
       type: "playPlaylist";
       guildId: string;
@@ -295,6 +312,7 @@ export type WsServerMessage =
   | { type: "lyrics"; guildId: string; lyrics: LyricsDTO | null; title?: string; artist?: string }
   | { type: "settings"; settings: GuildSettingsDTO }
   | { type: "playlists"; playlists: PlaylistDTO[]; playlistSort?: PlaylistSortMode }
+  | { type: "pinnedTracks"; tracks: PinnedTrackDTO[] }
   | { type: "preferences"; preferences: UserPreferencesDTO }
   | { type: "history"; entries: HistoryEntryDTO[] }
   | { type: "toast"; level: ToastLevel; message: string }

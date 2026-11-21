@@ -27,8 +27,16 @@ import type {
   SearchSource,
   SetupStatusDTO,
   TokenTestResultDTO,
+  UserPreferencesDTO,
 } from "@shared/types";
-import { CadenceIcon } from "./CadenceBrand";
+import {
+  BACKGROUND_MODES,
+  THEME_ACCENTS,
+  applyThemePreferences,
+  loadCachedPreferences,
+  saveCachedPreferences,
+} from "../utils/theme";
+import { CadenceBanner, CadenceIcon } from "./CadenceBrand";
 
 interface Props {
   onComplete: () => Promise<void>;
@@ -76,12 +84,13 @@ const SEARCH_PLATFORM_OPTIONS: {
 ];
 
 const SUPPORTED_BADGES = [
-  "YouTube",
-  "YT Music",
+  "YouTube & YT Music",
   "Spotify",
   "Deezer",
   "SoundCloud",
-  "LRCLIB Lyrics",
+  "Synced Lyrics",
+  "Discord Controller",
+  "Mobile Web App",
 ];
 
 const OPTIONAL_ENV_SNIPPET = `# Optional: add to .env and restart Lavalink for custom API keys
@@ -118,6 +127,18 @@ export function OnboardingWizard({ onComplete }: Props) {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [completedMeta, setCompletedMeta] = useState<AppMetaDTO | null>(null);
+  const [themePrefs, setThemePrefs] = useState<UserPreferencesDTO>(() =>
+    loadCachedPreferences()
+  );
+
+  const updateThemePrefs = (patch: Partial<UserPreferencesDTO>) => {
+    setThemePrefs((prev) => {
+      const next = { ...prev, ...patch };
+      saveCachedPreferences(next);
+      applyThemePreferences(next);
+      return next;
+    });
+  };
 
   const fetchSetupStatus = useCallback(async () => {
     setStatusLoading(true);
@@ -243,20 +264,16 @@ export function OnboardingWizard({ onComplete }: Props) {
     /^https?:\/\/\S+$/i.test(normalizedDashboardUrl);
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-y-auto bg-[#09090b] px-4 py-10">
-      <div className="pointer-events-none fixed -top-44 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-violet-600/20 blur-3xl" />
-
-      <div className="relative w-full max-w-2xl rounded-2xl border border-white/10 bg-[#111116]/95 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
+    <div className="ytm-ambient relative flex min-h-screen items-center justify-center overflow-y-auto px-4 py-10">
+      <div className="relative w-full max-w-2xl rounded-2xl border border-white/10 bg-[#121212]/95 p-6 shadow-2xl backdrop-blur-xl sm:p-8">
         {/* Header & Step Progress */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/8 pb-5">
           <div className="flex items-center gap-3">
-            <CadenceIcon className="h-10 w-10" />
+            <CadenceIcon className="h-9 w-9 shrink-0" />
             <div>
-              <h1 className="text-lg font-semibold tracking-tight text-white">
-                Cadence Setup
-              </h1>
-              <p className="text-xs text-zinc-400">
-                Guided first-time configuration — no .env editing needed
+              <CadenceBanner className="h-6" />
+              <p className="mt-1 text-xs text-zinc-400">
+                Guided first-time setup — no manual config editing required
               </p>
             </div>
           </div>
@@ -268,12 +285,20 @@ export function OnboardingWizard({ onComplete }: Props) {
               return (
                 <div
                   key={item.step}
-                  className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+                  style={
                     active
-                      ? "bg-violet-600/25 text-violet-200 ring-1 ring-violet-500/40"
+                      ? {
+                          backgroundColor: "rgba(var(--cadence-accent-rgb), 0.18)",
+                          borderColor: "var(--cadence-accent)",
+                        }
+                      : undefined
+                  }
+                  className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                    active
+                      ? "text-white"
                       : done
-                        ? "bg-emerald-500/15 text-emerald-300"
-                        : "bg-white/[0.04] text-zinc-500"
+                        ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-300"
+                        : "border-transparent bg-white/[0.04] text-zinc-500"
                   }`}
                 >
                   {done ? (
@@ -296,11 +321,11 @@ export function OnboardingWizard({ onComplete }: Props) {
                 Welcome to Cadence
               </h2>
               <p className="mt-1 text-sm text-zinc-400">
-                Let&apos;s connect your Discord bot and web dashboard in just a couple of minutes.
+                Let&apos;s connect your Discord bot and music deck in just a couple of minutes.
               </p>
             </div>
 
-            <div className="space-y-2.5 rounded-xl border border-white/8 bg-[#09090b]/70 p-4">
+            <div className="space-y-2.5 rounded-xl border border-white/8 bg-[#0b0b0b]/80 p-4">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                   System Check
@@ -378,10 +403,10 @@ export function OnboardingWizard({ onComplete }: Props) {
             </div>
 
             {setupStatus?.setupTokenRequired && (
-              <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-4">
+              <div className="rounded-xl border border-white/15 bg-white/[0.04] p-4">
                 <label className="block space-y-1.5">
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-violet-100">
-                    <KeyRound className="h-4 w-4 text-violet-300" />
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-white">
+                    <KeyRound className="h-4 w-4 text-zinc-300" />
                     Setup Passcode Required
                   </span>
                   <input
@@ -389,7 +414,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                     value={setupToken}
                     onChange={(e) => setSetupToken(e.target.value)}
                     placeholder="Enter SETUP_TOKEN from your environment"
-                    className="w-full rounded-xl border border-white/15 bg-[#09090b] px-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-400"
+                    className="w-full rounded-xl border border-white/15 bg-[#0b0b0b] px-3.5 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
                   />
                 </label>
               </div>
@@ -403,7 +428,11 @@ export function OnboardingWizard({ onComplete }: Props) {
                   setErrorMsg(null);
                   setStep(2);
                 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-500 disabled:opacity-50"
+                style={{
+                  backgroundColor: "var(--cadence-accent)",
+                  color: "var(--cadence-accent-fg)",
+                }}
+                className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg transition hover:brightness-110 disabled:opacity-50"
               >
                 Get Started
                 <ArrowRight className="h-4 w-4" />
@@ -428,7 +457,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 href="https://discord.com/developers/applications"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-violet-300 transition hover:bg-white/[0.08]"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/[0.1]"
               >
                 Open Developer Portal
                 <ExternalLink className="h-3.5 w-3.5" />
@@ -466,7 +495,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                       setTokenError(null);
                     }}
                     placeholder="Paste your Discord Bot Token"
-                    className="w-full rounded-xl border border-white/10 bg-[#09090b] py-2.5 pl-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+                    className="w-full rounded-xl border border-white/12 bg-[#0b0b0b] py-2.5 pl-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
                   />
                   <button
                     type="button"
@@ -485,7 +514,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                   type="button"
                   disabled={verifyingToken || !discordToken.trim()}
                   onClick={() => void handleVerifyToken()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-violet-500/40 bg-violet-600/20 px-4 py-2.5 text-sm font-medium text-violet-200 transition hover:bg-violet-600/30 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/15 disabled:opacity-50"
                 >
                   {verifyingToken ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -572,7 +601,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                   value={discordClientId}
                   onChange={(e) => setDiscordClientId(e.target.value)}
                   placeholder="Application / Client ID"
-                  className="w-full rounded-xl border border-white/10 bg-[#09090b] px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+                  className="w-full rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
                 />
               </label>
 
@@ -586,7 +615,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                     value={discordClientSecret}
                     onChange={(e) => setDiscordClientSecret(e.target.value)}
                     placeholder="Client Secret from OAuth2 tab"
-                    className="w-full rounded-xl border border-white/10 bg-[#09090b] py-2.5 pl-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-violet-500"
+                    className="w-full rounded-xl border border-white/12 bg-[#0b0b0b] py-2.5 pl-3.5 pr-10 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
                   />
                   <button
                     type="button"
@@ -605,7 +634,7 @@ export function OnboardingWizard({ onComplete }: Props) {
             </div>
 
             {/* Dashboard URL + Copyable Redirect URL */}
-            <div className="space-y-3 rounded-xl border border-white/8 bg-[#09090b]/70 p-4">
+            <div className="space-y-3 rounded-xl border border-white/8 bg-[#0b0b0b]/80 p-4">
               <label className="block space-y-1.5">
                 <span className="text-sm font-medium text-zinc-200">
                   Dashboard URL
@@ -615,7 +644,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                   value={dashboardUrl}
                   onChange={(e) => setDashboardUrl(e.target.value)}
                   placeholder="http://localhost:8000"
-                  className="w-full rounded-xl border border-white/10 bg-[#111116] px-3.5 py-2 text-sm text-white outline-none focus:border-violet-500"
+                  className="w-full rounded-xl border border-white/12 bg-[#121212] px-3.5 py-2 text-sm text-white outline-none focus:border-white/40"
                 />
               </label>
 
@@ -623,14 +652,14 @@ export function OnboardingWizard({ onComplete }: Props) {
                 <span className="text-xs font-medium text-zinc-400">
                   Copy this exact URL into Discord Developer Portal → OAuth2 → Redirects:
                 </span>
-                <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2">
-                  <code className="flex-1 truncate font-mono text-xs text-violet-100">
+                <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-3 py-2">
+                  <code className="flex-1 truncate font-mono text-xs text-zinc-100">
                     {redirectUrl}
                   </code>
                   <button
                     type="button"
                     onClick={() => void handleCopyRedirect()}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-violet-600/30 px-2.5 py-1 text-xs font-medium text-violet-100 transition hover:bg-violet-600/50"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-white/12 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-white/20"
                   >
                     {copiedRedirect ? (
                       <>
@@ -652,7 +681,7 @@ export function OnboardingWizard({ onComplete }: Props) {
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-white/[0.08]"
+                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-white/[0.08]"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
@@ -664,7 +693,11 @@ export function OnboardingWizard({ onComplete }: Props) {
                   setErrorMsg(null);
                   setStep(3);
                 }}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-violet-600/20 transition hover:bg-violet-500 disabled:opacity-50"
+                style={{
+                  backgroundColor: "var(--cadence-accent)",
+                  color: "var(--cadence-accent-fg)",
+                }}
+                className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg transition hover:brightness-110 disabled:opacity-50"
               >
                 Continue
                 <ArrowRight className="h-4 w-4" />
@@ -678,11 +711,70 @@ export function OnboardingWizard({ onComplete }: Props) {
           <div className="mt-6 space-y-5">
             <div>
               <h2 className="text-xl font-semibold text-white">
-                Bot &amp; Music Preferences
+                Bot &amp; Dashboard Preferences
               </h2>
               <p className="mt-1 text-xs text-zinc-400">
-                Set your defaults — you can change server-specific preferences anytime in Settings.
+                Choose your theme, command prefix, and music defaults — saved across sessions automatically.
               </p>
+            </div>
+
+            {/* Theme Accent & Surface Quick Picker */}
+            <div className="space-y-3 rounded-xl border border-white/8 bg-[#0b0b0b]/80 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-200">
+                  Theme Color &amp; Surface
+                </span>
+                <span className="text-[11px] text-zinc-400">Synced via browser &amp; account</span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {THEME_ACCENTS.map((accent) => {
+                  const selected = themePrefs.themeAccent === accent.id;
+                  return (
+                    <button
+                      key={accent.id}
+                      type="button"
+                      onClick={() => updateThemePrefs({ themeAccent: accent.id })}
+                      title={accent.name}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+                        selected
+                          ? "border-white bg-white/12 font-medium text-white"
+                          : "border-white/10 bg-[#121212] text-zinc-300 hover:border-white/25"
+                      }`}
+                    >
+                      <span
+                        style={{ backgroundColor: accent.hex }}
+                        className="h-3 w-3 rounded-full ring-1 ring-white/20"
+                      />
+                      <span>{accent.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                {BACKGROUND_MODES.map((mode) => {
+                  const selected = themePrefs.backgroundMode === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => updateThemePrefs({ backgroundMode: mode.id })}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition ${
+                        selected
+                          ? "border-white bg-white/10 font-semibold text-white"
+                          : "border-white/10 bg-[#121212] text-zinc-300 hover:border-white/25"
+                      }`}
+                    >
+                      <span
+                        style={{ backgroundColor: mode.swatch }}
+                        className="h-4 w-4 shrink-0 rounded border border-white/20"
+                      />
+                      <span className="truncate">{mode.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <label className="block space-y-1.5">
@@ -695,7 +787,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 value={botPrefix}
                 onChange={(e) => setBotPrefix(e.target.value)}
                 placeholder="?"
-                className="w-full max-w-44 rounded-xl border border-white/10 bg-[#09090b] px-3.5 py-2 text-sm text-white outline-none focus:border-violet-500"
+                className="w-full max-w-44 rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2 text-sm text-white outline-none focus:border-white/40"
               />
               <p className="text-xs text-zinc-500">
                 Slash commands (<code className="font-mono">/play</code>) always work alongside prefix commands (<code className="font-mono">{botPrefix || "?"}play</code>).
@@ -716,8 +808,8 @@ export function OnboardingWizard({ onComplete }: Props) {
                       onClick={() => setDefaultSearchSource(option.id)}
                       className={`rounded-xl border p-3.5 text-left transition ${
                         selected
-                          ? "border-violet-500/50 bg-violet-600/20 ring-1 ring-violet-500/30"
-                          : "border-white/8 bg-[#14141b] hover:border-white/15"
+                          ? "border-white bg-white/10"
+                          : "border-white/8 bg-[#121212] hover:border-white/20"
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -725,7 +817,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                           {option.name}
                         </span>
                         {selected && (
-                          <CheckCircle2 className="h-4 w-4 text-violet-300" />
+                          <CheckCircle2 className="h-4 w-4 text-white" />
                         )}
                       </div>
                       <p className="mt-1 text-xs text-zinc-400">
@@ -742,7 +834,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
                 <p className="leading-relaxed">
                   <strong>YouTube, YT Music, Spotify</strong> (via <code className="font-mono">spotify-tokener</code>),{" "}
-                  <strong>SoundCloud</strong>, and <strong>LRCLIB lyrics</strong> work automatically with no extra API keys.
+                  <strong>SoundCloud</strong>, and <strong>Synced LRCLIB lyrics</strong> work automatically with no extra API keys.
                   Direct <strong>Deezer</strong> streams require <code className="font-mono">DEEZER_ENABLED=true</code> +{" "}
                   <code className="font-mono">DEEZER_MASTER_KEY</code> in <code className="font-mono">.env</code>.
                 </p>
@@ -751,7 +843,7 @@ export function OnboardingWizard({ onComplete }: Props) {
               <button
                 type="button"
                 onClick={() => setShowOptionalEnv((v) => !v)}
-                className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-violet-300 hover:text-violet-200"
+                className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-zinc-300 hover:text-white"
               >
                 {showOptionalEnv ? (
                   <ChevronUp className="h-3.5 w-3.5" />
@@ -762,7 +854,7 @@ export function OnboardingWizard({ onComplete }: Props) {
               </button>
 
               {showOptionalEnv && (
-                <pre className="mt-2.5 overflow-x-auto rounded-lg border border-white/8 bg-[#09090b] p-3 font-mono text-[11px] text-zinc-300">
+                <pre className="mt-2.5 overflow-x-auto rounded-lg border border-white/8 bg-[#0b0b0b] p-3 font-mono text-[11px] text-zinc-300">
                   {OPTIONAL_ENV_SNIPPET}
                 </pre>
               )}
@@ -780,7 +872,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 type="button"
                 disabled={saving}
                 onClick={() => setStep(2)}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-white/[0.08] disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-200 transition hover:bg-white/[0.08] disabled:opacity-50"
               >
                 <ArrowLeft className="h-4 w-4" />
                 Back
@@ -789,7 +881,11 @@ export function OnboardingWizard({ onComplete }: Props) {
                 type="button"
                 disabled={saving}
                 onClick={() => void handleCompleteSetup()}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500 disabled:opacity-50"
+                style={{
+                  backgroundColor: "var(--cadence-accent)",
+                  color: "var(--cadence-accent-fg)",
+                }}
+                className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold shadow-lg transition hover:brightness-110 disabled:opacity-50"
               >
                 {saving ? (
                   <>
@@ -832,7 +928,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 Setup Complete!
               </h2>
               <p className="mt-1.5 max-w-md text-sm text-zinc-400">
-                Your Discord bot is connected and saved. Invite it to your Discord server, then sign in with Discord to open your live music deck.
+                Your Discord bot, interactive player controller, and mobile-ready web deck are ready. Invite the bot to a server and sign in with Discord.
               </p>
             </div>
 
@@ -842,7 +938,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                   href={completedMeta.inviteUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/12 bg-white/[0.05] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/[0.1]"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/[0.1]"
                 >
                   <ExternalLink className="h-4 w-4" />
                   Invite Bot to Discord Server
@@ -851,7 +947,11 @@ export function OnboardingWizard({ onComplete }: Props) {
 
               <a
                 href="/api/auth/login"
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-violet-600/25 transition hover:bg-violet-500"
+                style={{
+                  backgroundColor: "var(--cadence-accent)",
+                  color: "var(--cadence-accent-fg)",
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:brightness-110"
               >
                 <LogIn className="h-4 w-4" />
                 Sign in with Discord &amp; Open Dashboard

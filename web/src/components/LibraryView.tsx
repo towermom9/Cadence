@@ -36,6 +36,7 @@ interface Props {
   onImportPlaylist: (url: string, name?: string) => void;
   onSetPlaylistSort: (sort: PlaylistSortMode) => void;
   onReorderPlaylists: (playlistIds: string[]) => void;
+  onTogglePinPlaylist: (playlistId: string) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
@@ -54,6 +55,7 @@ export function LibraryView({
   onImportPlaylist,
   onSetPlaylistSort,
   onReorderPlaylists,
+  onTogglePinPlaylist,
   onSelectPlaylist,
   onPlayPlaylist,
   onEnqueue,
@@ -351,6 +353,21 @@ export function LibraryView({
                           <RefreshCw className="h-3 w-3" />
                         </span>
                       )}
+                      {!pl.isLiked && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onTogglePinPlaylist(pl.id);
+                          }}
+                          title={pl.isPinned ? "Unpin playlist" : "Pin playlist"}
+                          className={`absolute top-2.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-white shadow transition ${
+                            pl.sourceUrl ? "left-10" : "left-2.5"
+                          } ${pl.isPinned ? "opacity-100" : "opacity-0 hover:bg-black group-hover:opacity-100"}`}
+                        >
+                          <Pin className={`h-3.5 w-3.5 ${pl.isPinned ? "fill-current" : ""}`} />
+                        </button>
+                      )}
                       {canReorder && customPlaylists.length > 1 && (
                         <div
                           onClick={(e) => e.stopPropagation()}
@@ -401,6 +418,14 @@ export function LibraryView({
                               {pl.tracks.length === 1 ? "track" : "tracks"}
                             </span>
                           </>
+                        ) : pl.isPinned ? (
+                          <>
+                            <Pin className="h-3 w-3 shrink-0 fill-current text-zinc-400" />
+                            <span>
+                              Pinned • {pl.tracks.length}{" "}
+                              {pl.tracks.length === 1 ? "track" : "tracks"}
+                            </span>
+                          </>
                         ) : (
                           <span>
                             {pl.tracks.length} {pl.tracks.length === 1 ? "track" : "tracks"}
@@ -427,7 +452,7 @@ export function LibraryView({
               {history.map((entry) => (
                 <div
                   key={entry.id}
-                  onClick={() => onEnqueue([entry.track], "now", "History")}
+                  onClick={() => onEnqueue([entry.track], "now")}
                   onContextMenu={(e) => onTrackContextMenu(e, entry.track)}
                   className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
                 >
@@ -449,7 +474,7 @@ export function LibraryView({
                   >
                     <button
                       type="button"
-                      onClick={() => onEnqueue([entry.track], "now", "History")}
+                      onClick={() => onEnqueue([entry.track], "now")}
                       title="Play now"
                       className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
                     >
@@ -457,7 +482,7 @@ export function LibraryView({
                     </button>
                     <button
                       type="button"
-                      onClick={() => onEnqueue([entry.track], "end", "History")}
+                      onClick={() => onEnqueue([entry.track], "end")}
                       title="Add to queue"
                       className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
                     >

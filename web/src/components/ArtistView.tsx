@@ -256,7 +256,7 @@ export function ArtistView({
             {visibleSongs.map((track, idx) => (
               <div
                 key={`artist-top-${track.identifier}-${idx}`}
-                onClick={() => onEnqueue([track], "now", profile.name)}
+                onClick={() => onEnqueue([track], "now")}
                 onContextMenu={(e) => onTrackContextMenu(e, track)}
                 className="group flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
               >
@@ -281,7 +281,7 @@ export function ArtistView({
                 >
                   <button
                     type="button"
-                    onClick={() => onEnqueue([track], "now", profile.name)}
+                    onClick={() => onEnqueue([track], "now")}
                     title="Play now"
                     className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
                   >
@@ -289,7 +289,7 @@ export function ArtistView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onEnqueue([track], "end", profile.name)}
+                    onClick={() => onEnqueue([track], "end")}
                     title="Add to queue"
                     className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
                   >
@@ -326,7 +326,7 @@ export function ArtistView({
             {profile.relatedTracks.map((track, idx) => (
               <div
                 key={`artist-rel-${track.identifier}-${idx}`}
-                onClick={() => onEnqueue([track], "now", profile.name)}
+                onClick={() => onEnqueue([track], "now")}
                 onContextMenu={(e) => onTrackContextMenu(e, track)}
                 className="group cursor-pointer space-y-2"
               >

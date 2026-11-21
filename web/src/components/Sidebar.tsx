@@ -305,6 +305,14 @@ export function Sidebar({
                           {pl.tracks.length === 1 ? "track" : "tracks"}
                         </span>
                       </>
+                    ) : pl.isPinned ? (
+                      <>
+                        <Pin className="h-2.5 w-2.5 shrink-0 fill-current text-zinc-400" />
+                        <span>
+                          Pinned • {pl.tracks.length}{" "}
+                          {pl.tracks.length === 1 ? "track" : "tracks"}
+                        </span>
+                      </>
                     ) : (
                       <span>
                         {pl.tracks.length} {pl.tracks.length === 1 ? "track" : "tracks"}

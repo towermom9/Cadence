@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { PermissionsBitField } from "discord.js";
 import type { Context } from "hono";
 import { createBunWebSocket } from "hono/bun";
+import { getCookie } from "hono/cookie";
 import type { WSContext } from "hono/ws";
 import type { ToastLevel, WsClientMessage, WsServerMessage } from "@shared/types";
 import { getSessionFromContext } from "./auth";
@@ -37,8 +38,21 @@ export class CadenceWsHub {
         return c.text("Unauthorized", 401);
       }
 
+      let preferredGuildId: string | null = null;
+      try {
+        const rawUi = getCookie(c, "cadence_ui");
+        if (rawUi) {
+          const parsedUi = JSON.parse(decodeURIComponent(rawUi)) as { selectedGuildId?: unknown };
+          if (typeof parsedUi?.selectedGuildId === "string") {
+            preferredGuildId = parsedUi.selectedGuildId;
+          }
+        }
+      } catch {
+        // Ignore malformed UI cookie
+      }
+
       const handler = this.upgradeWebSocket((_ctx) => {
-        const selectedGuildId = this.findInitialGuildForUser(session.user.id);
+        const selectedGuildId = this.findInitialGuildForUser(session.user.id, preferredGuildId);
 
         return {
           onOpen: (_event, ws) => {
@@ -79,7 +93,7 @@ export class CadenceWsHub {
     };
   }
 
-  private findInitialGuildForUser(userId: string): string | null {
+  private findInitialGuildForUser(userId: string, preferredGuildId?: string | null): string | null {
     const guilds = [...this.bot.client.guilds.cache.values()];
 
     // 1. Guild where user is currently inside a voice channel
@@ -97,7 +111,15 @@ export class CadenceWsHub {
       }
     }
 
-    // 3. Any mutual guild
+    // 3. Previously selected guild stored in cadence_ui cookie
+    if (preferredGuildId) {
+      const preferred = this.bot.client.guilds.cache.get(preferredGuildId);
+      if (preferred && preferred.members.cache.has(userId)) {
+        return preferred.id;
+      }
+    }
+
+    // 4. Any mutual guild
     for (const guild of guilds) {
       if (guild.members.cache.has(userId)) {
         return guild.id;
@@ -161,9 +183,21 @@ export class CadenceWsHub {
     }
     this.sendPlaylists(rawWs, session.user.id);
     this.send(rawWs, {
+      type: "pinnedTracks",
+      tracks: this.db.getPinnedTracks(session.user.id),
+    });
+    this.send(rawWs, {
       type: "history",
       entries: this.db.getPlayHistory(session.user.id),
     });
+  }
+
+  notifyPlaylistsChanged(userId: string): void {
+    for (const [rawWs, meta] of this.clients.entries()) {
+      if (meta.session.user.id === userId) {
+        this.sendPlaylists(rawWs, userId);
+      }
+    }
   }
 
   broadcastGuild(guildId: string): void {
@@ -273,7 +307,9 @@ export class CadenceWsHub {
             vcId,
             msg.tracks,
             msg.mode,
-            requester
+            requester,
+            undefined,
+            msg.queueName ? { queueName: msg.queueName } : undefined
           );
           const label =
             res.added === 1
@@ -585,6 +621,17 @@ export class CadenceWsHub {
           return;
         }
 
+        case "togglePinPlaylist": {
+          const res = this.db.togglePinPlaylist(user.id, msg.playlistId);
+          this.sendPlaylists(ws, user.id);
+          this.sendToast(
+            ws,
+            res.pinned ? "success" : "info",
+            res.pinned ? `Pinned "${res.playlist.name}"` : `Unpinned "${res.playlist.name}"`
+          );
+          return;
+        }
+
         case "addTrackToPlaylist": {
           const updated = this.db.addTrackToPlaylist(user.id, msg.playlistId, msg.track);
           this.sendPlaylists(ws, user.id);
@@ -619,6 +666,19 @@ export class CadenceWsHub {
             res.liked
               ? `Added "${msg.track.title}" to Liked Music`
               : `Removed "${msg.track.title}" from Liked Music`
+          );
+          return;
+        }
+
+        case "togglePinTrack": {
+          const res = this.db.togglePinTrack(user.id, msg.track);
+          this.send(ws, { type: "pinnedTracks", tracks: res.pinnedTracks });
+          this.sendToast(
+            ws,
+            res.pinned ? "success" : "info",
+            res.pinned
+              ? `Pinned "${msg.track.title}" to Listen again`
+              : `Unpinned "${msg.track.title}" from Listen again`
           );
           return;
         }
@@ -670,7 +730,10 @@ export class CadenceWsHub {
             "replace",
             requester,
             undefined,
-            startIndex > 0 ? { previousTracks: tracks.slice(0, startIndex) } : undefined
+            {
+              ...(startIndex > 0 ? { previousTracks: tracks.slice(0, startIndex) } : {}),
+              queueName: playlist.name,
+            }
           );
           this.sendToast(
             ws,

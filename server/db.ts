@@ -7,6 +7,7 @@ import type {
   BackgroundMode,
   GuildSettingsDTO,
   HistoryEntryDTO,
+  PinnedTrackDTO,
   PlaylistDTO,
   PlaylistSortMode,
   SearchSource,
@@ -53,8 +54,15 @@ const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
   backgroundMode: "dark",
   ambienceMode: true,
   artworkSeekButtons: true,
+  artworkSeekSeconds: 10,
+  lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
 };
+
+function normalizeSeekSeconds(value: unknown, fallback = 10): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(5, Math.min(30, Math.round(value)));
+}
 
 export interface StoredAppConfig {
   discordToken: string;
@@ -106,9 +114,17 @@ interface PlaylistRow {
   last_synced_at: number | null;
   last_played_at: number | null;
   is_liked: number;
+  is_pinned: number;
   sort_order: number;
   created_at: number;
   updated_at: number;
+}
+
+interface PinnedTrackRow {
+  user_id: string;
+  track_id: string;
+  track_json: string;
+  pinned_at: number;
 }
 
 interface HistoryRow {
@@ -201,6 +217,16 @@ export class CadenceDatabase {
         playlist_sort TEXT NOT NULL DEFAULT 'recent_activity',
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS pinned_tracks (
+        user_id TEXT NOT NULL,
+        track_id TEXT NOT NULL,
+        track_json TEXT NOT NULL,
+        pinned_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, track_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_pinned_tracks_user ON pinned_tracks(user_id, pinned_at DESC);
     `);
 
     const playlistCols = this.db
@@ -215,6 +241,9 @@ export class CadenceDatabase {
     }
     if (!playlistCols.includes("is_liked")) {
       this.db.exec(`ALTER TABLE playlists ADD COLUMN is_liked INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!playlistCols.includes("is_pinned")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0`);
     }
     if (!playlistCols.includes("last_played_at")) {
       this.db.exec(`ALTER TABLE playlists ADD COLUMN last_played_at INTEGER`);
@@ -321,6 +350,7 @@ export class CadenceDatabase {
       lastSyncedAt: row.last_synced_at ?? null,
       lastPlayedAt: row.last_played_at ?? null,
       isLiked: row.is_liked === 1,
+      isPinned: row.is_pinned === 1,
       sortOrder: row.sort_order ?? 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -331,7 +361,7 @@ export class CadenceDatabase {
     const existing = this.db
       .query<PlaylistRow, [string]>(
         `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
-                last_played_at, is_liked, sort_order, created_at, updated_at
+                last_played_at, is_liked, is_pinned, sort_order, created_at, updated_at
          FROM playlists WHERE user_id = ? AND is_liked = 1 LIMIT 1`
       )
       .get(userId);
@@ -344,8 +374,8 @@ export class CadenceDatabase {
     const sortOrder = -1_000_000;
     this.db
       .query(
-        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, sort_order, created_at, updated_at)
-         VALUES (?, ?, 'Liked Music', '[]', 1, ?, ?, ?)`
+        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, is_pinned, sort_order, created_at, updated_at)
+         VALUES (?, ?, 'Liked Music', '[]', 1, 1, ?, ?, ?)`
       )
       .run(id, userId, sortOrder, now, now);
 
@@ -357,6 +387,7 @@ export class CadenceDatabase {
       lastSyncedAt: null,
       lastPlayedAt: null,
       isLiked: true,
+      isPinned: true,
       sortOrder,
       createdAt: now,
       updatedAt: now,
@@ -368,8 +399,8 @@ export class CadenceDatabase {
     const rows = this.db
       .query<PlaylistRow, [string]>(
         `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
-                last_played_at, is_liked, sort_order, created_at, updated_at
-         FROM playlists WHERE user_id = ? ORDER BY is_liked DESC, updated_at DESC`
+                last_played_at, is_liked, is_pinned, sort_order, created_at, updated_at
+         FROM playlists WHERE user_id = ? ORDER BY is_liked DESC, is_pinned DESC, updated_at DESC`
       )
       .all(userId);
 
@@ -380,7 +411,7 @@ export class CadenceDatabase {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
         `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
-                last_played_at, is_liked, sort_order, created_at, updated_at
+                last_played_at, is_liked, is_pinned, sort_order, created_at, updated_at
          FROM playlists WHERE id = ? AND user_id = ?`
       )
       .get(playlistId, userId);
@@ -392,7 +423,7 @@ export class CadenceDatabase {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
         `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
-                last_played_at, is_liked, sort_order, created_at, updated_at
+                last_played_at, is_liked, is_pinned, sort_order, created_at, updated_at
          FROM playlists WHERE user_id = ? AND lower(name) = lower(?) LIMIT 1`
       )
       .get(userId, name.trim());
@@ -423,8 +454,8 @@ export class CadenceDatabase {
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, '[]', 0, ?, ?, ?)`
+        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, is_pinned, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)`
       )
       .run(id, userId, name, sortOrder, now, now);
 
@@ -436,6 +467,7 @@ export class CadenceDatabase {
       lastSyncedAt: null,
       lastPlayedAt: null,
       isLiked: false,
+      isPinned: false,
       sortOrder,
       createdAt: now,
       updatedAt: now,
@@ -480,8 +512,8 @@ export class CadenceDatabase {
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO playlists (id, user_id, name, tracks_json, source_url, last_synced_at, is_liked, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+        `INSERT INTO playlists (id, user_id, name, tracks_json, source_url, last_synced_at, is_liked, is_pinned, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`
       )
       .run(id, userId, baseName, JSON.stringify(saveable), sourceUrl, now, sortOrder, now, now);
 
@@ -493,6 +525,7 @@ export class CadenceDatabase {
       lastSyncedAt: now,
       lastPlayedAt: null,
       isLiked: false,
+      isPinned: false,
       sortOrder,
       createdAt: now,
       updatedAt: now,
@@ -587,6 +620,91 @@ export class CadenceDatabase {
     return result.changes > 0;
   }
 
+  togglePinPlaylist(
+    userId: string,
+    playlistId: string
+  ): { playlist: PlaylistDTO; pinned: boolean } {
+    const target = this.getPlaylist(userId, playlistId);
+    if (!target) {
+      throw new Error("Playlist not found.");
+    }
+    if (target.isLiked) {
+      throw new Error("Liked Music is always pinned.");
+    }
+    const nextPinned = !Boolean(target.isPinned);
+    this.db
+      .query(`UPDATE playlists SET is_pinned = ? WHERE id = ? AND user_id = ?`)
+      .run(nextPinned ? 1 : 0, playlistId, userId);
+
+    return {
+      playlist: { ...target, isPinned: nextPinned },
+      pinned: nextPinned,
+    };
+  }
+
+  getPinnedTracks(userId: string, limit = 20): PinnedTrackDTO[] {
+    const rows = this.db
+      .query<PinnedTrackRow, [string, number]>(
+        `SELECT user_id, track_id, track_json, pinned_at
+         FROM pinned_tracks
+         WHERE user_id = ?
+         ORDER BY pinned_at DESC
+         LIMIT ?`
+      )
+      .all(userId, limit);
+
+    const pinned: PinnedTrackDTO[] = [];
+    for (const row of rows) {
+      try {
+        const track = JSON.parse(row.track_json) as TrackDTO;
+        pinned.push({ track, pinnedAt: row.pinned_at });
+      } catch {
+        // Ignore corrupted pinned track JSON
+      }
+    }
+    return pinned;
+  }
+
+  togglePinTrack(
+    userId: string,
+    track: TrackDTO
+  ): { pinnedTracks: PinnedTrackDTO[]; pinned: boolean } {
+    if (track.isStream) {
+      throw new Error("Live streams cannot be pinned to Listen again.");
+    }
+    const existing = this.db
+      .query<{ track_id: string }, [string, string]>(
+        `SELECT track_id FROM pinned_tracks WHERE user_id = ? AND track_id = ? LIMIT 1`
+      )
+      .get(userId, track.identifier);
+
+    if (existing) {
+      this.db
+        .query(`DELETE FROM pinned_tracks WHERE user_id = ? AND track_id = ?`)
+        .run(userId, track.identifier);
+      return { pinnedTracks: this.getPinnedTracks(userId), pinned: false };
+    }
+
+    const currentCount = this.db
+      .query<{ cnt: number }, [string]>(
+        `SELECT COUNT(*) AS cnt FROM pinned_tracks WHERE user_id = ?`
+      )
+      .get(userId)?.cnt ?? 0;
+
+    if (currentCount >= 20) {
+      throw new Error("Maximum of 20 pinned tracks reached.");
+    }
+
+    this.db
+      .query(
+        `INSERT INTO pinned_tracks (user_id, track_id, track_json, pinned_at)
+         VALUES (?, ?, ?, ?)`
+      )
+      .run(userId, track.identifier, JSON.stringify(track), Date.now());
+
+    return { pinnedTracks: this.getPinnedTracks(userId), pinned: true };
+  }
+
   toggleLikedTrack(
     userId: string,
     track: TrackDTO
@@ -646,6 +764,15 @@ export class CadenceDatabase {
     return safeSort;
   }
 
+  hasStoredUserPreferences(userId: string): boolean {
+    const row = this.db
+      .query<{ user_id: string }, [string]>(
+        `SELECT user_id FROM user_preferences WHERE user_id = ? LIMIT 1`
+      )
+      .get(userId);
+    return Boolean(row);
+  }
+
   getUserPreferences(userId: string): UserPreferencesDTO {
     const row = this.db
       .query<{ playlist_sort: string; preferences_json: string | null }, [string]>(
@@ -694,6 +821,14 @@ export class CadenceDatabase {
         typeof parsed.artworkSeekButtons === "boolean"
           ? parsed.artworkSeekButtons
           : DEFAULT_USER_PREFERENCES.artworkSeekButtons,
+      artworkSeekSeconds: normalizeSeekSeconds(
+        parsed.artworkSeekSeconds,
+        DEFAULT_USER_PREFERENCES.artworkSeekSeconds
+      ),
+      lyricsAutoScroll:
+        typeof parsed.lyricsAutoScroll === "boolean"
+          ? parsed.lyricsAutoScroll
+          : DEFAULT_USER_PREFERENCES.lyricsAutoScroll,
       autoplayClickBehavior:
         parsed.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(parsed.autoplayClickBehavior)
           ? parsed.autoplayClickBehavior
@@ -727,6 +862,14 @@ export class CadenceDatabase {
         typeof patch.artworkSeekButtons === "boolean"
           ? patch.artworkSeekButtons
           : current.artworkSeekButtons,
+      artworkSeekSeconds: normalizeSeekSeconds(
+        patch.artworkSeekSeconds,
+        current.artworkSeekSeconds
+      ),
+      lyricsAutoScroll:
+        typeof patch.lyricsAutoScroll === "boolean"
+          ? patch.lyricsAutoScroll
+          : current.lyricsAutoScroll,
       autoplayClickBehavior:
         patch.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(patch.autoplayClickBehavior)
           ? patch.autoplayClickBehavior

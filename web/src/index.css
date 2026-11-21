@@ -65,8 +65,14 @@ body,
   background-color: rgba(0, 0, 0, 0.92) !important;
 }
 
-:root[data-bg="amoled"] .bg-\[\#111116\]\/90 {
+:root[data-bg="amoled"] .bg-\[\#121212\]\/95,
+:root[data-bg="amoled"] .bg-\[\#111116\]\/90,
+:root[data-bg="amoled"] .bg-\[\#0b0b0b\]\/80 {
   background-color: rgba(0, 0, 0, 0.94) !important;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .ytm-progress {

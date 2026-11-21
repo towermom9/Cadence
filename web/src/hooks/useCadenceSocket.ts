@@ -6,6 +6,7 @@ import type {
   GuildSettingsDTO,
   HistoryEntryDTO,
   LyricsDTO,
+  PinnedTrackDTO,
   PlayerStateDTO,
   PlaylistDTO,
   PlaylistSortMode,
@@ -21,6 +22,7 @@ import {
   applyThemePreferences,
   loadCachedPreferences,
   saveCachedPreferences,
+  saveUiPrefs,
 } from "../utils/theme";
 
 export interface PlaybackAnchor {
@@ -39,7 +41,10 @@ export interface ToastItem {
   message: string;
 }
 
-export function useCadenceSocket(enabled: boolean) {
+export function useCadenceSocket(
+  enabled: boolean,
+  initialPreferences?: UserPreferencesDTO | null
+) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -51,6 +56,10 @@ export function useCadenceSocket(enabled: boolean) {
     startedAt: number;
     until: number;
     trackId: string | null;
+  } | null>(null);
+  const volumeLockRef = useRef<{
+    value: number;
+    until: number;
   } | null>(null);
 
   const [connected, setConnected] = useState(false);
@@ -66,9 +75,17 @@ export function useCadenceSocket(enabled: boolean) {
   } | null>(null);
   const [searching, setSearching] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistDTO[]>([]);
+  const [pinnedTracks, setPinnedTracks] = useState<PinnedTrackDTO[]>([]);
   const [preferences, setPreferences] = useState<UserPreferencesDTO>(() =>
     loadCachedPreferences()
   );
+
+  useEffect(() => {
+    if (!initialPreferences) return;
+    setPreferences(initialPreferences);
+    saveCachedPreferences(initialPreferences);
+    applyThemePreferences(initialPreferences);
+  }, [initialPreferences]);
   const playlistSort: PlaylistSortMode = preferences.playlistSort;
   const [history, setHistory] = useState<HistoryEntryDTO[]>([]);
   const [settings, setSettings] = useState<GuildSettingsDTO | null>(null);
@@ -186,11 +203,26 @@ export function useCadenceSocket(enabled: boolean) {
               trackId: incomingTrackId,
               isStream,
             };
+
+            let resolvedVolume = msg.state.volume;
+            const volLock = volumeLockRef.current;
+            if (volLock) {
+              if (now < volLock.until && msg.state.volume !== volLock.value) {
+                resolvedVolume = volLock.value;
+              } else {
+                volumeLockRef.current = null;
+              }
+            }
+
             anchorRef.current = nextAnchor;
             setPlaybackAnchor(nextAnchor);
-            setPlayerState(msg.state);
+            setPlayerState(
+              resolvedVolume === msg.state.volume
+                ? msg.state
+                : { ...msg.state, volume: resolvedVolume }
+            );
             setSelectedGuildId(msg.state.guildId);
-            setDisplayPosition(resolvedPos);
+            setDisplayPosition(Math.round(resolvedPos));
             break;
           }
           case "searchResults":
@@ -212,6 +244,9 @@ export function useCadenceSocket(enabled: boolean) {
                 return next;
               });
             }
+            break;
+          case "pinnedTracks":
+            setPinnedTracks(msg.tracks);
             break;
           case "preferences":
             setPreferences(msg.preferences);
@@ -278,7 +313,9 @@ export function useCadenceSocket(enabled: boolean) {
     const interval = setInterval(() => {
       const a = anchorRef.current;
       if (!a || !a.playing || a.paused || a.isStream || a.duration <= 0) return;
-      const estimated = Math.min(a.duration, Math.max(0, a.position + (performance.now() - a.syncedAt)));
+      const estimated = Math.round(
+        Math.min(a.duration, Math.max(0, a.position + (performance.now() - a.syncedAt)))
+      );
       setDisplayPosition(estimated);
     }, 100);
 
@@ -290,6 +327,7 @@ export function useCadenceSocket(enabled: boolean) {
       setSelectedGuildId(guildId);
       setSettings(null);
       setLyricsState({ guildId, lyrics: null, loading: false });
+      saveUiPrefs({ selectedGuildId: guildId });
       send({ type: "selectGuild", guildId });
     },
     [send]
@@ -305,12 +343,12 @@ export function useCadenceSocket(enabled: boolean) {
   );
 
   const enqueue = useCallback(
-    (tracks: TrackDTO[], mode: EnqueueMode = "end") => {
+    (tracks: TrackDTO[], mode: EnqueueMode = "end", queueName?: string) => {
       if (!selectedGuildId) {
         pushToast("error", "Select a server first.");
         return;
       }
-      send({ type: "enqueue", guildId: selectedGuildId, tracks, mode });
+      send({ type: "enqueue", guildId: selectedGuildId, tracks, mode, queueName });
     },
     [pushToast, selectedGuildId, send]
   );
@@ -352,6 +390,60 @@ export function useCadenceSocket(enabled: boolean) {
     [selectedGuildId, send]
   );
 
+  const seekTo = useCallback(
+    (position: number) => {
+      if (!selectedGuildId) return;
+      const now = performance.now();
+      const duration = playerState?.current?.duration ?? position;
+      const clamped = Math.round(Math.max(0, Math.min(position, duration || position)));
+      seekLockRef.current = {
+        target: clamped,
+        startedAt: now,
+        until: now + 3500,
+        trackId: playerState?.current?.identifier ?? null,
+      };
+      const nextAnchor: PlaybackAnchor = {
+        position: clamped,
+        syncedAt: now,
+        playing: Boolean(playerState?.playing),
+        paused: Boolean(playerState?.paused),
+        duration,
+        trackId: playerState?.current?.identifier ?? null,
+        isStream: Boolean(playerState?.current?.isStream),
+      };
+      anchorRef.current = nextAnchor;
+      setPlaybackAnchor(nextAnchor);
+      setDisplayPosition(clamped);
+      setPlayerState((prev) => (prev ? { ...prev, position: clamped } : prev));
+      send({ type: "seek", guildId: selectedGuildId, position: clamped });
+    },
+    [playerState, selectedGuildId, send]
+  );
+
+  const seekBy = useCallback(
+    (deltaMs: number) => {
+      const a = anchorRef.current;
+      const dur = a?.duration || playerState?.current?.duration || 0;
+      const basePos = a
+        ? a.playing && !a.paused
+          ? a.position + (performance.now() - a.syncedAt)
+          : a.position
+        : displayPosition;
+      const rawTarget = basePos + deltaMs;
+      const target = dur > 0 ? Math.min(dur, Math.max(0, rawTarget)) : Math.max(0, rawTarget);
+      seekTo(Math.round(target));
+    },
+    [displayPosition, playerState?.current?.duration, seekTo]
+  );
+
+  const persistPrefsHttp = useCallback((patch: Partial<UserPreferencesDTO>) => {
+    void fetch("/api/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {});
+  }, []);
+
   return {
     connected,
     selectedGuildId,
@@ -361,6 +453,7 @@ export function useCadenceSocket(enabled: boolean) {
     searchResults,
     searching,
     playlists,
+    pinnedTracks,
     playlistSort,
     preferences,
     history,
@@ -383,34 +476,15 @@ export function useCadenceSocket(enabled: boolean) {
     },
     skip: () => selectedGuildId && send({ type: "skip", guildId: selectedGuildId }),
     previous: () => selectedGuildId && send({ type: "previous", guildId: selectedGuildId }),
-    seek: (position: number) => {
+    seek: seekTo,
+    seekBy,
+    setVolume: (volume: number) => {
       if (!selectedGuildId) return;
-      const now = performance.now();
-      const duration = playerState?.current?.duration ?? position;
-      const clamped = Math.max(0, Math.min(position, duration || position));
-      seekLockRef.current = {
-        target: clamped,
-        startedAt: now,
-        until: now + 3500,
-        trackId: playerState?.current?.identifier ?? null,
-      };
-      const nextAnchor: PlaybackAnchor = {
-        position: clamped,
-        syncedAt: now,
-        playing: Boolean(playerState?.playing),
-        paused: Boolean(playerState?.paused),
-        duration,
-        trackId: playerState?.current?.identifier ?? null,
-        isStream: Boolean(playerState?.current?.isStream),
-      };
-      anchorRef.current = nextAnchor;
-      setPlaybackAnchor(nextAnchor);
-      setDisplayPosition(clamped);
-      setPlayerState((prev) => (prev ? { ...prev, position: clamped } : prev));
-      send({ type: "seek", guildId: selectedGuildId, position: clamped });
+      const clamped = Math.max(0, Math.min(100, Math.round(volume)));
+      volumeLockRef.current = { value: clamped, until: performance.now() + 1200 };
+      setPlayerState((prev) => (prev ? { ...prev, volume: clamped } : prev));
+      send({ type: "volume", guildId: selectedGuildId, volume: clamped });
     },
-    setVolume: (volume: number) =>
-      selectedGuildId && send({ type: "volume", guildId: selectedGuildId, volume }),
     setRepeat: (mode: RepeatModeType) =>
       selectedGuildId && send({ type: "repeat", guildId: selectedGuildId, mode }),
     shuffle: () => selectedGuildId && send({ type: "shuffle", guildId: selectedGuildId }),
@@ -440,6 +514,8 @@ export function useCadenceSocket(enabled: boolean) {
     renamePlaylist: (playlistId: string, name: string) =>
       send({ type: "renamePlaylist", playlistId, name }),
     deletePlaylist: (playlistId: string) => send({ type: "deletePlaylist", playlistId }),
+    togglePinPlaylist: (playlistId: string) =>
+      send({ type: "togglePinPlaylist", playlistId }),
     addTrackToPlaylist: (playlistId: string, track: TrackDTO) =>
       send({ type: "addTrackToPlaylist", playlistId, track }),
     addTracksToPlaylist: (playlistId: string, tracks: TrackDTO[]) =>
@@ -447,12 +523,14 @@ export function useCadenceSocket(enabled: boolean) {
     removeTrackFromPlaylist: (playlistId: string, index: number) =>
       send({ type: "removeTrackFromPlaylist", playlistId, index }),
     toggleLike: (track: TrackDTO) => send({ type: "toggleLike", track }),
+    togglePinTrack: (track: TrackDTO) => send({ type: "togglePinTrack", track }),
     setPlaylistSort: (sort: PlaylistSortMode) => {
       setPreferences((prev) => {
         const next = { ...prev, playlistSort: sort };
         saveCachedPreferences(next);
         return next;
       });
+      persistPrefsHttp({ playlistSort: sort });
       send({ type: "setPlaylistSort", sort });
     },
     reorderPlaylists: (playlistIds: string[]) => {
@@ -461,6 +539,7 @@ export function useCadenceSocket(enabled: boolean) {
         saveCachedPreferences(next);
         return next;
       });
+      persistPrefsHttp({ playlistSort: "manual" });
       send({ type: "reorderPlaylists", playlistIds });
     },
     updatePreferences: (patch: Partial<UserPreferencesDTO>) => {
@@ -470,6 +549,7 @@ export function useCadenceSocket(enabled: boolean) {
         applyThemePreferences(next);
         return next;
       });
+      persistPrefsHttp(patch);
       send({ type: "updatePreferences", preferences: patch });
     },
     playPlaylist: (playlistId: string, shuffle = false, startIndex?: number) =>
