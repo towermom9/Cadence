@@ -155,3 +155,15 @@ vite.config.ts.timestamp-*
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+
+# Cadence local data & runtime
+.env
+!.env.example
+data/
+*.sqlite
+*.sqlite-*
+*.db
+lavalink/plugins/
+lavalink/logs/
+web/dist/
+
