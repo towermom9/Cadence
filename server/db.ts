@@ -3,15 +3,58 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type {
+  AutoplayClickBehavior,
+  BackgroundMode,
   GuildSettingsDTO,
   HistoryEntryDTO,
   PlaylistDTO,
   PlaylistSortMode,
   SearchSource,
+  ThemeAccentId,
   TrackDTO,
+  UserPreferencesDTO,
   UserProfileDTO,
 } from "@shared/types";
 import { config } from "./config";
+
+const VALID_PLAYLIST_SORTS = new Set<PlaylistSortMode>([
+  "recent_activity",
+  "recently_saved",
+  "recently_played",
+  "recent_sync",
+  "manual",
+  "alphabetical",
+]);
+
+const VALID_THEME_ACCENTS = new Set<ThemeAccentId>([
+  "red",
+  "rose",
+  "violet",
+  "indigo",
+  "blue",
+  "cyan",
+  "emerald",
+  "amber",
+  "monochrome",
+]);
+
+const VALID_BG_MODES = new Set<BackgroundMode>(["amoled", "dark", "elevated"]);
+
+const VALID_AUTOPLAY_CLICKS = new Set<AutoplayClickBehavior>([
+  "play_now_here",
+  "play_now_end",
+  "queue_next",
+  "queue_end",
+]);
+
+const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
+  playlistSort: "recent_activity",
+  themeAccent: "red",
+  backgroundMode: "dark",
+  ambienceMode: true,
+  artworkSeekButtons: true,
+  autoplayClickBehavior: "play_now_here",
+};
 
 export interface StoredAppConfig {
   discordToken: string;
@@ -179,6 +222,14 @@ export class CadenceDatabase {
     if (!playlistCols.includes("sort_order")) {
       this.db.exec(`ALTER TABLE playlists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
     }
+
+    const prefCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(user_preferences)`)
+      .all()
+      .map((col) => col.name);
+    if (!prefCols.includes("preferences_json")) {
+      this.db.exec(`ALTER TABLE user_preferences ADD COLUMN preferences_json TEXT`);
+    }
   }
 
   getGuildSettings(guildId: string): GuildSettingsDTO {
@@ -204,7 +255,7 @@ export class CadenceDatabase {
     return {
       guildId: row.guild_id,
       prefix: row.prefix || config.botPrefix,
-      defaultVolume: row.default_volume,
+      defaultVolume: Math.max(0, Math.min(100, row.default_volume)),
       djRoleId: row.dj_role_id,
       stay247: row.stay_247 === 1,
       autoplay: row.autoplay === 1,
@@ -225,7 +276,7 @@ export class CadenceDatabase {
           : current.prefix,
       defaultVolume:
         typeof patch.defaultVolume === "number" && Number.isFinite(patch.defaultVolume)
-          ? Math.max(0, Math.min(150, Math.round(patch.defaultVolume)))
+          ? Math.max(0, Math.min(100, Math.round(patch.defaultVolume)))
           : current.defaultVolume,
       djRoleId: patch.djRoleId === undefined ? current.djRoleId : patch.djRoleId,
       stay247: typeof patch.stay247 === "boolean" ? patch.stay247 : current.stay247,
@@ -571,41 +622,130 @@ export class CadenceDatabase {
         `SELECT playlist_sort FROM user_preferences WHERE user_id = ?`
       )
       .get(userId);
-    const valid = new Set<PlaylistSortMode>([
-      "recent_activity",
-      "recently_saved",
-      "recently_played",
-      "recent_sync",
-      "manual",
-      "alphabetical",
-    ]);
-    if (row && valid.has(row.playlist_sort as PlaylistSortMode)) {
+    if (row && VALID_PLAYLIST_SORTS.has(row.playlist_sort as PlaylistSortMode)) {
       return row.playlist_sort as PlaylistSortMode;
     }
     return "recent_activity";
   }
 
   setUserPlaylistSort(userId: string, sort: PlaylistSortMode): PlaylistSortMode {
-    const valid = new Set<PlaylistSortMode>([
-      "recent_activity",
-      "recently_saved",
-      "recently_played",
-      "recent_sync",
-      "manual",
-      "alphabetical",
-    ]);
-    const safeSort: PlaylistSortMode = valid.has(sort) ? sort : "recent_activity";
+    const safeSort: PlaylistSortMode = VALID_PLAYLIST_SORTS.has(sort) ? sort : "recent_activity";
+    const current = this.getUserPreferences(userId);
+    const updated: UserPreferencesDTO = { ...current, playlistSort: safeSort };
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO user_preferences (user_id, playlist_sort, updated_at)
-         VALUES (?, ?, ?)
+        `INSERT INTO user_preferences (user_id, playlist_sort, preferences_json, updated_at)
+         VALUES (?, ?, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET
            playlist_sort = excluded.playlist_sort,
+           preferences_json = excluded.preferences_json,
            updated_at = excluded.updated_at`
       )
-      .run(userId, safeSort, now);
+      .run(userId, safeSort, JSON.stringify(updated), now);
     return safeSort;
+  }
+
+  getUserPreferences(userId: string): UserPreferencesDTO {
+    const row = this.db
+      .query<{ playlist_sort: string; preferences_json: string | null }, [string]>(
+        `SELECT playlist_sort, preferences_json FROM user_preferences WHERE user_id = ?`
+      )
+      .get(userId);
+
+    if (!row) {
+      return { ...DEFAULT_USER_PREFERENCES };
+    }
+
+    let parsed: Partial<UserPreferencesDTO> = {};
+    if (row.preferences_json) {
+      try {
+        const raw = JSON.parse(row.preferences_json);
+        if (raw && typeof raw === "object") {
+          parsed = raw as Partial<UserPreferencesDTO>;
+        }
+      } catch {
+        // Ignore corrupted JSON preferences
+      }
+    }
+
+    const colSort = VALID_PLAYLIST_SORTS.has(row.playlist_sort as PlaylistSortMode)
+      ? (row.playlist_sort as PlaylistSortMode)
+      : DEFAULT_USER_PREFERENCES.playlistSort;
+
+    return {
+      playlistSort:
+        parsed.playlistSort && VALID_PLAYLIST_SORTS.has(parsed.playlistSort)
+          ? parsed.playlistSort
+          : colSort,
+      themeAccent:
+        parsed.themeAccent && VALID_THEME_ACCENTS.has(parsed.themeAccent)
+          ? parsed.themeAccent
+          : DEFAULT_USER_PREFERENCES.themeAccent,
+      backgroundMode:
+        parsed.backgroundMode && VALID_BG_MODES.has(parsed.backgroundMode)
+          ? parsed.backgroundMode
+          : DEFAULT_USER_PREFERENCES.backgroundMode,
+      ambienceMode:
+        typeof parsed.ambienceMode === "boolean"
+          ? parsed.ambienceMode
+          : DEFAULT_USER_PREFERENCES.ambienceMode,
+      artworkSeekButtons:
+        typeof parsed.artworkSeekButtons === "boolean"
+          ? parsed.artworkSeekButtons
+          : DEFAULT_USER_PREFERENCES.artworkSeekButtons,
+      autoplayClickBehavior:
+        parsed.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(parsed.autoplayClickBehavior)
+          ? parsed.autoplayClickBehavior
+          : DEFAULT_USER_PREFERENCES.autoplayClickBehavior,
+    };
+  }
+
+  updateUserPreferences(
+    userId: string,
+    patch: Partial<UserPreferencesDTO>
+  ): UserPreferencesDTO {
+    const current = this.getUserPreferences(userId);
+    const next: UserPreferencesDTO = {
+      playlistSort:
+        patch.playlistSort && VALID_PLAYLIST_SORTS.has(patch.playlistSort)
+          ? patch.playlistSort
+          : current.playlistSort,
+      themeAccent:
+        patch.themeAccent && VALID_THEME_ACCENTS.has(patch.themeAccent)
+          ? patch.themeAccent
+          : current.themeAccent,
+      backgroundMode:
+        patch.backgroundMode && VALID_BG_MODES.has(patch.backgroundMode)
+          ? patch.backgroundMode
+          : current.backgroundMode,
+      ambienceMode:
+        typeof patch.ambienceMode === "boolean"
+          ? patch.ambienceMode
+          : current.ambienceMode,
+      artworkSeekButtons:
+        typeof patch.artworkSeekButtons === "boolean"
+          ? patch.artworkSeekButtons
+          : current.artworkSeekButtons,
+      autoplayClickBehavior:
+        patch.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(patch.autoplayClickBehavior)
+          ? patch.autoplayClickBehavior
+          : current.autoplayClickBehavior,
+    };
+
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO user_preferences (user_id, playlist_sort, preferences_json, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           playlist_sort = excluded.playlist_sort,
+           preferences_json = excluded.preferences_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(userId, next.playlistSort, JSON.stringify(next), now);
+
+    return next;
   }
 
   reorderPlaylists(userId: string, orderedIds: string[]): PlaylistDTO[] {

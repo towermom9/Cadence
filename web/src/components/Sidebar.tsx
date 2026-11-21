@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { PlaylistDTO, PlaylistSortMode } from "@shared/types";
+import { CadenceBanner } from "./CadenceBrand";
 
 export type MainView =
   | "home"
@@ -115,12 +116,9 @@ export function Sidebar({
             onSelectView("home");
             onCloseMobile();
           }}
-          className="flex items-center gap-2.5 text-left"
+          className="flex items-center text-left transition hover:opacity-90"
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#ff0033] text-white shadow-sm">
-            <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />
-          </span>
-          <span className="text-lg font-bold tracking-tight text-white">Cadence</span>
+          <CadenceBanner className="h-7" />
         </button>
 
         <button

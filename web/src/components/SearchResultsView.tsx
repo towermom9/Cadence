@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import { ListPlus, Loader2, MoreVertical, Play, Plus, RefreshCw, SkipForward } from "lucide-react";
 import type { EnqueueMode, SearchSource, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -119,16 +120,7 @@ export function SearchResultsView({
             <div className="min-w-0 flex-1 space-y-1.5">
               <h4 className="truncate text-xl font-bold text-white">{topResult.title}</h4>
               <p className="truncate text-sm text-zinc-300">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenArtist(topResult.author);
-                  }}
-                  className="hover:text-white hover:underline"
-                >
-                  {topResult.author}
-                </button>
+                <ArtistLinks author={topResult.author} onOpenArtist={onOpenArtist} />
                 <span>
                   {" "}• {sourceLabel(topResult.sourceName)} •{" "}
                   {topResult.isStream ? "LIVE" : formatMs(topResult.duration)}
@@ -194,16 +186,7 @@ export function SearchResultsView({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{track.title}</p>
                 <p className="truncate text-xs text-zinc-400">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenArtist(track.author);
-                    }}
-                    className="hover:text-white hover:underline"
-                  >
-                    {track.author}
-                  </button>
+                  <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                   <span>
                     {" "}• {sourceLabel(track.sourceName)} •{" "}
                     {track.isStream ? "LIVE" : formatMs(track.duration)}

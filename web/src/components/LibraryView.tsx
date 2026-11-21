@@ -22,6 +22,7 @@ import type {
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
 import { PLAYLIST_SORT_OPTIONS, playlistSortLabel } from "../utils/playlists";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
 import { TrackArtwork } from "./TrackArtwork";
@@ -438,16 +439,7 @@ export function LibraryView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{entry.track.title}</p>
                     <p className="truncate text-xs text-zinc-400">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenArtist(entry.track.author);
-                        }}
-                        className="hover:text-white hover:underline"
-                      >
-                        {entry.track.author}
-                      </button>
+                      <ArtistLinks author={entry.track.author} onOpenArtist={onOpenArtist} />
                       <span> • {sourceLabel(entry.track.sourceName)} • {formatMs(entry.track.duration)}</span>
                     </p>
                   </div>

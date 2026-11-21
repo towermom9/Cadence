@@ -13,9 +13,15 @@ import type {
   SearchSource,
   ToastLevel,
   TrackDTO,
+  UserPreferencesDTO,
   WsClientMessage,
   WsServerMessage,
 } from "@shared/types";
+import {
+  applyThemePreferences,
+  loadCachedPreferences,
+  saveCachedPreferences,
+} from "../utils/theme";
 
 export interface PlaybackAnchor {
   position: number;
@@ -60,7 +66,10 @@ export function useCadenceSocket(enabled: boolean) {
   } | null>(null);
   const [searching, setSearching] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistDTO[]>([]);
-  const [playlistSort, setPlaylistSortState] = useState<PlaylistSortMode>("recent_activity");
+  const [preferences, setPreferences] = useState<UserPreferencesDTO>(() =>
+    loadCachedPreferences()
+  );
+  const playlistSort: PlaylistSortMode = preferences.playlistSort;
   const [history, setHistory] = useState<HistoryEntryDTO[]>([]);
   const [settings, setSettings] = useState<GuildSettingsDTO | null>(null);
   const [lyricsState, setLyricsState] = useState<{
@@ -196,8 +205,18 @@ export function useCadenceSocket(enabled: boolean) {
           case "playlists":
             setPlaylists(msg.playlists);
             if (msg.playlistSort) {
-              setPlaylistSortState(msg.playlistSort);
+              setPreferences((prev) => {
+                if (prev.playlistSort === msg.playlistSort) return prev;
+                const next = { ...prev, playlistSort: msg.playlistSort! };
+                saveCachedPreferences(next);
+                return next;
+              });
             }
+            break;
+          case "preferences":
+            setPreferences(msg.preferences);
+            saveCachedPreferences(msg.preferences);
+            applyThemePreferences(msg.preferences);
             break;
           case "history":
             setHistory(msg.entries);
@@ -343,6 +362,7 @@ export function useCadenceSocket(enabled: boolean) {
     searching,
     playlists,
     playlistSort,
+    preferences,
     history,
     settings,
     lyricsState,
@@ -428,12 +448,29 @@ export function useCadenceSocket(enabled: boolean) {
       send({ type: "removeTrackFromPlaylist", playlistId, index }),
     toggleLike: (track: TrackDTO) => send({ type: "toggleLike", track }),
     setPlaylistSort: (sort: PlaylistSortMode) => {
-      setPlaylistSortState(sort);
+      setPreferences((prev) => {
+        const next = { ...prev, playlistSort: sort };
+        saveCachedPreferences(next);
+        return next;
+      });
       send({ type: "setPlaylistSort", sort });
     },
     reorderPlaylists: (playlistIds: string[]) => {
-      setPlaylistSortState("manual");
+      setPreferences((prev) => {
+        const next = { ...prev, playlistSort: "manual" as const };
+        saveCachedPreferences(next);
+        return next;
+      });
       send({ type: "reorderPlaylists", playlistIds });
+    },
+    updatePreferences: (patch: Partial<UserPreferencesDTO>) => {
+      setPreferences((prev) => {
+        const next = { ...prev, ...patch };
+        saveCachedPreferences(next);
+        applyThemePreferences(next);
+        return next;
+      });
+      send({ type: "updatePreferences", preferences: patch });
     },
     playPlaylist: (playlistId: string, shuffle = false, startIndex?: number) =>
       selectedGuildId &&

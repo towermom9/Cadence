@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Check, Copy, Disc3, ExternalLink, LogIn, Radio, ShieldAlert } from "lucide-react";
+import { Check, Copy, ExternalLink, LogIn, Radio, ShieldAlert } from "lucide-react";
 import type { AppMetaDTO } from "@shared/types";
+import { CadenceBanner, CadenceIcon } from "./CadenceBrand";
 
 interface Props {
   meta: AppMetaDTO | null;
@@ -36,23 +37,21 @@ export function LoginView({ meta, errorCode }: Props) {
       <div className="pointer-events-none absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-violet-600/20 blur-3xl" />
 
       <div className="relative w-full max-w-md rounded-2xl border border-white/10 bg-[#111116]/90 p-8 shadow-2xl backdrop-blur-xl">
-        <div className="flex items-center gap-3.5">
-          {meta?.botAvatarUrl ? (
-            <img
-              src={meta.botAvatarUrl}
-              alt={meta.botName}
-              className="h-12 w-12 rounded-xl border border-white/10 object-cover"
-            />
-          ) : (
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-600/20 text-violet-400 ring-1 ring-violet-500/30">
-              <Disc3 className="h-6 w-6" />
-            </div>
-          )}
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-white">
-              {meta?.botName || "Cadence"}
-            </h1>
-            <p className="text-xs text-zinc-400">Unified Discord Music Deck</p>
+        <div className="space-y-2">
+          <CadenceBanner className="h-8" />
+          <div className="flex items-center gap-2.5 pt-1">
+            {meta?.botAvatarUrl ? (
+              <img
+                src={meta.botAvatarUrl}
+                alt={meta.botName}
+                className="h-6 w-6 rounded-full border border-white/15 object-cover"
+              />
+            ) : (
+              <CadenceIcon className="h-6 w-6" />
+            )}
+            <p className="text-xs text-zinc-400">
+              {meta?.botName ? `${meta.botName} • ` : ""}Unified Discord Music Deck
+            </p>
           </div>
         </div>
 

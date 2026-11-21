@@ -459,9 +459,9 @@ export class CadenceBot {
       new SlashCommandBuilder().setName("nowplaying").setDescription("Show the currently playing track"),
       new SlashCommandBuilder()
         .setName("volume")
-        .setDescription("Set player volume (0 - 150%)")
+        .setDescription("Set player volume (0 - 100%)")
         .addIntegerOption((opt) =>
-          opt.setName("percent").setDescription("Volume percentage").setRequired(true).setMinValue(0).setMaxValue(150)
+          opt.setName("percent").setDescription("Volume percentage").setRequired(true).setMinValue(0).setMaxValue(100)
         ),
       new SlashCommandBuilder()
         .setName("loop")
@@ -542,7 +542,7 @@ export class CadenceBot {
             .setName("volume")
             .setDescription("Set default volume")
             .addIntegerOption((opt) =>
-              opt.setName("percent").setDescription("0 - 150").setRequired(true).setMinValue(0).setMaxValue(150)
+              opt.setName("percent").setDescription("0 - 100").setRequired(true).setMinValue(0).setMaxValue(100)
             )
         )
         .addSubcommand((sub) =>

@@ -3,9 +3,16 @@ import { Disc3 } from "lucide-react";
 import type { TrackDTO } from "@shared/types";
 
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
-const YTIMG_PATH_REGEX =
-  /^\/vi(?:_webp)?\/([A-Za-z0-9_-]{11})\/(?:default|mqdefault|hqdefault|sddefault|maxresdefault)\.(?:jpg|webp)$/i;
-const PROXY_PREFERRED_HOSTS = new Set(["yt3.googleusercontent.com", "lh3.googleusercontent.com"]);
+const YTIMG_PATH_REGEX = /^\/vi(?:_webp)?\/([A-Za-z0-9_-]{11})\//i;
+const PROXY_PREFERRED_HOSTS = new Set([
+  "yt3.googleusercontent.com",
+  "yt3.ggpht.com",
+  "lh3.googleusercontent.com",
+  "lh3.ggpht.com",
+  "lh4.googleusercontent.com",
+  "lh5.googleusercontent.com",
+  "lh6.googleusercontent.com",
+]);
 
 type ArtworkTrackInput = Pick<TrackDTO, "artworkUrl" | "identifier" | "sourceName" | "uri"> & {
   title?: string;
@@ -26,7 +33,7 @@ export function buildArtworkCandidates(track: ArtworkTrackInput | null | undefin
       const parsed = new URL(raw);
       const host = parsed.hostname.toLowerCase();
       isGoogleUserContent = PROXY_PREFERRED_HOSTS.has(host);
-      isYtImg = host === "i.ytimg.com" || host === "img.youtube.com";
+      isYtImg = host === "i.ytimg.com" || host === "i9.ytimg.com" || host === "img.youtube.com";
       if (isYtImg) {
         const match = parsed.pathname.match(YTIMG_PATH_REGEX);
         if (match) ytIdFromUrl = match[1];
@@ -43,6 +50,7 @@ export function buildArtworkCandidates(track: ArtworkTrackInput | null | undefin
         Boolean(track.uri?.includes("youtube")) ||
         Boolean(track.uri?.includes("youtu.be")) ||
         raw.includes("googleusercontent.com") ||
+        raw.includes("ggpht.com") ||
         isYtImg));
 
   const ytId =
@@ -68,7 +76,9 @@ export function buildArtworkCandidates(track: ArtworkTrackInput | null | undefin
       const url = `https://i.ytimg.com/vi/${ytId}/${q}`;
       candidates.push(url, `/api/artwork?url=${encodeURIComponent(url)}`);
     }
-  } else if (raw && isYtImg) {
+  }
+
+  if (raw) {
     candidates.push(raw, `/api/artwork?url=${encodeURIComponent(raw)}`);
   }
 
@@ -122,6 +132,17 @@ export function TrackArtwork({
         alt={alt ?? track.title ?? "Artwork"}
         referrerPolicy="no-referrer"
         loading="lazy"
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          const decoded = decodeURIComponent(src);
+          if (
+            /\/(?:maxresdefault|sddefault)\.(?:jpg|webp)/i.test(decoded) &&
+            img.naturalWidth <= 120 &&
+            img.naturalHeight <= 90
+          ) {
+            setCandidateIdx((i) => i + 1);
+          }
+        }}
         onError={() => setCandidateIdx((i) => i + 1)}
         className={`h-full w-full object-cover ${cropBars ? "scale-[1.35]" : ""}`}
       />

@@ -10,6 +10,8 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  RotateCcw,
+  RotateCw,
   Shuffle,
   Trash2,
   Volume2,
@@ -23,6 +25,7 @@ import type {
   TrackDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -47,8 +50,11 @@ interface Props {
     loading: boolean;
   };
   lyricsSubjectTrack: TrackDTO | null;
+  relatedSubjectTrack: TrackDTO | null;
   activeTab: NowPlayingTab;
   playSourceLabel: string;
+  ambienceMode: boolean;
+  showArtworkSeekButtons: boolean;
   onTabChange: (tab: NowPlayingTab) => void;
   onTogglePause: () => void;
   onSeek: (ms: number) => void;
@@ -68,24 +74,103 @@ interface Props {
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
-interface SyncedLine {
+interface SyncedWord {
   timeMs: number;
   text: string;
 }
 
+interface SyncedLine {
+  timeMs: number;
+  text: string;
+  words?: SyncedWord[];
+}
+
+function toTimestampMs(minStr: string, secStr: string, fracStr?: string): number {
+  const min = Number(minStr);
+  const sec = Number(secStr);
+  const frac = fracStr ? Number(fracStr.padEnd(3, "0").slice(0, 3)) : 0;
+  return min * 60_000 + sec * 1000 + frac;
+}
+
+function stripInlineTags(raw: string): string {
+  return raw
+    .replace(/<\d{1,3}:\d{2}(?:\.\d{1,3})?>/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^ +| +$/gm, "");
+}
+
+function parseEnhancedBody(
+  body: string,
+  lineTimeMs: number,
+  offsetMs: number
+): { text: string; words?: SyncedWord[] } {
+  const inlineRegex = /<(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?>/g;
+  if (!inlineRegex.test(body)) {
+    const clean = body.trim() || "♪";
+    return { text: clean };
+  }
+
+  inlineRegex.lastIndex = 0;
+  const words: SyncedWord[] = [];
+  let lastIdx = 0;
+  let activeTime = lineTimeMs;
+  let match: RegExpExecArray | null;
+
+  while ((match = inlineRegex.exec(body)) !== null) {
+    const chunk = body.slice(lastIdx, match.index);
+    const cleaned = chunk.replace(/\s+/g, " ").trim();
+    if (cleaned) {
+      words.push({ timeMs: activeTime, text: cleaned });
+    }
+    activeTime = Math.max(0, toTimestampMs(match[1], match[2], match[3]) - offsetMs);
+    lastIdx = match.index + match[0].length;
+  }
+
+  const tail = body.slice(lastIdx).replace(/\s+/g, " ").trim();
+  if (tail) {
+    words.push({ timeMs: activeTime, text: tail });
+  }
+
+  const plain = words.map((w) => w.text).join(" ").trim() || "♪";
+  return words.length > 0 ? { text: plain, words } : { text: plain };
+}
+
 function parseSyncedLyrics(raw: string | null | undefined): SyncedLine[] {
   if (!raw) return [];
-  const lines: SyncedLine[] = [];
-  const pattern = /^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$/;
-  for (const rawLine of raw.split(/\r?\n/)) {
-    const match = rawLine.match(pattern);
-    if (!match) continue;
-    const min = Number(match[1]);
-    const sec = Number(match[2]);
-    const frac = match[3] ? Number(match[3].padEnd(3, "0")) : 0;
-    const text = match[4]?.trim() || "♪";
-    lines.push({ timeMs: min * 60_000 + sec * 1000 + frac, text });
+  const rawLines = raw.split(/\r?\n/);
+
+  let offsetMs = 0;
+  for (const l of rawLines) {
+    const om = l.match(/^\[offset:\s*([+-]?\d+)\s*\]$/i);
+    if (om) {
+      offsetMs = Number(om[1]) || 0;
+      break;
+    }
   }
+
+  const lines: SyncedLine[] = [];
+  const prefixPattern = /^((?:\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]\s*)+)(.*)$/;
+  const singleTagPattern = /\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+
+  for (const rawLine of rawLines) {
+    const match = rawLine.match(prefixPattern);
+    if (!match) continue;
+    const tagBlock = match[1];
+    const body = match[2] ?? "";
+
+    singleTagPattern.lastIndex = 0;
+    let tagMatch: RegExpExecArray | null;
+    while ((tagMatch = singleTagPattern.exec(tagBlock)) !== null) {
+      const timeMs = Math.max(
+        0,
+        toTimestampMs(tagMatch[1], tagMatch[2], tagMatch[3]) - offsetMs
+      );
+      const parsed = parseEnhancedBody(body, timeMs, offsetMs);
+      lines.push({ timeMs, text: parsed.text, words: parsed.words });
+    }
+  }
+
+  lines.sort((a, b) => a.timeMs - b.timeMs);
   return lines;
 }
 
@@ -94,8 +179,11 @@ export function NowPlayingView({
   displayPosition,
   lyricsState,
   lyricsSubjectTrack,
+  relatedSubjectTrack,
   activeTab,
   playSourceLabel,
+  ambienceMode,
+  showArtworkSeekButtons,
   onTabChange,
   onTogglePause,
   onSeek,
@@ -209,11 +297,13 @@ export function NowPlayingView({
     }
   }, [relatedCache]);
 
+  const activeRelatedTrack = relatedSubjectTrack ?? current;
+
   useEffect(() => {
-    if (activeTab === "related" && current && !relatedCache[current.identifier]) {
-      void loadRelated(current);
+    if (activeTab === "related" && activeRelatedTrack && !relatedCache[activeRelatedTrack.identifier]) {
+      void loadRelated(activeRelatedTrack);
     }
-  }, [activeTab, current, loadRelated, relatedCache]);
+  }, [activeTab, activeRelatedTrack, loadRelated, relatedCache]);
 
   const tracksToSave: TrackDTO[] = useMemo(() => {
     const items: TrackDTO[] = [];
@@ -224,12 +314,20 @@ export function NowPlayingView({
     return items;
   }, [current, queue]);
 
-  const relatedTracks = current ? relatedCache[current.identifier] ?? [] : [];
+  const relatedTracks = activeRelatedTrack ? relatedCache[activeRelatedTrack.identifier] ?? [] : [];
+  const duration = current?.duration || 0;
+  const canSeekCurrent = Boolean(current && !current.isStream && duration > 0);
 
   return (
-    <div className="mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
-      {/* Left Clean Artwork Column (click to Play / Pause) */}
-      <div className="flex min-h-0 flex-col items-center justify-center lg:col-span-7">
+    <div className="relative mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
+      {ambienceMode && current && (
+        <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
+          <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
+        </div>
+      )}
+
+      {/* Left Clean Artwork Column (click to Play / Pause + toggleable +/-10s seek) */}
+      <div className="relative z-10 flex min-h-0 flex-col items-center justify-center lg:col-span-7">
         <div className="flex w-full max-w-[460px] flex-col items-center">
           <div
             role={current ? "button" : undefined}
@@ -269,12 +367,28 @@ export function NowPlayingView({
             />
             {current && (
               <div
-                className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${
+                className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-5 transition-opacity duration-150 ${
                   playerState?.paused
                     ? "bg-black/35 opacity-100"
                     : "bg-black/25 opacity-0 group-hover:opacity-100"
                 }`}
               >
+                {showArtworkSeekButtons && canSeekCurrent && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSeek(Math.max(0, displayPosition - 10_000));
+                    }}
+                    title="Rewind 10 seconds"
+                    aria-label="Rewind 10 seconds"
+                    className="pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/85"
+                  >
+                    <RotateCcw className="h-5 w-5" />
+                    <span className="mt-0.5 text-[9px] font-bold">10</span>
+                  </button>
+                )}
+
                 <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs">
                   {playerState?.paused ? (
                     <Play className="ml-1 h-8 w-8 fill-current" />
@@ -282,6 +396,22 @@ export function NowPlayingView({
                     <Pause className="h-8 w-8 fill-current" />
                   )}
                 </span>
+
+                {showArtworkSeekButtons && canSeekCurrent && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSeek(Math.min(duration, displayPosition + 10_000));
+                    }}
+                    title="Forward 10 seconds"
+                    aria-label="Forward 10 seconds"
+                    className="pointer-events-auto relative flex h-12 w-12 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs transition hover:scale-105 hover:bg-black/85"
+                  >
+                    <RotateCw className="h-5 w-5" />
+                    <span className="mt-0.5 text-[9px] font-bold">10</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -291,13 +421,7 @@ export function NowPlayingView({
               <>
                 <h2 className="truncate text-lg font-bold text-white">{current.title}</h2>
                 <p className="mt-0.5 truncate text-xs text-zinc-400">
-                  <button
-                    type="button"
-                    onClick={() => onOpenArtist(current.author)}
-                    className="hover:text-white hover:underline"
-                  >
-                    {current.author}
-                  </button>
+                  <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
                   <span> • {sourceLabel(current.sourceName)}</span>
                 </p>
               </>
@@ -309,7 +433,7 @@ export function NowPlayingView({
       </div>
 
       {/* Right Queue / Lyrics / Related Column */}
-      <div className="flex min-h-0 flex-col lg:col-span-5">
+      <div className="relative z-10 flex min-h-0 flex-col lg:col-span-5">
         <div className="flex shrink-0 items-center border-b border-white/10">
           {(
             [
@@ -407,16 +531,7 @@ export function NowPlayingView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
                     <p className="truncate text-xs text-zinc-400">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenArtist(track.author);
-                        }}
-                        className="hover:text-white hover:underline"
-                      >
-                        {track.author}
-                      </button>
+                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     </p>
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
@@ -467,16 +582,7 @@ export function NowPlayingView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{current.title}</p>
                     <p className="truncate text-xs text-zinc-300">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenArtist(current.author);
-                        }}
-                        className="hover:text-white hover:underline"
-                      >
-                        {current.author}
-                      </button>
+                      <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
                     </p>
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
@@ -512,16 +618,7 @@ export function NowPlayingView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{track.title}</p>
                     <p className="truncate text-xs text-zinc-400">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenArtist(track.author);
-                        }}
-                        className="hover:text-white hover:underline"
-                      >
-                        {track.author}
-                      </button>
+                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     </p>
                   </div>
 
@@ -600,8 +697,11 @@ export function NowPlayingView({
                     aria-checked={autoplayEnabled}
                     disabled={!playerState}
                     onClick={() => onToggleAutoplay(!autoplayEnabled)}
+                    style={
+                      autoplayEnabled ? { backgroundColor: "var(--cadence-accent)" } : undefined
+                    }
                     className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-40 ${
-                      autoplayEnabled ? "bg-[#3ea6ff]" : "bg-zinc-600"
+                      autoplayEnabled ? "" : "bg-zinc-600"
                     }`}
                     title={autoplayEnabled ? "Disable Autoplay" : "Enable Autoplay"}
                   >
@@ -658,16 +758,7 @@ export function NowPlayingView({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{track.title}</p>
                         <p className="truncate text-xs text-zinc-400">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenArtist(track.author);
-                            }}
-                            className="hover:text-white hover:underline"
-                          >
-                            {track.author}
-                          </button>
+                          <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                         </p>
                       </div>
 
@@ -676,19 +767,17 @@ export function NowPlayingView({
                       </span>
 
                       <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
-                        {privileged && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onRemoveTrack(queueIndex);
-                            }}
-                            title="Remove suggestion"
-                            className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveTrack(queueIndex);
+                          }}
+                          title="Remove suggestion"
+                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => {
@@ -751,13 +840,34 @@ export function NowPlayingView({
                 <div className="space-y-1">
                   {parsedSynced.map((line, i) => {
                     const activeLine = i === activeSyncedIndex;
+                    const renderLineContent = () => {
+                      if (activeLine && line.words && line.words.length > 0) {
+                        return (
+                          <span className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+                            {line.words.map((w, wi) => {
+                              const spoken = w.timeMs <= displayPosition + 250;
+                              return (
+                                <span
+                                  key={`${w.timeMs}-${wi}`}
+                                  className={spoken ? "text-white" : "text-zinc-400"}
+                                >
+                                  {w.text}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        );
+                      }
+                      return <span>{line.text}</span>;
+                    };
+
                     if (!canSeekLyrics) {
                       return (
                         <div
                           key={`${line.timeMs}-${i}`}
                           className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-base leading-relaxed text-zinc-400"
                         >
-                          <span>{line.text}</span>
+                          {renderLineContent()}
                           <span className="shrink-0 text-[11px] tabular-nums text-zinc-600">
                             {formatMs(line.timeMs)}
                           </span>
@@ -776,7 +886,7 @@ export function NowPlayingView({
                             : "text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
                         }`}
                       >
-                        <span>{line.text}</span>
+                        {renderLineContent()}
                         <span
                           className={`shrink-0 text-[11px] tabular-nums transition-opacity ${
                             activeLine
@@ -813,7 +923,7 @@ export function NowPlayingView({
                   </button>
                 </div>
                 <pre className="whitespace-pre-wrap font-sans text-base leading-8 text-zinc-200">
-                  {lyricsState.lyrics.plainLyrics}
+                  {stripInlineTags(lyricsState.lyrics.plainLyrics)}
                 </pre>
               </div>
             ) : (
@@ -827,9 +937,9 @@ export function NowPlayingView({
         {/* RELATED / SUGGESTIONS */}
         {activeTab === "related" && (
           <div className="flex min-h-0 flex-1 flex-col pt-3">
-            {!current ? (
+            {!activeRelatedTrack ? (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
-                Play a track to see related song suggestions.
+                Play or right-click a track to see related song suggestions.
               </div>
             ) : (
               <>
@@ -837,13 +947,13 @@ export function NowPlayingView({
                   <div className="min-w-0">
                     <p className="text-[11px] text-zinc-400">Related to</p>
                     <p className="truncate text-sm font-semibold text-white">
-                      {current.title}
+                      {activeRelatedTrack.title}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => onStartMix(current)}
+                      onClick={() => onStartMix(activeRelatedTrack)}
                       className="inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200"
                     >
                       <Radio className="h-3.5 w-3.5" />
@@ -852,7 +962,7 @@ export function NowPlayingView({
                     <button
                       type="button"
                       disabled={relatedLoading}
-                      onClick={() => void loadRelated(current, true)}
+                      onClick={() => void loadRelated(activeRelatedTrack, true)}
                       title="Refresh suggestions"
                       className="rounded-full bg-white/[0.06] p-1.5 text-zinc-300 transition hover:bg-white/12 hover:text-white disabled:opacity-40"
                     >
@@ -876,7 +986,7 @@ export function NowPlayingView({
                       <div
                         key={`rel-${track.identifier}-${idx}`}
                         onClick={() =>
-                          onEnqueue([track], "now", `Related • ${current.title}`)
+                          onEnqueue([track], "now", `Related • ${activeRelatedTrack.title}`)
                         }
                         onContextMenu={(e) => onTrackContextMenu(e, track)}
                         className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
@@ -889,16 +999,7 @@ export function NowPlayingView({
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-white">{track.title}</p>
                           <p className="truncate text-xs text-zinc-400">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onOpenArtist(track.author);
-                              }}
-                              className="hover:text-white hover:underline"
-                            >
-                              {track.author}
-                            </button>
+                            <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                           </p>
                         </div>
                         <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
@@ -909,7 +1010,7 @@ export function NowPlayingView({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onEnqueue([track], "end", `Related • ${current.title}`);
+                              onEnqueue([track], "end", `Related • ${activeRelatedTrack.title}`);
                             }}
                             title="Add to queue"
                             className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"

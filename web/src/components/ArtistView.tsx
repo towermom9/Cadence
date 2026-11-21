@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { ArtistProfileDTO, EnqueueMode, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -36,6 +37,8 @@ export function ArtistView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<ArtistProfileDTO | null>(null);
+  const [showAllSongs, setShowAllSongs] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
 
   useEffect(() => {
     const clean = artistName.trim();
@@ -48,6 +51,8 @@ export function ArtistView({
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    setShowAllSongs(false);
+    setFilterQuery("");
 
     fetch(`/api/artist?name=${encodeURIComponent(clean)}`, {
       signal: controller.signal,
@@ -120,6 +125,15 @@ export function ArtistView({
   }
 
   const heroTrack = profile.topSongs[0] ?? null;
+  const trimmedFilter = filterQuery.trim().toLowerCase();
+  const filteredSongs = trimmedFilter
+    ? profile.topSongs.filter(
+        (s) =>
+          s.title.toLowerCase().includes(trimmedFilter) ||
+          s.author.toLowerCase().includes(trimmedFilter)
+      )
+    : profile.topSongs;
+  const visibleSongs = showAllSongs || trimmedFilter ? filteredSongs : filteredSongs.slice(0, 15);
 
   return (
     <div className="space-y-8">
@@ -166,7 +180,7 @@ export function ArtistView({
                 </h1>
                 <p className="mt-1.5 text-sm text-zinc-300">
                   {profile.topSongs.length}{" "}
-                  {profile.topSongs.length === 1 ? "top song" : "top songs"}
+                  {profile.topSongs.length === 1 ? "song" : "songs"} found
                 </p>
               </div>
             </div>
@@ -206,16 +220,40 @@ export function ArtistView({
         </div>
       </div>
 
-      {/* Top Songs */}
+      {/* Songs Catalog */}
       <section className="space-y-3">
-        <h2 className="text-xl font-bold tracking-tight text-white">Top songs</h2>
-        {profile.topSongs.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-bold tracking-tight text-white">
+            Songs ({profile.topSongs.length})
+          </h2>
+          {profile.topSongs.length > 6 && (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={filterQuery}
+                onChange={(e) => setFilterQuery(e.target.value)}
+                placeholder="Filter artist songs..."
+                className="w-44 rounded-full border border-white/15 bg-[#121212] px-3.5 py-1 text-xs text-white placeholder-zinc-500 outline-none focus:border-white/40 sm:w-56"
+              />
+              {!trimmedFilter && filteredSongs.length > 15 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllSongs((v) => !v)}
+                  className="rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-1 text-xs font-medium text-zinc-200 transition hover:bg-white/12 hover:text-white"
+                >
+                  {showAllSongs ? "Show less" : `Show all (${filteredSongs.length})`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {visibleSongs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 bg-[#121212] p-8 text-center text-sm text-zinc-400">
-            No songs found for &ldquo;{profile.name}&rdquo;.
+            No songs found matching &ldquo;{trimmedFilter || profile.name}&rdquo;.
           </div>
         ) : (
           <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-[#121212]">
-            {profile.topSongs.map((track, idx) => (
+            {visibleSongs.map((track, idx) => (
               <div
                 key={`artist-top-${track.identifier}-${idx}`}
                 onClick={() => onEnqueue([track], "now", profile.name)}
@@ -230,16 +268,7 @@ export function ArtistView({
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-white">{track.title}</p>
                   <p className="truncate text-xs text-zinc-400">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenArtist(track.author);
-                      }}
-                      className="hover:text-white hover:underline"
-                    >
-                      {track.author}
-                    </button>
+                    <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     <span> • {sourceLabel(track.sourceName)}</span>
                   </p>
                 </div>
@@ -314,16 +343,7 @@ export function ArtistView({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-white">{track.title}</p>
                   <p className="truncate text-xs text-zinc-400">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenArtist(track.author);
-                      }}
-                      className="hover:text-white hover:underline"
-                    >
-                      {track.author}
-                    </button>
+                    <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                   </p>
                 </div>
               </div>

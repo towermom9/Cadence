@@ -27,6 +27,7 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { formatMs } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import { MobileMenuButton } from "./Sidebar";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -340,17 +341,13 @@ export function TopBar({
                           <p className="truncate text-sm font-medium text-white">{track.title}</p>
                           <p className="truncate text-xs text-zinc-400">
                             <span>Song • </span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
+                            <ArtistLinks
+                              author={track.author}
+                              onOpenArtist={(name) => {
                                 setSuggestOpen(false);
-                                onOpenArtist(track.author);
+                                onOpenArtist(name);
                               }}
-                              className="hover:text-white hover:underline"
-                            >
-                              {track.author}
-                            </button>
+                            />
                             <span> • {track.isStream ? "LIVE" : formatMs(track.duration)}</span>
                           </p>
                         </div>
@@ -399,20 +396,18 @@ export function TopBar({
           </span>
         </button>
 
-        {currentGuild?.canManage && (
-          <button
-            type="button"
-            onClick={() => {
-              setOpenMenu(null);
-              onOpenSettings();
-            }}
-            title={`Server settings for ${currentGuild.name}`}
-            aria-label="Server settings"
-            className="rounded-full border border-white/12 bg-white/[0.04] p-2 text-zinc-300 transition hover:border-white/30 hover:bg-white/10 hover:text-white"
-          >
-            <Settings className="h-4 w-4" />
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => {
+            setOpenMenu(null);
+            onOpenSettings();
+          }}
+          title="Settings"
+          aria-label="Settings"
+          className="rounded-full border border-white/12 bg-white/[0.04] p-2 text-zinc-300 transition hover:border-white/30 hover:bg-white/10 hover:text-white"
+        >
+          <Settings className="h-4 w-4" />
+        </button>
 
         <button
           type="button"
@@ -548,19 +543,17 @@ export function TopBar({
               </p>
               <p className="truncate text-xs text-zinc-400">@{user.username}</p>
             </div>
-            {currentGuild?.canManage && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenMenu(null);
-                  onOpenSettings();
-                }}
-                className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-zinc-200 transition hover:bg-white/10"
-              >
-                <Settings className="h-4 w-4 text-zinc-400" />
-                Server Settings
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenSettings();
+              }}
+              className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-zinc-200 transition hover:bg-white/10"
+            >
+              <Settings className="h-4 w-4 text-zinc-400" />
+              Settings
+            </button>
             <button
               type="button"
               onClick={onLogout}

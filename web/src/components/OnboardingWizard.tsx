@@ -28,6 +28,7 @@ import type {
   SetupStatusDTO,
   TokenTestResultDTO,
 } from "@shared/types";
+import { CadenceIcon } from "./CadenceBrand";
 
 interface Props {
   onComplete: () => Promise<void>;
@@ -249,9 +250,7 @@ export function OnboardingWizard({ onComplete }: Props) {
         {/* Header & Step Progress */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/8 pb-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-600/20 text-violet-400 ring-1 ring-violet-500/30">
-              <Disc3 className="h-6 w-6" />
-            </div>
+            <CadenceIcon className="h-10 w-10" />
             <div>
               <h1 className="text-lg font-semibold tracking-tight text-white">
                 Cadence Setup

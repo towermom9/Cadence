@@ -7,8 +7,10 @@ import {
   type Track,
   type UnresolvedTrack,
 } from "lavalink-client";
+import { cleanArtistTag, splitArtists } from "@shared/artists";
 import type {
   ArtistProfileDTO,
+  AutoplayClickBehavior,
   AutoplayMood,
   EnqueueMode,
   FilterPreset,
@@ -65,6 +67,16 @@ function extractRequester(raw: unknown): RequesterInfo | undefined {
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
 const YTIMG_PATH_REGEX = /^\/vi(?:_webp)?\/([A-Za-z0-9_-]{11})\/(?:default|mqdefault|hqdefault|sddefault)\.(?:jpg|webp)$/i;
 
+const GOOGLE_IMAGE_HOSTS = new Set([
+  "yt3.googleusercontent.com",
+  "yt3.ggpht.com",
+  "lh3.googleusercontent.com",
+  "lh3.ggpht.com",
+  "lh4.googleusercontent.com",
+  "lh5.googleusercontent.com",
+  "lh6.googleusercontent.com",
+]);
+
 export function normalizeArtworkUrl(
   rawUrl: string | null | undefined,
   sourceName: string,
@@ -75,12 +87,12 @@ export function normalizeArtworkUrl(
     try {
       const parsed = new URL(rawUrl);
       const host = parsed.hostname.toLowerCase();
-      if (host === "yt3.googleusercontent.com" || host === "lh3.googleusercontent.com") {
+      if (GOOGLE_IMAGE_HOSTS.has(host)) {
         return rawUrl
           .replace(/=w\d+-h\d+[^/?#]*$/i, "=w1000-h1000-l90-rj")
           .replace(/=s\d+(-[^/?#]*)?$/i, "=s1000$1");
       }
-      if (host === "i.ytimg.com" || host === "img.youtube.com") {
+      if (host === "i.ytimg.com" || host === "i9.ytimg.com" || host === "img.youtube.com") {
         const match = parsed.pathname.match(YTIMG_PATH_REGEX);
         if (match) {
           return `https://i.ytimg.com/vi/${match[1]}/maxresdefault.jpg`;
@@ -566,57 +578,77 @@ export class MusicService {
     artistName: string,
     requester?: RequesterInfo
   ): Promise<ArtistProfileDTO> {
-    const cleanName = artistName.trim();
+    const cleanName = cleanArtistTag(artistName);
     if (!cleanName) {
       throw new Error("Artist name is required.");
     }
 
     const node = this.getConnectedNode();
-    const result = await node.search(
-      { query: cleanName, source: "ytmsearch" },
-      requester
-    );
-    if (result.loadType === "error") {
-      throw new Error(result.exception?.message || "Failed to load artist tracks.");
-    }
+    const searches = await Promise.allSettled([
+      node.search({ query: cleanName, source: "ytmsearch" }, requester),
+      node.search({ query: `${cleanName} songs`, source: "ytmsearch" }, requester),
+      node.search({ query: `${cleanName} - Topic`, source: "ytsearch" }, requester),
+      node.search({ query: `${cleanName} official music`, source: "ytsearch" }, requester),
+    ]);
 
     const needle = cleanName.toLowerCase();
+    const needleRegex = new RegExp(
+      `(?:^|\\b)${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\b|$)`,
+      "i"
+    );
     const exactMatches: TrackDTO[] = [];
     const fallbackTracks: TrackDTO[] = [];
-    const seen = new Set<string>();
+    const seenIds = new Set<string>();
+    const seenTitleDur = new Set<string>();
 
-    for (const rawTrack of result.tracks) {
-      if (rawTrack.info.isStream) continue;
-      const dto = trackToDTO(rawTrack);
-      if (seen.has(dto.identifier)) continue;
-      seen.add(dto.identifier);
+    const normalizeTitleKey = (title: string, duration: number) => {
+      const stripped = title
+        .replace(/\(.*?\)|\[.*?\]/g, "")
+        .replace(/[^a-z0-9]+/gi, " ")
+        .trim()
+        .toLowerCase();
+      if (!stripped || duration <= 0) return "";
+      return `${stripped}:${Math.round(duration / 3000)}`;
+    };
 
-      const authorLower = dto.author.toLowerCase();
-      const artistParts = authorLower
-        .split(/[,&•/]|feat\.|ft\./i)
-        .map((part) => part.trim())
-        .filter(Boolean);
+    for (const outcome of searches) {
+      if (outcome.status !== "fulfilled" || outcome.value.loadType === "error") continue;
+      for (const rawTrack of outcome.value.tracks) {
+        if (rawTrack.info.isStream) continue;
+        const dto = trackToDTO(rawTrack);
+        if (seenIds.has(dto.identifier)) continue;
+        seenIds.add(dto.identifier);
 
-      const isArtistMatch =
-        authorLower === needle ||
-        artistParts.includes(needle) ||
-        authorLower.includes(needle);
+        const titleDurKey = normalizeTitleKey(dto.title, dto.duration);
+        if (titleDurKey && seenTitleDur.has(titleDurKey)) continue;
+        if (titleDurKey) seenTitleDur.add(titleDurKey);
 
-      if (isArtistMatch) {
-        exactMatches.push(dto);
-      } else {
-        fallbackTracks.push(dto);
+        const authorLower = cleanArtistTag(dto.author).toLowerCase();
+        const artistParts = splitArtists(dto.author).map((p) => p.toLowerCase());
+        const titleLower = dto.title.toLowerCase();
+
+        const isArtistMatch =
+          authorLower === needle ||
+          artistParts.includes(needle) ||
+          (needle.length >= 4 && titleLower.startsWith(`${needle} -`)) ||
+          /\b(?:feat\.|ft\.)\s+[^-–—]+/i.test(dto.title) && needleRegex.test(dto.title);
+
+        if (isArtistMatch) {
+          exactMatches.push(dto);
+        } else {
+          fallbackTracks.push(dto);
+        }
       }
     }
 
     const topSongs =
       exactMatches.length >= 4
-        ? exactMatches.slice(0, 20)
-        : [...exactMatches, ...fallbackTracks].slice(0, 20);
+        ? exactMatches.slice(0, 60)
+        : [...exactMatches, ...fallbackTracks].slice(0, 60);
     const usedIds = new Set(topSongs.map((t) => t.identifier));
     const relatedTracks = fallbackTracks
       .filter((t) => !usedIds.has(t.identifier))
-      .slice(0, 12);
+      .slice(0, 18);
 
     return {
       name: cleanName,
@@ -770,7 +802,11 @@ export class MusicService {
     return { added: related.length };
   }
 
-  async playTrack(guildId: string, index: number): Promise<void> {
+  async playTrack(
+    guildId: string,
+    index: number,
+    autoplayClickBehavior: AutoplayClickBehavior = "play_now_here"
+  ): Promise<"played" | "queued_next" | "queued_end"> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
     if (index < 0 || index >= player.queue.tracks.length) {
@@ -780,12 +816,47 @@ export class MusicService {
     const target = player.queue.tracks[index];
     const wasAutoplay = this.isAutoplayTrack(target);
     this.clearAutoplayFlag(target);
-    this.pushPrevious(player, player.queue.current);
 
     if (wasAutoplay) {
-      // Jumping to an autoplay suggestion further down plays only that song without promoting songs above it
-      await player.queue.splice(index, 1);
+      if (autoplayClickBehavior === "queue_next") {
+        await player.queue.splice(index, 1);
+        await player.queue.add(target, 0);
+        await player.queue.utils.save();
+        this.onStateChange(guildId);
+        return "queued_next";
+      }
+
+      if (autoplayClickBehavior === "queue_end") {
+        await player.queue.splice(index, 1);
+        const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+        if (firstAutoIdx >= 0) {
+          await player.queue.add(target, firstAutoIdx);
+        } else {
+          await player.queue.add(target);
+        }
+        await player.queue.utils.save();
+        this.onStateChange(guildId);
+        return "queued_end";
+      }
+
+      this.pushPrevious(player, player.queue.current);
+      if (autoplayClickBehavior === "play_now_end") {
+        const manualTracks = player.queue.tracks.filter((t) => !this.isAutoplayTrack(t));
+        for (const m of manualTracks) {
+          this.pushPrevious(player, m);
+        }
+        const remainingAuto = player.queue.tracks.filter(
+          (t, i) => i !== index && this.isAutoplayTrack(t)
+        );
+        await player.queue.splice(0, player.queue.tracks.length);
+        if (remainingAuto.length > 0) {
+          await player.queue.add(remainingAuto);
+        }
+      } else {
+        await player.queue.splice(index, 1);
+      }
     } else {
+      this.pushPrevious(player, player.queue.current);
       for (let i = 0; i < index; i++) {
         this.pushPrevious(player, player.queue.tracks[i]);
       }
@@ -803,6 +874,7 @@ export class MusicService {
     }
 
     this.onStateChange(guildId);
+    return "played";
   }
 
   async playPrevious(guildId: string, previousIndex: number): Promise<void> {
@@ -908,7 +980,7 @@ export class MusicService {
   async setVolume(guildId: string, volume: number): Promise<number> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
-    const clamped = Math.max(0, Math.min(150, Math.round(volume)));
+    const clamped = Math.max(0, Math.min(100, Math.round(volume)));
     await player.setVolume(clamped);
     this.onStateChange(guildId);
     return clamped;
@@ -946,6 +1018,16 @@ export class MusicService {
     await player.queue.splice(from, 1);
     await player.queue.add(target, to);
     this.onStateChange(guildId);
+  }
+
+  canRemoveTrack(guildId: string, userId: string, index: number): boolean {
+    if (this.isPrivileged(guildId, userId)) return true;
+    const player = this.getPlayer(guildId);
+    if (!player || index < 0 || index >= player.queue.tracks.length) return true;
+    const track = player.queue.tracks[index];
+    if (this.isAutoplayTrack(track)) return true;
+    const req = extractRequester(track.requester) ?? extractRequester(track.userData?.requester);
+    return req?.id === userId;
   }
 
   async removeTrack(guildId: string, index: number): Promise<TrackDTO | null> {

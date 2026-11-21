@@ -49,6 +49,7 @@ export function App() {
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
   const [playSourceLabel, setPlaySourceLabel] = useState("Queue");
   const [lyricsSubjectTrack, setLyricsSubjectTrack] = useState<TrackDTO | null>(null);
+  const [relatedSubjectTrack, setRelatedSubjectTrack] = useState<TrackDTO | null>(null);
   const [saveModalTracks, setSaveModalTracks] = useState<TrackDTO[] | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -113,6 +114,7 @@ export function App() {
       socket.enqueue(tracks, mode);
       if (mode === "now" || mode === "replace") {
         setLyricsSubjectTrack(null);
+        setRelatedSubjectTrack(null);
         if (sourceLabel) {
           setPlaySourceLabel(sourceLabel);
         }
@@ -127,6 +129,7 @@ export function App() {
     (track: TrackDTO) => {
       socket.startMix(track);
       setLyricsSubjectTrack(null);
+      setRelatedSubjectTrack(null);
       setPlaySourceLabel(`Mix • ${track.title}`);
       setNowPlayingTab("upnext");
       setNowPlayingOpen(true);
@@ -139,6 +142,7 @@ export function App() {
       const playlist = socket.playlists.find((p) => p.id === playlistId);
       socket.playPlaylist(playlistId, shuffle, startIndex);
       setLyricsSubjectTrack(null);
+      setRelatedSubjectTrack(null);
       setPlaySourceLabel(playlist?.name || "Playlist");
       setNowPlayingTab("upnext");
       setNowPlayingOpen(true);
@@ -174,6 +178,16 @@ export function App() {
       socket.requestLyrics(track.title, track.author, track.duration);
     },
     [socket]
+  );
+
+  const handleFindRelated = useCallback(
+    (track: TrackDTO) => {
+      const isCurrent = socket.playerState?.current?.identifier === track.identifier;
+      setRelatedSubjectTrack(isCurrent ? null : track);
+      setNowPlayingTab("related");
+      setNowPlayingOpen(true);
+    },
+    [socket.playerState?.current?.identifier]
   );
 
   const handleTrackContextMenu = useCallback(
@@ -252,11 +266,14 @@ export function App() {
       <ContextMenu
         menu={contextMenu}
         privileged={Boolean(socket.playerState?.isPrivileged)}
+        currentUserId={user.id}
         likedTrackIds={likedTrackIds}
         onClose={() => setContextMenu(null)}
         onStartMix={handleStartMix}
         onEnqueue={handleEnqueue}
         onToggleLike={socket.toggleLike}
+        onFindRelated={handleFindRelated}
+        onSkip={socket.skip}
         onOpenSaveModal={handleOpenSaveModal}
         onOpenArtist={handleOpenArtist}
         onViewLyrics={handleViewLyrics}
@@ -325,10 +342,14 @@ export function App() {
                 displayPosition={socket.displayPosition}
                 lyricsState={socket.lyricsState}
                 lyricsSubjectTrack={lyricsSubjectTrack}
+                relatedSubjectTrack={relatedSubjectTrack}
                 activeTab={nowPlayingTab}
                 playSourceLabel={playSourceLabel}
+                ambienceMode={socket.preferences.ambienceMode}
+                showArtworkSeekButtons={socket.preferences.artworkSeekButtons}
                 onTabChange={(tab) => {
                   setLyricsSubjectTrack(null);
+                  setRelatedSubjectTrack(null);
                   setNowPlayingTab(tab);
                 }}
                 onTogglePause={socket.togglePause}
@@ -439,6 +460,8 @@ export function App() {
                     guildName={currentGuild?.name || "Server"}
                     canManage={Boolean(currentGuild?.canManage)}
                     settings={socket.settings}
+                    preferences={socket.preferences}
+                    onUpdatePreferences={socket.updatePreferences}
                     onLoadSettings={socket.requestSettings}
                     onSaveSettings={socket.updateSettings}
                   />

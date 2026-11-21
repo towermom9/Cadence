@@ -19,6 +19,34 @@ export type PlaylistSortMode =
   | "manual"
   | "alphabetical";
 
+export type ThemeAccentId =
+  | "red"
+  | "rose"
+  | "violet"
+  | "indigo"
+  | "blue"
+  | "cyan"
+  | "emerald"
+  | "amber"
+  | "monochrome";
+
+export type BackgroundMode = "amoled" | "dark" | "elevated";
+
+export type AutoplayClickBehavior =
+  | "play_now_here"
+  | "play_now_end"
+  | "queue_next"
+  | "queue_end";
+
+export interface UserPreferencesDTO {
+  playlistSort: PlaylistSortMode;
+  themeAccent: ThemeAccentId;
+  backgroundMode: BackgroundMode;
+  ambienceMode: boolean;
+  artworkSeekButtons: boolean;
+  autoplayClickBehavior: AutoplayClickBehavior;
+}
+
 export type FilterPreset =
   | "none"
   | "bassboost"
@@ -247,6 +275,7 @@ export type WsClientMessage =
     }
   | { type: "setPlaylistSort"; sort: PlaylistSortMode }
   | { type: "reorderPlaylists"; playlistIds: string[] }
+  | { type: "updatePreferences"; preferences: Partial<UserPreferencesDTO> }
   | { type: "getHistory" }
   | { type: "clearHistory" }
   | { type: "ping" };
@@ -266,6 +295,7 @@ export type WsServerMessage =
   | { type: "lyrics"; guildId: string; lyrics: LyricsDTO | null; title?: string; artist?: string }
   | { type: "settings"; settings: GuildSettingsDTO }
   | { type: "playlists"; playlists: PlaylistDTO[]; playlistSort?: PlaylistSortMode }
+  | { type: "preferences"; preferences: UserPreferencesDTO }
   | { type: "history"; entries: HistoryEntryDTO[] }
   | { type: "toast"; level: ToastLevel; message: string }
   | { type: "pong" };

@@ -137,7 +137,23 @@ export class CadenceWsHub {
     selectedGuildId: string | null
   ): void {
     this.send(rawWs, { type: "ready", selectedGuildId });
+    this.send(rawWs, {
+      type: "preferences",
+      preferences: this.db.getUserPreferences(session.user.id),
+    });
     if (selectedGuildId) {
+      const guild = this.bot.client.guilds.cache.get(selectedGuildId);
+      if (guild && !guild.members.cache.has(session.user.id)) {
+        void guild.members
+          .fetch(session.user.id)
+          .then(() => {
+            this.send(rawWs, {
+              type: "playerState",
+              state: this.bot.music.serializePlayer(selectedGuildId, session.user.id),
+            });
+          })
+          .catch(() => {});
+      }
       this.send(rawWs, {
         type: "playerState",
         state: this.bot.music.serializePlayer(selectedGuildId, session.user.id),
@@ -285,7 +301,17 @@ export class CadenceWsHub {
 
         case "playTrack": {
           await this.requireSameVoice(msg.guildId, user.id);
-          await this.bot.music.playTrack(msg.guildId, msg.index);
+          const prefs = this.db.getUserPreferences(user.id);
+          const action = await this.bot.music.playTrack(
+            msg.guildId,
+            msg.index,
+            prefs.autoplayClickBehavior
+          );
+          if (action === "queued_next") {
+            this.sendToast(ws, "info", "Moved track to Play Next");
+          } else if (action === "queued_end") {
+            this.sendToast(ws, "info", "Added track to end of queue");
+          }
           return;
         }
 
@@ -356,8 +382,11 @@ export class CadenceWsHub {
 
         case "removeTrack": {
           await this.requireSameVoice(msg.guildId, user.id);
-          this.requirePrivileged(msg.guildId, user.id);
+          if (!this.bot.music.canRemoveTrack(msg.guildId, user.id, msg.index)) {
+            throw new Error("Requires DJ role, admin permissions, or being the track requester.");
+          }
           await this.bot.music.removeTrack(msg.guildId, msg.index);
+          this.sendToast(ws, "info", "Removed track from queue");
           return;
         }
 
@@ -653,6 +682,15 @@ export class CadenceWsHub {
 
         case "getHistory": {
           this.send(ws, { type: "history", entries: this.db.getPlayHistory(user.id) });
+          return;
+        }
+
+        case "updatePreferences": {
+          const prefs = this.db.updateUserPreferences(user.id, msg.preferences);
+          this.send(ws, { type: "preferences", preferences: prefs });
+          if (msg.preferences.playlistSort) {
+            this.sendPlaylists(ws, user.id);
+          }
           return;
         }
 

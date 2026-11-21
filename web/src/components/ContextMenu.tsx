@@ -10,10 +10,13 @@ import {
   RefreshCw,
   Share2,
   Shuffle,
+  SkipForward,
+  Sparkles,
   ThumbsUp,
   Trash2,
   UserRound,
 } from "lucide-react";
+import { splitArtists } from "@shared/artists";
 import type { EnqueueMode, PlaylistDTO, ToastLevel, TrackDTO } from "@shared/types";
 
 export interface TrackMenuContext {
@@ -40,11 +43,14 @@ export type ContextMenuState =
 interface Props {
   menu: ContextMenuState | null;
   privileged: boolean;
+  currentUserId: string;
   likedTrackIds: Set<string>;
   onClose: () => void;
   onStartMix: (track: TrackDTO) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onToggleLike: (track: TrackDTO) => void;
+  onFindRelated: (track: TrackDTO) => void;
+  onSkip: () => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
   onViewLyrics: (track: TrackDTO) => void;
@@ -87,11 +93,14 @@ async function copyText(text: string): Promise<boolean> {
 export function ContextMenu({
   menu,
   privileged,
+  currentUserId,
   likedTrackIds,
   onClose,
   onStartMix,
   onEnqueue,
   onToggleLike,
+  onFindRelated,
+  onSkip,
   onOpenSaveModal,
   onOpenArtist,
   onViewLyrics,
@@ -265,14 +274,34 @@ export function ContextMenu({
           <button
             type="button"
             onClick={() => {
-              onOpenArtist(menu.track.author);
+              onFindRelated(menu.track);
               onClose();
             }}
             className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
           >
-            <UserRound className="h-4 w-4 text-zinc-300" />
-            <span>Go to artist</span>
+            <Sparkles className="h-4 w-4 text-zinc-300" />
+            <span>Find related songs</span>
           </button>
+
+          {(() => {
+            const artists = splitArtists(menu.track.author).slice(0, 3);
+            return artists.map((artistName, idx) => (
+              <button
+                key={`${artistName}-${idx}`}
+                type="button"
+                onClick={() => {
+                  onOpenArtist(artistName);
+                  onClose();
+                }}
+                className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+              >
+                <UserRound className="h-4 w-4 shrink-0 text-zinc-300" />
+                <span className="truncate">
+                  {artists.length > 1 ? `Go to ${artistName}` : "Go to artist"}
+                </span>
+              </button>
+            ));
+          })()}
 
           <button
             type="button"
@@ -295,14 +324,31 @@ export function ContextMenu({
             <span>Share</span>
           </button>
 
-          {((typeof menu.queueIndex === "number" && privileged) ||
+          {(menu.isCurrent ||
+            typeof menu.queueIndex === "number" ||
             (menu.playlistId && typeof menu.playlistTrackIndex === "number")) && (
             <>
               <div className="my-1 border-t border-white/10" />
 
-              {typeof menu.queueIndex === "number" && privileged && (
+              {menu.isCurrent && (
+                <button
+                  type="button"
+                  disabled={!privileged}
+                  title={!privileged ? "Requires DJ role" : undefined}
+                  onClick={() => {
+                    onSkip();
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
+                >
+                  <SkipForward className="h-4 w-4 text-zinc-300" />
+                  <span>Skip current track</span>
+                </button>
+              )}
+
+              {typeof menu.queueIndex === "number" && (
                 <>
-                  {menu.queueIndex > 0 && (
+                  {privileged && menu.queueIndex > 0 && (
                     <button
                       type="button"
                       onClick={() => {
@@ -316,17 +362,31 @@ export function ContextMenu({
                     </button>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onRemoveTrack(menu.queueIndex!);
-                      onClose();
-                    }}
-                    className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span>Remove from queue</span>
-                  </button>
+                  {(() => {
+                    const canRemove =
+                      privileged ||
+                      Boolean(menu.track.isAutoplay) ||
+                      menu.track.requester?.id === currentUserId;
+                    return (
+                      <button
+                        type="button"
+                        disabled={!canRemove}
+                        title={
+                          canRemove
+                            ? "Remove from queue"
+                            : "Requires DJ role or being the track requester"
+                        }
+                        onClick={() => {
+                          onRemoveTrack(menu.queueIndex!);
+                          onClose();
+                        }}
+                        className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Remove from queue</span>
+                      </button>
+                    );
+                  })()}
                 </>
               )}
 

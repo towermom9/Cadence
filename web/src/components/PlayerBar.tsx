@@ -35,6 +35,7 @@ import type {
 } from "@shared/types";
 import type { PlaybackAnchor } from "../hooks/useCadenceSocket";
 import { formatMs, sourceLabel } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -263,7 +264,7 @@ export function PlayerBar({
       setVolumeDraft(String(serverVolume));
       return;
     }
-    const clamped = Math.max(0, Math.min(150, parsed));
+    const clamped = Math.max(0, Math.min(100, parsed));
     setVolumeDraft(String(clamped));
     if (clamped !== serverVolume) {
       onVolume(clamped);
@@ -320,13 +321,13 @@ export function PlayerBar({
           <div
             ref={fillRef}
             style={{ width: `${progressPct}%` }}
-            className="pointer-events-none h-full bg-[#ff0033]"
+            className="pointer-events-none h-full bg-[var(--cadence-accent)]"
           />
           {canSeek && (
             <div
               ref={thumbRef}
               style={{ left: `${progressPct}%` }}
-              className={`pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ff0033] shadow transition-opacity ${
+              className={`pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--cadence-accent)] shadow transition-opacity ${
                 isSeeking ? "scale-110 opacity-100" : "opacity-0 group-hover/bar:opacity-100"
               }`}
             />
@@ -373,7 +374,7 @@ export function PlayerBar({
 
           <span className="ml-2 hidden text-xs tabular-nums text-zinc-400 md:inline">
             {track?.isStream ? (
-              <span className="inline-flex items-center gap-1 text-[#ff0033]">
+              <span className="inline-flex items-center gap-1 text-[var(--cadence-accent)]">
                 <Radio className="h-3 w-3" />
                 LIVE
               </span>
@@ -413,16 +414,7 @@ export function PlayerBar({
               <p className="truncate text-xs text-zinc-400">
                 {track ? (
                   <>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenArtist(track.author);
-                      }}
-                      className="hover:text-white hover:underline"
-                    >
-                      {track.author}
-                    </button>
+                    <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     <span> • {sourceLabel(track.sourceName)}</span>
                   </>
                 ) : playerState?.voiceChannelName ? (
@@ -479,8 +471,8 @@ export function PlayerBar({
             <input
               type="range"
               min={0}
-              max={150}
-              value={serverVolume}
+              max={100}
+              value={Math.min(100, serverVolume)}
               disabled={!playerState?.connected || !privileged}
               onChange={(e) => {
                 const v = Number(e.target.value);
@@ -517,8 +509,9 @@ export function PlayerBar({
               disabled={!playerState?.connected || !privileged}
               onClick={() => setEffectsOpen((v) => !v)}
               title="Audio effects"
+              style={activeFilter !== "none" ? { color: "var(--cadence-accent)" } : undefined}
               className={`rounded-full p-2 transition hover:bg-white/10 disabled:opacity-40 ${
-                activeFilter !== "none" ? "text-[#ff0033]" : "text-zinc-400 hover:text-white"
+                activeFilter !== "none" ? "" : "text-zinc-400 hover:text-white"
               }`}
             >
               <Sliders className="h-4 w-4" />

@@ -29,8 +29,14 @@ const DISCORD_OAUTH_TOKEN = "https://discord.com/api/v10/oauth2/token";
 
 const ALLOWED_ARTWORK_HOSTS = new Set([
   "yt3.googleusercontent.com",
+  "yt3.ggpht.com",
   "lh3.googleusercontent.com",
+  "lh3.ggpht.com",
+  "lh4.googleusercontent.com",
+  "lh5.googleusercontent.com",
+  "lh6.googleusercontent.com",
   "i.ytimg.com",
+  "i9.ytimg.com",
   "img.youtube.com",
   "i.scdn.co",
   "mosaic.scdn.co",
@@ -232,6 +238,15 @@ export function createWebApp(
       const contentType = res.headers.get("content-type") || "";
       if (!contentType.toLowerCase().startsWith("image/")) {
         return c.json({ error: "Upstream response is not an image" }, 400);
+      }
+
+      // Reject YouTube's known 120x90 grey placeholder on maxresdefault/sddefault so client falls back cleanly
+      if (
+        currentUrl.hostname.toLowerCase().endsWith("ytimg.com") &&
+        /\/(?:maxresdefault|sddefault)\.(?:jpg|webp)$/i.test(currentUrl.pathname) &&
+        res.headers.get("content-length") === "1097"
+      ) {
+        return c.json({ error: "YouTube placeholder thumbnail" }, 404);
       }
 
       return new Response(res.body, {

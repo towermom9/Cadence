@@ -9,6 +9,7 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
 import { TrackArtwork } from "./TrackArtwork";
@@ -182,16 +183,7 @@ export function HomeView({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-white">{track.title}</p>
                   <p className="truncate text-xs text-zinc-400">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenArtist(track.author);
-                      }}
-                      className="hover:text-white hover:underline"
-                    >
-                      {track.author}
-                    </button>
+                    <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     <span> • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}</span>
                   </p>
                 </div>
