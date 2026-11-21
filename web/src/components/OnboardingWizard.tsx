@@ -86,6 +86,7 @@ const SUPPORTED_BADGES = [
 const OPTIONAL_ENV_SNIPPET = `# Optional: add to .env and restart Lavalink for custom API keys
 SPOTIFY_CLIENT_ID=
 SPOTIFY_CLIENT_SECRET=
+DEEZER_ENABLED=false
 DEEZER_ARL=
 DEEZER_MASTER_KEY=
 APPLE_MUSIC_ENABLED=false
@@ -742,8 +743,9 @@ export function OnboardingWizard({ onComplete }: Props) {
                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
                 <p className="leading-relaxed">
                   <strong>YouTube, YT Music, Spotify</strong> (via <code className="font-mono">spotify-tokener</code>),{" "}
-                  <strong>Deezer</strong> (via ISRC), <strong>SoundCloud</strong>, and{" "}
-                  <strong>LRCLIB lyrics</strong> work automatically with no extra API keys.
+                  <strong>SoundCloud</strong>, and <strong>LRCLIB lyrics</strong> work automatically with no extra API keys.
+                  Direct <strong>Deezer</strong> streams require <code className="font-mono">DEEZER_ENABLED=true</code> +{" "}
+                  <code className="font-mono">DEEZER_MASTER_KEY</code> in <code className="font-mono">.env</code>.
                 </p>
               </div>
 

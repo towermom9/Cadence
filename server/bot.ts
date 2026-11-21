@@ -184,6 +184,7 @@ export class CadenceBot {
       needsSetup: config.needsSetup,
       setupTokenRequired: Boolean(config.setupToken),
       oauthConfigured: config.hasOAuthConfig,
+      redirectUri: config.discordRedirectUri,
     };
   }
 

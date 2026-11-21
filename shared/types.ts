@@ -119,6 +119,7 @@ export interface AppMetaDTO {
   needsSetup: boolean;
   setupTokenRequired: boolean;
   oauthConfigured: boolean;
+  redirectUri: string;
 }
 
 export interface SetupStatusDTO {

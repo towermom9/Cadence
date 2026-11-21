@@ -1,4 +1,5 @@
-import { Disc3, ExternalLink, LogIn, Radio, ShieldAlert } from "lucide-react";
+import { useState } from "react";
+import { Check, Copy, Disc3, ExternalLink, LogIn, Radio, ShieldAlert } from "lucide-react";
 import type { AppMetaDTO } from "@shared/types";
 
 interface Props {
@@ -9,13 +10,26 @@ interface Props {
 const ERROR_MESSAGES: Record<string, string> = {
   oauth_state: "Login session verification expired. Please try signing in again.",
   oauth_unconfigured: "Discord OAuth2 credentials are not set yet.",
-  oauth_token: "Could not complete Discord OAuth2 token exchange. Check your redirect URL in Discord Developer Portal.",
+  oauth_token:
+    "Could not complete Discord OAuth2 token exchange. Check your redirect URL in Discord Developer Portal.",
   oauth_failed: "Unexpected error during Discord login.",
 };
 
 export function LoginView({ meta, errorCode }: Props) {
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
   const oauthConfigured = meta?.oauthConfigured ?? true;
   const errorText = errorCode ? ERROR_MESSAGES[errorCode] || "Login failed." : null;
+
+  const handleCopyRedirect = async () => {
+    if (!meta?.redirectUri) return;
+    try {
+      await navigator.clipboard.writeText(meta.redirectUri);
+      setCopiedRedirect(true);
+      setTimeout(() => setCopiedRedirect(false), 2000);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#09090b] px-4 py-12">
@@ -54,18 +68,23 @@ export function LoginView({ meta, errorCode }: Props) {
                 meta?.botReady ? "bg-emerald-400 shadow-[0_0_8px_#34d399]" : "bg-amber-400"
               }`}
             />
-            <span className="text-zinc-300">
+            <span className="truncate text-zinc-300">
               Bot: {meta?.botReady ? "Online" : "Waiting token"}
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-lg border border-white/8 bg-white/[0.03] px-3 py-2">
             <Radio
-              className={`h-3.5 w-3.5 ${
+              className={`h-3.5 w-3.5 shrink-0 ${
                 meta?.lavalinkConnected ? "text-emerald-400" : "text-zinc-500"
               }`}
             />
-            <span className="text-zinc-300">
-              Audio: {meta?.lavalinkConnected ? "Connected" : "Offline"}
+            <span className="truncate text-zinc-300">
+              Audio:{" "}
+              {meta?.lavalinkConnected
+                ? meta.lavalinkVersion
+                  ? `Online (v${meta.lavalinkVersion})`
+                  : "Online"
+                : "Offline"}
             </span>
           </div>
         </div>
@@ -81,8 +100,8 @@ export function LoginView({ meta, errorCode }: Props) {
           <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
             Set <code className="font-mono">DISCORD_TOKEN</code>,{" "}
             <code className="font-mono">DISCORD_CLIENT_ID</code>, and{" "}
-            <code className="font-mono">DISCORD_CLIENT_SECRET</code> in <code className="font-mono">.env</code> to
-            enable login.
+            <code className="font-mono">DISCORD_CLIENT_SECRET</code> in{" "}
+            <code className="font-mono">.env</code> to enable login.
           </div>
         )}
 
@@ -107,6 +126,38 @@ export function LoginView({ meta, errorCode }: Props) {
             </a>
           )}
         </div>
+
+        {meta?.redirectUri && (
+          <div className="mt-5 rounded-xl border border-white/8 bg-[#09090b]/70 p-3 text-[11px] text-zinc-400">
+            <p>
+              If Discord says <span className="text-zinc-200">Invalid OAuth2 redirect_uri</span>,
+              ensure this exact URL is saved under{" "}
+              <strong className="text-zinc-200">Discord Developer Portal → OAuth2 → Redirects</strong>:
+            </p>
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-white/8 bg-[#111116] px-2.5 py-1.5">
+              <code className="flex-1 truncate font-mono text-[11px] text-violet-200">
+                {meta.redirectUri}
+              </code>
+              <button
+                type="button"
+                onClick={() => void handleCopyRedirect()}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md bg-white/8 px-2 py-0.5 text-[10px] font-medium text-zinc-200 transition hover:bg-white/15"
+              >
+                {copiedRedirect ? (
+                  <>
+                    <Check className="h-3 w-3 text-emerald-300" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" />
+                    Copy
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -37,10 +37,10 @@ plugins:
         sources:
             spotify: true
             applemusic: ${APPLE_MUSIC_ENABLED:false}
-            deezer: true
+            deezer: ${DEEZER_ENABLED:false}
             yandexmusic: false
             flowerytts: false
-            youtube: true
+            youtube: false
             vkmusic: false
         lyrics-sources:
             spotify: false

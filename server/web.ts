@@ -72,7 +72,6 @@ export function createWebApp(
       redirect_uri: config.discordRedirectUri,
       scope: "identify guilds",
       state,
-      prompt: "none",
     });
 
     return c.redirect(`${DISCORD_OAUTH_AUTHORIZE}?${params.toString()}`);
