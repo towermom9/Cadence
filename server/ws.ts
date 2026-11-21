@@ -3,7 +3,7 @@ import { PermissionsBitField } from "discord.js";
 import type { Context } from "hono";
 import { createBunWebSocket } from "hono/bun";
 import type { WSContext } from "hono/ws";
-import type { WsClientMessage, WsServerMessage } from "@shared/types";
+import type { ToastLevel, WsClientMessage, WsServerMessage } from "@shared/types";
 import { getSessionFromContext } from "./auth";
 import type { CadenceBot } from "./bot";
 import type { CadenceDatabase, SessionRecord } from "./db";
@@ -156,6 +156,14 @@ export class CadenceWsHub {
     }
   }
 
+  broadcastToast(guildId: string, level: ToastLevel, message: string): void {
+    for (const [rawWs, meta] of this.clients.entries()) {
+      if (meta.selectedGuildId === guildId) {
+        this.sendToast(rawWs, level, message);
+      }
+    }
+  }
+
   private async ensureMemberInGuild(guildId: string, userId: string) {
     const guild = this.bot.client.guilds.cache.get(guildId);
     if (!guild) {
@@ -251,6 +259,18 @@ export class CadenceWsHub {
               ? `Queued "${msg.tracks[0]?.title || "track"}"`
               : `Queued ${res.added} tracks`;
           this.sendToast(ws, "success", label);
+          this.send(ws, {
+            type: "history",
+            entries: this.db.getPlayHistory(user.id),
+          });
+          return;
+        }
+
+        case "startMix": {
+          const vcId = await this.requireSameVoice(msg.guildId, user.id);
+          const res = await this.bot.music.startMix(msg.guildId, vcId, msg.track, requester);
+          const suffix = res.added > 0 ? ` (+${res.added} tracks)` : "";
+          this.sendToast(ws, "success", `Started mix for "${msg.track.title}"${suffix}`);
           this.send(ws, {
             type: "history",
             entries: this.db.getPlayHistory(user.id),
@@ -440,6 +460,23 @@ export class CadenceWsHub {
           return;
         }
 
+        case "createPlaylistWithTracks": {
+          const created = this.db.createPlaylist(user.id, msg.name);
+          if (msg.tracks.length > 0) {
+            const res = this.db.addTracksToPlaylist(user.id, created.id, msg.tracks);
+            this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+            this.sendToast(
+              ws,
+              "success",
+              `Created "${created.name}" with ${res.added} track${res.added === 1 ? "" : "s"}`
+            );
+          } else {
+            this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+            this.sendToast(ws, "success", `Created playlist "${created.name}"`);
+          }
+          return;
+        }
+
         case "renamePlaylist": {
           const renamed = this.db.renamePlaylist(user.id, msg.playlistId, msg.name);
           this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
@@ -458,6 +495,17 @@ export class CadenceWsHub {
           const updated = this.db.addTrackToPlaylist(user.id, msg.playlistId, msg.track);
           this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
           this.sendToast(ws, "success", `Added "${msg.track.title}" to "${updated.name}"`);
+          return;
+        }
+
+        case "addTracksToPlaylist": {
+          const res = this.db.addTracksToPlaylist(user.id, msg.playlistId, msg.tracks);
+          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendToast(
+            ws,
+            "success",
+            `Saved ${res.added} track${res.added === 1 ? "" : "s"} to "${res.playlist.name}"`
+          );
           return;
         }
 

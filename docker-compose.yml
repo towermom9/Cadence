@@ -40,6 +40,8 @@ services:
       - DEEZER_MASTER_KEY=${DEEZER_MASTER_KEY:-}
       - APPLE_MUSIC_ENABLED=${APPLE_MUSIC_ENABLED:-false}
       - APPLE_MUSIC_TOKEN=${APPLE_MUSIC_TOKEN:-}
+      - YT_OAUTH_ENABLED=${YT_OAUTH_ENABLED:-false}
+      - YT_OAUTH_REFRESH_TOKEN=${YT_OAUTH_REFRESH_TOKEN:-}
       - YT_CIPHER_URL=http://yt-cipher:8001
       - SPOTIFY_TOKEN_ENDPOINT=http://spotify-tokener:49152/api/token
     volumes:

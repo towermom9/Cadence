@@ -1,4 +1,5 @@
-import { Disc3, Play, Plus } from "lucide-react";
+import type { MouseEvent } from "react";
+import { Play, Plus } from "lucide-react";
 import type {
   EnqueueMode,
   HistoryEntryDTO,
@@ -8,16 +9,20 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   user: UserProfileDTO;
   history: HistoryEntryDTO[];
   playlists: PlaylistDTO[];
   onMoodSearch: (query: string, source?: SearchSource) => void;
-  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode) => void;
+  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
+  onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
+  onPlaylistContextMenu: (e: MouseEvent, playlist: PlaylistDTO) => void;
 }
 
 const MOOD_CHIPS = [
@@ -74,6 +79,8 @@ export function HomeView({
   onEnqueue,
   onSelectPlaylist,
   onPlayPlaylist,
+  onTrackContextMenu,
+  onPlaylistContextMenu,
 }: Props) {
   const uniqueHistory: TrackDTO[] = [];
   const seen = new Set<string>();
@@ -127,21 +134,16 @@ export function HomeView({
             {uniqueHistory.slice(0, 10).map((track) => (
               <div
                 key={track.identifier}
-                onClick={() => onEnqueue([track], "now")}
+                onClick={() => onEnqueue([track], "now", "Listen again")}
+                onContextMenu={(e) => onTrackContextMenu(e, track)}
                 className="group cursor-pointer space-y-2.5"
               >
                 <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]">
-                  {track.artworkUrl ? (
-                    <img
-                      src={track.artworkUrl}
-                      alt={track.title}
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105 group-hover:brightness-75"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-zinc-600">
-                      <Disc3 className="h-12 w-12" />
-                    </div>
-                  )}
+                  <TrackArtwork
+                    track={track}
+                    className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
+                    iconClassName="h-12 w-12"
+                  />
 
                   <button
                     type="button"
@@ -204,6 +206,7 @@ export function HomeView({
               <div
                 key={pl.id}
                 onClick={() => onSelectPlaylist(pl.id)}
+                onContextMenu={(e) => onPlaylistContextMenu(e, pl)}
                 className="group cursor-pointer space-y-2.5"
               >
                 <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818] ring-1 ring-white/10">

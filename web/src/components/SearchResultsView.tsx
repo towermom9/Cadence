@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { Disc3, ListPlus, Loader2, Play, Plus, SkipForward } from "lucide-react";
+import { useState, type MouseEvent } from "react";
+import { ListPlus, Loader2, MoreVertical, Play, Plus, SkipForward } from "lucide-react";
 import type { EnqueueMode, PlaylistDTO, SearchSource, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import type { TrackMenuContext } from "./ContextMenu";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   searching: boolean;
@@ -12,8 +14,9 @@ interface Props {
     playlistName: string | null;
   } | null;
   playlists: PlaylistDTO[];
-  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode) => void;
+  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onAddToPlaylist: (playlistId: string, track: TrackDTO) => void;
+  onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
 export function SearchResultsView({
@@ -22,6 +25,7 @@ export function SearchResultsView({
   playlists,
   onEnqueue,
   onAddToPlaylist,
+  onTrackContextMenu,
 }: Props) {
   const [menuKey, setMenuKey] = useState<string | null>(null);
 
@@ -57,6 +61,7 @@ export function SearchResultsView({
 
   const topResult = searchResults.tracks[0];
   const songs = searchResults.tracks.slice(0, 25);
+  const resultLabel = searchResults.playlistName || searchResults.query;
 
   return (
     <div className="space-y-8">
@@ -66,14 +71,14 @@ export function SearchResultsView({
             {searchResults.playlistName ? "Playlist" : "Search results"}
           </p>
           <h2 className="text-2xl font-bold tracking-tight text-white">
-            {searchResults.playlistName || searchResults.query}
+            {resultLabel}
           </h2>
         </div>
 
         {searchResults.tracks.length > 1 && (
           <button
             type="button"
-            onClick={() => onEnqueue(searchResults.tracks, "end")}
+            onClick={() => onEnqueue(searchResults.tracks, "end", resultLabel)}
             className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
           >
             <ListPlus className="h-4 w-4" />
@@ -86,18 +91,16 @@ export function SearchResultsView({
       {!searchResults.playlistName && topResult && (
         <section className="space-y-3">
           <h3 className="text-lg font-bold text-white">Top result</h3>
-          <div className="flex flex-col gap-5 rounded-xl border border-white/10 bg-gradient-to-br from-[#242424] to-[#121212] p-5 sm:flex-row sm:items-center">
-            {topResult.artworkUrl ? (
-              <img
-                src={topResult.artworkUrl}
-                alt={topResult.title}
-                className="h-28 w-28 shrink-0 rounded-lg object-cover shadow-xl"
-              />
-            ) : (
-              <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-lg bg-zinc-800 text-zinc-500">
-                <Disc3 className="h-10 w-10" />
-              </div>
-            )}
+          <div
+            onClick={() => onEnqueue([topResult], "now", resultLabel)}
+            onContextMenu={(e) => onTrackContextMenu(e, topResult)}
+            className="flex cursor-pointer flex-col gap-5 rounded-xl border border-white/10 bg-gradient-to-br from-[#242424] to-[#121212] p-5 transition hover:border-white/20 sm:flex-row sm:items-center"
+          >
+            <TrackArtwork
+              track={topResult}
+              className="h-28 w-28 shrink-0 rounded-lg shadow-xl"
+              iconClassName="h-10 w-10"
+            />
 
             <div className="min-w-0 flex-1 space-y-1.5">
               <h4 className="truncate text-xl font-bold text-white">{topResult.title}</h4>
@@ -108,7 +111,10 @@ export function SearchResultsView({
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => onEnqueue([topResult], "now")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEnqueue([topResult], "now", resultLabel);
+                  }}
                   className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
                 >
                   <Play className="h-4 w-4 fill-current" />
@@ -116,11 +122,25 @@ export function SearchResultsView({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onEnqueue([topResult], "end")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEnqueue([topResult], "end", resultLabel);
+                  }}
                   className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
                 >
                   <Plus className="h-4 w-4" />
                   Add to queue
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTrackContextMenu(e, topResult);
+                  }}
+                  title="More options"
+                  className="rounded-full p-2 text-zinc-300 transition hover:bg-white/12 hover:text-white"
+                >
+                  <MoreVertical className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -138,19 +158,15 @@ export function SearchResultsView({
             return (
               <div
                 key={key}
-                className="relative flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
+                onClick={() => onEnqueue([track], "now", resultLabel)}
+                onContextMenu={(e) => onTrackContextMenu(e, track)}
+                className="relative flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
               >
-                {track.artworkUrl ? (
-                  <img
-                    src={track.artworkUrl}
-                    alt={track.title}
-                    className="h-11 w-11 shrink-0 rounded object-cover"
-                  />
-                ) : (
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-500">
-                    <Disc3 className="h-5 w-5" />
-                  </div>
-                )}
+                <TrackArtwork
+                  track={track}
+                  className="h-11 w-11 shrink-0 rounded"
+                  iconClassName="h-5 w-5"
+                />
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-white">{track.title}</p>
@@ -160,10 +176,13 @@ export function SearchResultsView({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1"
+                >
                   <button
                     type="button"
-                    onClick={() => onEnqueue([track], "now")}
+                    onClick={() => onEnqueue([track], "now", resultLabel)}
                     title="Play now"
                     className="rounded-full p-2 text-zinc-200 transition hover:bg-white/12 hover:text-white"
                   >
@@ -171,7 +190,7 @@ export function SearchResultsView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onEnqueue([track], "next")}
+                    onClick={() => onEnqueue([track], "next", resultLabel)}
                     title="Play next"
                     className="rounded-full p-2 text-zinc-400 transition hover:bg-white/12 hover:text-white"
                   >
@@ -179,7 +198,7 @@ export function SearchResultsView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onEnqueue([track], "end")}
+                    onClick={() => onEnqueue([track], "end", resultLabel)}
                     title="Add to queue"
                     className="rounded-full p-2 text-zinc-400 transition hover:bg-white/12 hover:text-white"
                   >
@@ -219,6 +238,15 @@ export function SearchResultsView({
                       )}
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={(e) => onTrackContextMenu(e, track)}
+                    title="More options"
+                    className="rounded-full p-2 text-zinc-400 transition hover:bg-white/12 hover:text-white"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
             );

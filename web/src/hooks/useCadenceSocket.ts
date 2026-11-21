@@ -220,6 +220,17 @@ export function useCadenceSocket(enabled: boolean) {
     [pushToast, selectedGuildId, send]
   );
 
+  const startMix = useCallback(
+    (track: TrackDTO) => {
+      if (!selectedGuildId) {
+        pushToast("error", "Select a server first.");
+        return;
+      }
+      send({ type: "startMix", guildId: selectedGuildId, track });
+    },
+    [pushToast, selectedGuildId, send]
+  );
+
   const requestLyrics = useCallback(
     (title?: string, artist?: string, duration?: number) => {
       if (!selectedGuildId) return;
@@ -258,10 +269,12 @@ export function useCadenceSocket(enabled: boolean) {
     settings,
     lyricsState,
     toasts,
+    pushToast,
     dismissToast,
     selectGuild,
     search,
     enqueue,
+    startMix,
     playTrack: (index: number) =>
       selectedGuildId && send({ type: "playTrack", guildId: selectedGuildId, index }),
     togglePause: () => {
@@ -295,11 +308,15 @@ export function useCadenceSocket(enabled: boolean) {
     requestSettings,
     updateSettings,
     createPlaylist: (name: string) => send({ type: "createPlaylist", name }),
+    createPlaylistWithTracks: (name: string, tracks: TrackDTO[]) =>
+      send({ type: "createPlaylistWithTracks", name, tracks }),
     renamePlaylist: (playlistId: string, name: string) =>
       send({ type: "renamePlaylist", playlistId, name }),
     deletePlaylist: (playlistId: string) => send({ type: "deletePlaylist", playlistId }),
     addTrackToPlaylist: (playlistId: string, track: TrackDTO) =>
       send({ type: "addTrackToPlaylist", playlistId, track }),
+    addTracksToPlaylist: (playlistId: string, tracks: TrackDTO[]) =>
+      send({ type: "addTracksToPlaylist", playlistId, tracks }),
     removeTrackFromPlaylist: (playlistId: string, index: number) =>
       send({ type: "removeTrackFromPlaylist", playlistId, index }),
     playPlaylist: (playlistId: string, shuffle = false) =>

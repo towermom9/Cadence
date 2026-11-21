@@ -22,6 +22,34 @@ import type { CadenceWsHub } from "./ws";
 const DISCORD_OAUTH_AUTHORIZE = "https://discord.com/oauth2/authorize";
 const DISCORD_OAUTH_TOKEN = "https://discord.com/api/v10/oauth2/token";
 
+const ALLOWED_ARTWORK_HOSTS = new Set([
+  "yt3.googleusercontent.com",
+  "lh3.googleusercontent.com",
+  "i.ytimg.com",
+  "img.youtube.com",
+  "i.scdn.co",
+  "mosaic.scdn.co",
+  "image-cdn-ak.spotifycdn.com",
+  "image-cdn-fa.spotifycdn.com",
+  "i1.sndcdn.com",
+  "cdn.discordapp.com",
+  "e-cdns-images.dzcdn.net",
+  "cdns-images.dzcdn.net",
+  "is1-ssl.mzstatic.com",
+  "f4.bcbits.com",
+]);
+
+function parseAllowedArtworkUrl(raw: string, base?: URL): URL | null {
+  try {
+    const parsed = base ? new URL(raw, base) : new URL(raw);
+    if (parsed.protocol !== "https:") return null;
+    if (!ALLOWED_ARTWORK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function createWebApp(
   bot: CadenceBot,
   db: CadenceDatabase,
@@ -152,6 +180,65 @@ export function createWebApp(
       meta: bot.getBotMeta(),
       guilds,
     });
+  });
+
+  app.get("/api/artwork", async (c) => {
+    const rawUrl = c.req.query("url");
+    if (!rawUrl) {
+      return c.json({ error: "Missing url query parameter" }, 400);
+    }
+
+    let currentUrl = parseAllowedArtworkUrl(rawUrl);
+    if (!currentUrl) {
+      return c.json({ error: "Artwork host is not allowed" }, 400);
+    }
+
+    try {
+      let res: globalThis.Response | null = null;
+      for (let hops = 0; hops <= 2; hops++) {
+        res = await fetch(currentUrl.toString(), {
+          signal: AbortSignal.timeout(8000),
+          redirect: "manual",
+          headers: {
+            Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0",
+          },
+        });
+
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get("location");
+          if (!location) {
+            return c.json({ error: "Invalid upstream redirect" }, 502);
+          }
+          const nextUrl = parseAllowedArtworkUrl(location, currentUrl);
+          if (!nextUrl) {
+            return c.json({ error: "Redirected artwork host is not allowed" }, 400);
+          }
+          currentUrl = nextUrl;
+          continue;
+        }
+        break;
+      }
+
+      if (!res || !res.ok) {
+        return c.json({ error: "Failed to fetch artwork" }, res ? 502 : 504);
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().startsWith("image/")) {
+        return c.json({ error: "Upstream response is not an image" }, 400);
+      }
+
+      return new Response(res.body, {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
+    } catch {
+      return c.json({ error: "Artwork fetch failed" }, 502);
+    }
   });
 
   app.get("/ws", wsHub.handleUpgrade());

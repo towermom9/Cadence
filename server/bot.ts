@@ -25,6 +25,7 @@ import type {
   GuildSummaryDTO,
   RepeatModeType,
   SearchSource,
+  ToastLevel,
   TrackDTO,
 } from "@shared/types";
 import type { SearchPlatform } from "lavalink-client";
@@ -82,12 +83,15 @@ export class CadenceBot {
   private ready = false;
   private pendingSearchCache = new Map<string, TrackDTO[]>();
   private onGuildStateChange: (guildId: string) => void;
+  private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
 
   constructor(
     private db: CadenceDatabase,
-    onGuildStateChange?: (guildId: string) => void
+    onGuildStateChange?: (guildId: string) => void,
+    onGuildToast?: (guildId: string, level: ToastLevel, message: string) => void
   ) {
     this.onGuildStateChange = onGuildStateChange ?? (() => {});
+    this.onGuildToast = onGuildToast ?? (() => {});
     this.initClientAndMusic();
   }
 
@@ -102,9 +106,16 @@ export class CadenceBot {
       ],
     });
 
-    this.music = new MusicService(this.client, this.db, (guildId) => {
-      this.onGuildStateChange(guildId);
-    });
+    this.music = new MusicService(
+      this.client,
+      this.db,
+      (guildId) => {
+        this.onGuildStateChange(guildId);
+      },
+      (guildId, level, message) => {
+        this.onGuildToast(guildId, level, message);
+      }
+    );
 
     this.registerDiscordListeners();
   }
@@ -119,6 +130,11 @@ export class CadenceBot {
   setStateChangeHandler(handler: (guildId: string) => void): void {
     this.onGuildStateChange = handler;
     this.music.setStateChangeHandler(handler);
+  }
+
+  setToastHandler(handler: (guildId: string, level: ToastLevel, message: string) => void): void {
+    this.onGuildToast = handler;
+    this.music.setToastHandler(handler);
   }
 
   isReady(): boolean {

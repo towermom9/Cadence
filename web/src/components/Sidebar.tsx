@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type MouseEvent } from "react";
 import { Bookmark, Compass, Home, Menu, Play, Plus, X } from "lucide-react";
 import type { PlaylistDTO } from "@shared/types";
 
@@ -6,6 +6,7 @@ export type MainView = "home" | "explore" | "library" | "playlist" | "search" | 
 
 interface Props {
   activeView: MainView;
+  nowPlayingOpen?: boolean;
   selectedPlaylistId: string | null;
   playlists: PlaylistDTO[];
   connected: boolean;
@@ -13,6 +14,7 @@ interface Props {
   onSelectPlaylist: (playlistId: string) => void;
   onCreatePlaylist: (name: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
+  onPlaylistContextMenu: (e: MouseEvent, playlist: PlaylistDTO) => void;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -25,6 +27,7 @@ const NAV_ITEMS: { id: Extract<MainView, "home" | "explore" | "library">; label:
 
 export function Sidebar({
   activeView,
+  nowPlayingOpen = false,
   selectedPlaylistId,
   playlists,
   connected,
@@ -32,6 +35,7 @@ export function Sidebar({
   onSelectPlaylist,
   onCreatePlaylist,
   onPlayPlaylist,
+  onPlaylistContextMenu,
   mobileOpen,
   onCloseMobile,
 }: Props) {
@@ -82,7 +86,7 @@ export function Sidebar({
       <nav className="space-y-1 px-2.5">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-          const active = activeView === item.id;
+          const active = !nowPlayingOpen && activeView === item.id;
           return (
             <button
               key={item.id}
@@ -154,8 +158,9 @@ export function Sidebar({
                   onSelectPlaylist(pl.id);
                   onCloseMobile();
                 }}
+                onContextMenu={(e) => onPlaylistContextMenu(e, pl)}
                 className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 transition ${
-                  selected ? "bg-white/12 text-white" : "text-zinc-300 hover:bg-white/[0.06]"
+                  !nowPlayingOpen && selected ? "bg-white/12 text-white" : "text-zinc-300 hover:bg-white/[0.06]"
                 }`}
               >
                 <div className="min-w-0 flex-1">

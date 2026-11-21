@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import {
   ChevronDown,
   ChevronUp,
-  Disc3,
   ListPlus,
   Pause,
   Play,
@@ -18,6 +17,8 @@ import {
 } from "lucide-react";
 import type { PlayerStateDTO, PlaylistDTO, RepeatModeType, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import type { TrackMenuContext } from "./ContextMenu";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   playerState: PlayerStateDTO | null;
@@ -34,6 +35,7 @@ interface Props {
   onShuffle: () => void;
   onToggleAutoplay: (enabled: boolean) => void;
   onAddToPlaylist: (playlistId: string, track: TrackDTO) => void;
+  onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
 export function PlayerBar({
@@ -51,6 +53,7 @@ export function PlayerBar({
   onShuffle,
   onToggleAutoplay,
   onAddToPlaylist,
+  onTrackContextMenu,
 }: Props) {
   const [playlistMenuOpen, setPlaylistMenuOpen] = useState(false);
 
@@ -136,24 +139,22 @@ export function PlayerBar({
           </span>
         </div>
 
-        {/* Center: Track info (click toggles Now Playing drawer) */}
+        {/* Center: Track info (click toggles Now Playing view) */}
         <div className="flex min-w-0 max-w-md flex-1 items-center justify-center gap-3">
           <button
             type="button"
             onClick={onToggleDrawer}
+            onContextMenu={(e) => {
+              if (!track) return;
+              onTrackContextMenu(e, track, { isCurrent: true });
+            }}
             className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.06]"
           >
-            {track?.artworkUrl ? (
-              <img
-                src={track.artworkUrl}
-                alt={track.title}
-                className="h-10 w-10 shrink-0 rounded object-cover"
-              />
-            ) : (
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-500">
-                <Disc3 className="h-5 w-5" />
-              </div>
-            )}
+            <TrackArtwork
+              track={track}
+              className="h-10 w-10 shrink-0 rounded"
+              iconClassName="h-5 w-5"
+            />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-white">
                 {track ? track.title : "Nothing playing"}
@@ -272,7 +273,7 @@ export function PlayerBar({
           <button
             type="button"
             onClick={onToggleDrawer}
-            title={drawerOpen ? "Close player drawer" : "Open Up Next, Lyrics & Effects"}
+            title={drawerOpen ? "Close Now Playing" : "Open Up Next, Lyrics & Effects"}
             className="inline-flex items-center gap-1 rounded-full p-2 text-zinc-200 transition hover:bg-white/10 hover:text-white"
           >
             {drawerOpen ? (

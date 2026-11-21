@@ -340,24 +340,42 @@ export class CadenceDatabase {
   }
 
   addTrackToPlaylist(userId: string, playlistId: string, track: TrackDTO): PlaylistDTO {
+    return this.addTracksToPlaylist(userId, playlistId, [track]).playlist;
+  }
+
+  addTracksToPlaylist(
+    userId: string,
+    playlistId: string,
+    tracks: TrackDTO[]
+  ): { playlist: PlaylistDTO; added: number } {
     const playlist = this.getPlaylist(userId, playlistId);
     if (!playlist) {
       throw new Error("Playlist not found.");
     }
-    if (track.isStream) {
+    const saveable = tracks.filter((t) => !t.isStream);
+    if (tracks.length > 0 && saveable.length === 0) {
       throw new Error("Live streams cannot be saved to a playlist.");
     }
-    if (playlist.tracks.length >= 500) {
+    const remaining = Math.max(0, 500 - playlist.tracks.length);
+    if (tracks.length > 0 && remaining === 0) {
       throw new Error("Playlist limit of 500 tracks reached.");
     }
 
-    const updatedTracks = [...playlist.tracks, track];
+    const toAppend = saveable.slice(0, remaining);
+    if (tracks.length > 0 && toAppend.length === 0) {
+      throw new Error("No eligible tracks to save to playlist.");
+    }
+
+    const updatedTracks = [...playlist.tracks, ...toAppend];
     const now = Date.now();
     this.db
       .query(`UPDATE playlists SET tracks_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
       .run(JSON.stringify(updatedTracks), now, playlistId, userId);
 
-    return { ...playlist, tracks: updatedTracks, updatedAt: now };
+    return {
+      playlist: { ...playlist, tracks: updatedTracks, updatedAt: now },
+      added: toAppend.length,
+    };
   }
 
   removeTrackFromPlaylist(userId: string, playlistId: string, index: number): PlaylistDTO {

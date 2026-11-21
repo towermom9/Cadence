@@ -16,6 +16,10 @@ async function main() {
     wsHub.broadcastGuild(guildId);
   });
 
+  bot.setToastHandler((guildId, level, message) => {
+    wsHub.broadcastToast(guildId, level, message);
+  });
+
   const app = createWebApp(bot, db, wsHub);
 
   const server = Bun.serve({

@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from "react";
-import { ArrowLeft, Disc3, Pencil, Play, Shuffle, Trash2, X } from "lucide-react";
+import { useState, type FormEvent, type MouseEvent } from "react";
+import { ArrowLeft, MoreVertical, Pencil, Play, Shuffle, Trash2, X } from "lucide-react";
 import type { EnqueueMode, PlaylistDTO, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   playlist: PlaylistDTO | null;
@@ -11,7 +13,8 @@ interface Props {
   onRenamePlaylist: (playlistId: string, name: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onRemoveTrack: (playlistId: string, index: number) => void;
-  onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode) => void;
+  onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
 export function PlaylistDetailView({
@@ -22,6 +25,7 @@ export function PlaylistDetailView({
   onDeletePlaylist,
   onRemoveTrack,
   onEnqueueTrack,
+  onTrackContextMenu,
 }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
@@ -163,22 +167,23 @@ export function PlaylistDetailView({
           {playlist.tracks.map((track, idx) => (
             <div
               key={`${track.identifier}-${idx}`}
-              className="group flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
+              onClick={() => onEnqueueTrack([track], "now", playlist.name)}
+              onContextMenu={(e) =>
+                onTrackContextMenu(e, track, {
+                  playlistId: playlist.id,
+                  playlistTrackIndex: idx,
+                })
+              }
+              className="group flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
             >
               <span className="w-6 text-center text-xs tabular-nums text-zinc-500">
                 {idx + 1}
               </span>
-              {track.artworkUrl ? (
-                <img
-                  src={track.artworkUrl}
-                  alt={track.title}
-                  className="h-10 w-10 shrink-0 rounded object-cover"
-                />
-              ) : (
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-500">
-                  <Disc3 className="h-4 w-4" />
-                </div>
-              )}
+              <TrackArtwork
+                track={track}
+                className="h-10 w-10 shrink-0 rounded"
+                iconClassName="h-4 w-4"
+              />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{track.title}</p>
                 <p className="truncate text-xs text-zinc-400">
@@ -188,22 +193,40 @@ export function PlaylistDetailView({
               <span className="hidden text-xs tabular-nums text-zinc-400 sm:inline">
                 {track.isStream ? "LIVE" : formatMs(track.duration)}
               </span>
-              <button
-                type="button"
-                onClick={() => onEnqueueTrack([track], "now")}
-                title="Play now"
-                className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-0.5"
               >
-                <Play className="h-4 w-4 fill-current" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onRemoveTrack(playlist.id, idx)}
-                title="Remove from playlist"
-                className="rounded-full p-2 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => onEnqueueTrack([track], "now", playlist.name)}
+                  title="Play now"
+                  className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  <Play className="h-4 w-4 fill-current" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRemoveTrack(playlist.id, idx)}
+                  title="Remove from playlist"
+                  className="rounded-full p-2 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) =>
+                    onTrackContextMenu(e, track, {
+                      playlistId: playlist.id,
+                      playlistTrackIndex: idx,
+                    })
+                  }
+                  title="More options"
+                  className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>

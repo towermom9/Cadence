@@ -164,6 +164,7 @@ export type WsClientMessage =
   | { type: "selectGuild"; guildId: string }
   | { type: "search"; query: string; source: SearchSource }
   | { type: "enqueue"; guildId: string; tracks: TrackDTO[]; mode: EnqueueMode }
+  | { type: "startMix"; guildId: string; track: TrackDTO }
   | { type: "playTrack"; guildId: string; index: number }
   | { type: "pause"; guildId: string }
   | { type: "resume"; guildId: string }
@@ -188,9 +189,11 @@ export type WsClientMessage =
     }
   | { type: "getPlaylists" }
   | { type: "createPlaylist"; name: string }
+  | { type: "createPlaylistWithTracks"; name: string; tracks: TrackDTO[] }
   | { type: "renamePlaylist"; playlistId: string; name: string }
   | { type: "deletePlaylist"; playlistId: string }
   | { type: "addTrackToPlaylist"; playlistId: string; track: TrackDTO }
+  | { type: "addTracksToPlaylist"; playlistId: string; tracks: TrackDTO[] }
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
   | { type: "playPlaylist"; guildId: string; playlistId: string; shuffle?: boolean }
   | { type: "getHistory" }

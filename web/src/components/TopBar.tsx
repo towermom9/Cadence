@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
-  Cast,
   Check,
+  Disc3,
   ExternalLink,
   Loader2,
   LogOut,
@@ -24,6 +24,7 @@ interface Props {
   meta: AppMetaDTO | null;
   guilds: GuildSummaryDTO[];
   selectedGuildId: string | null;
+  playerConnected?: boolean;
   searching: boolean;
   onOpenMobileMenu: () => void;
   onSearch: (query: string, source: SearchSource) => void;
@@ -45,6 +46,7 @@ export function TopBar({
   meta,
   guilds,
   selectedGuildId,
+  playerConnected = false,
   searching,
   onOpenMobileMenu,
   onSearch,
@@ -138,18 +140,40 @@ export function TopBar({
         </form>
       </div>
 
-      {/* Right controls: Server/Cast + Avatar */}
-      <div className="relative flex items-center gap-2">
+      {/* Right controls: Discord Server Icon + User Avatar */}
+      <div className="relative flex items-center gap-2.5">
         <button
           type="button"
           onClick={() => setOpenMenu((m) => (m === "cast" ? null : "cast"))}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/10"
-          title="Switch Discord server"
+          className="relative rounded-full ring-1 ring-white/15 transition hover:ring-white/40"
+          title={currentGuild ? `Server: ${currentGuild.name}` : "Select Discord server"}
+          aria-label="Switch Discord server"
         >
-          <Cast className="h-4 w-4 text-zinc-300" />
-          <span className="hidden max-w-36 truncate sm:inline">
-            {currentGuild ? currentGuild.name : "Select Server"}
-          </span>
+          {currentGuild?.iconUrl ? (
+            <img
+              src={currentGuild.iconUrl}
+              alt={currentGuild.name}
+              referrerPolicy="no-referrer"
+              className="h-8 w-8 rounded-full object-cover"
+            />
+          ) : currentGuild ? (
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600/80 text-xs font-semibold text-white">
+              {currentGuild.name
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((w) => w[0]?.toUpperCase())
+                .join("") || currentGuild.name.slice(0, 2).toUpperCase()}
+            </div>
+          ) : (
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
+              <Disc3 className="h-4 w-4" />
+            </div>
+          )}
+
+          {(currentGuild?.inVoice || playerConnected) && (
+            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#030303]" />
+          )}
         </button>
 
         <button
@@ -162,6 +186,7 @@ export function TopBar({
             <img
               src={user.avatarUrl}
               alt={user.username}
+              referrerPolicy="no-referrer"
               className="h-8 w-8 rounded-full object-cover"
             />
           ) : (

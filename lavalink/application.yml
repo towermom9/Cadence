@@ -11,20 +11,17 @@ plugins:
         allowDirectVideoIds: true
         allowDirectPlaylistIds: true
         clients:
-            - TV
             - MUSIC
-            - ANDROID_VR
-            - ANDROID_MUSIC
             - WEB
+            - MWEB
+            - ANDROID_VR
+            - IOS
             - WEBEMBEDDED
             - TVHTML5_SIMPLY
-        clientOptions:
-            WEB:
-                playback: false
-                videoLoading: false
-            WEBEMBEDDED:
-                playlistLoading: false
-                searching: false
+            - TV
+        oauth:
+            enabled: ${YT_OAUTH_ENABLED:false}
+            refreshToken: "${YT_OAUTH_REFRESH_TOKEN:}"
         remoteCipher:
             url: "${YT_CIPHER_URL:http://yt-cipher:8001}"
             password: "${YT_CIPHER_PASSWORD:}"
@@ -32,7 +29,9 @@ plugins:
 
     lavasrc:
         providers:
+            - 'ytmsearch:"%ISRC%"'
             - 'ytsearch:"%ISRC%"'
+            - "ytmsearch:%QUERY%"
             - "ytsearch:%QUERY%"
         sources:
             spotify: true
@@ -131,6 +130,7 @@ logging:
     level:
         root: INFO
         lavalink: INFO
+        dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
     logback:
         rollingpolicy:
             max-file-size: 500MB

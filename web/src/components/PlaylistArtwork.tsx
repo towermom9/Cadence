@@ -1,5 +1,6 @@
 import { Disc3 } from "lucide-react";
-import type { PlaylistDTO } from "@shared/types";
+import type { PlaylistDTO, TrackDTO } from "@shared/types";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   playlist: PlaylistDTO;
@@ -7,30 +8,40 @@ interface Props {
 }
 
 export function PlaylistArtwork({ playlist, className = "h-full w-full" }: Props) {
-  const covers = Array.from(
-    new Set(
-      playlist.tracks
-        .map((t) => t.artworkUrl)
-        .filter((url): url is string => Boolean(url))
-    )
-  ).slice(0, 4);
+  const seen = new Set<string>();
+  const sampleTracks: TrackDTO[] = [];
 
-  if (covers.length >= 4) {
+  for (const track of playlist.tracks) {
+    const key = track.artworkUrl || track.identifier;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    sampleTracks.push(track);
+    if (sampleTracks.length >= 4) break;
+  }
+
+  if (sampleTracks.length >= 4) {
     return (
       <div className={`grid grid-cols-2 grid-rows-2 overflow-hidden bg-zinc-900 ${className}`}>
-        {covers.map((src, idx) => (
-          <img key={idx} src={src} alt="" className="h-full w-full object-cover" />
+        {sampleTracks.map((track, idx) => (
+          <TrackArtwork
+            key={`${track.identifier}-${idx}`}
+            track={track}
+            alt=""
+            className="h-full w-full"
+            iconClassName="h-5 w-5"
+          />
         ))}
       </div>
     );
   }
 
-  if (covers.length > 0) {
+  if (sampleTracks.length > 0) {
     return (
-      <img
-        src={covers[0]}
+      <TrackArtwork
+        track={sampleTracks[0]}
         alt={playlist.name}
-        className={`object-cover bg-zinc-900 ${className}`}
+        className={className}
+        iconClassName="h-1/3 w-1/3"
       />
     );
   }

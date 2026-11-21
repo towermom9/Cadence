@@ -14,6 +14,7 @@ import type {
   PlayerStateDTO,
   RepeatModeType,
   SearchSource,
+  ToastLevel,
   TrackDTO,
 } from "@shared/types";
 import { config } from "./config";
@@ -59,17 +60,54 @@ function extractRequester(raw: unknown): RequesterInfo | undefined {
   return undefined;
 }
 
+const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+
+export function normalizeArtworkUrl(
+  rawUrl: string | null | undefined,
+  sourceName: string,
+  identifier: string,
+  uri?: string | null
+): string | null {
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      if (
+        parsed.hostname === "yt3.googleusercontent.com" ||
+        parsed.hostname === "lh3.googleusercontent.com"
+      ) {
+        return rawUrl.replace(/=w\d+-h\d+[^/?#]*$/i, "=w544-h544-l90-rj");
+      }
+      return rawUrl;
+    } catch {
+      return rawUrl;
+    }
+  }
+
+  const looksLikeYouTube =
+    sourceName === "youtube" ||
+    Boolean(uri && (uri.includes("youtube.com") || uri.includes("youtu.be")));
+  if (looksLikeYouTube && YOUTUBE_ID_REGEX.test(identifier)) {
+    return `https://i.ytimg.com/vi/${identifier}/hqdefault.jpg`;
+  }
+
+  return null;
+}
+
 export function trackToDTO(track: Track | UnresolvedTrack): TrackDTO {
   const info = track.info;
+  const identifier = info.identifier || `${info.title ?? "unknown"}:${info.author ?? "unknown"}`;
+  const sourceName = info.sourceName || "unknown";
+  const rawArtwork = info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null;
+
   return {
     encoded: track.encoded || "",
-    identifier: info.identifier || `${info.title ?? "unknown"}:${info.author ?? "unknown"}`,
+    identifier,
     title: info.title || "Unknown Title",
     author: info.author || "Unknown Artist",
     duration: typeof info.duration === "number" ? info.duration : 0,
     uri: info.uri ?? null,
-    artworkUrl: info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null,
-    sourceName: info.sourceName || "unknown",
+    artworkUrl: normalizeArtworkUrl(rawArtwork, sourceName, identifier, info.uri),
+    sourceName,
     isStream: Boolean(info.isStream),
     requester: extractRequester(track.requester) ?? extractRequester(track.userData?.requester),
   };
@@ -82,13 +120,16 @@ export class MusicService {
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
+  private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
 
   constructor(
     private client: Client,
     private db: CadenceDatabase,
-    onStateChange?: (guildId: string) => void
+    onStateChange?: (guildId: string) => void,
+    onGuildToast?: (guildId: string, level: ToastLevel, message: string) => void
   ) {
     this.onStateChange = onStateChange ?? (() => {});
+    this.onGuildToast = onGuildToast ?? (() => {});
 
     this.manager = new LavalinkManager({
       nodes: [
@@ -134,6 +175,10 @@ export class MusicService {
 
   setStateChangeHandler(handler: (guildId: string) => void): void {
     this.onStateChange = handler;
+  }
+
+  setToastHandler(handler: (guildId: string, level: ToastLevel, message: string) => void): void {
+    this.onGuildToast = handler;
   }
 
   private registerEvents(): void {
@@ -188,6 +233,31 @@ export class MusicService {
     });
 
     this.manager.on("trackEnd", (player) => {
+      this.onStateChange(player.guildId);
+    });
+
+    this.manager.on("trackError", (player, track, payload) => {
+      const title = track?.info?.title || "Unknown Track";
+      const rawMessage = payload.exception?.message || payload.error || "Unknown playback error";
+      const rawCause = payload.exception?.cause || "";
+      console.error(`[Music] Track error in guild ${player.guildId} (${title}):`, payload.exception ?? rawMessage);
+
+      const userMessage = /AllClientsFailed|requires login|not a bot|Sign in/i.test(
+        `${rawMessage} ${rawCause}`
+      )
+        ? `Playback failed for "${title}": YouTube blocked anonymous playback on this IP. Try enabling YT_OAUTH_ENABLED=true in .env or using another source.`
+        : `Playback failed for "${title}": ${rawMessage}`;
+
+      this.onGuildToast(player.guildId, "error", userMessage);
+      this.onStateChange(player.guildId);
+    });
+
+    this.manager.on("trackStuck", (player, track, payload) => {
+      const title = track?.info?.title || "Unknown Track";
+      console.warn(
+        `[Music] Track stuck in guild ${player.guildId} (${title}) after ${payload.thresholdMs}ms`
+      );
+      this.onGuildToast(player.guildId, "error", `Track "${title}" got stuck and was skipped.`);
       this.onStateChange(player.guildId);
     });
 
@@ -416,6 +486,79 @@ export class MusicService {
       added: tracks.length,
       playingNow: player.queue.current ? trackToDTO(player.queue.current) : filtered[0] ?? null,
     };
+  }
+
+  async startMix(
+    guildId: string,
+    voiceChannelId: string,
+    seedTrack: TrackDTO,
+    requester: RequesterInfo,
+    textChannelId?: string
+  ): Promise<{ added: number }> {
+    await this.enqueue(guildId, voiceChannelId, [seedTrack], "now", requester, textChannelId);
+    this.autoplayOverrides.set(guildId, true);
+
+    const player = this.getPlayer(guildId);
+    if (!player) {
+      return { added: 0 };
+    }
+
+    const node = this.getConnectedNode();
+    const candidatePool: (Track | UnresolvedTrack)[] = [];
+
+    const looksLikeYouTube =
+      YOUTUBE_ID_REGEX.test(seedTrack.identifier) &&
+      (seedTrack.sourceName === "youtube" ||
+        Boolean(seedTrack.uri?.includes("youtube")) ||
+        Boolean(seedTrack.uri?.includes("youtu.be")));
+
+    if (looksLikeYouTube) {
+      try {
+        const mixUrl = `https://www.youtube.com/watch?v=${seedTrack.identifier}&list=RD${seedTrack.identifier}`;
+        const mixResult = await node.search({ query: mixUrl }, requester);
+        if (mixResult.loadType !== "error") {
+          candidatePool.push(...mixResult.tracks);
+        }
+      } catch (error) {
+        console.warn(`[Mix] YouTube RD mix lookup failed for ${seedTrack.identifier}:`, error);
+      }
+    }
+
+    const nonSeedFromMix = candidatePool.filter(
+      (t) => !t.info.isStream && t.info.identifier !== seedTrack.identifier
+    );
+    if (nonSeedFromMix.length < 2) {
+      try {
+        const fallbackQuery = `${seedTrack.author} ${seedTrack.title}`.trim();
+        const searchResult = await node.search(
+          { query: fallbackQuery, source: "ytmsearch" },
+          requester
+        );
+        if (searchResult.loadType !== "error") {
+          candidatePool.push(...searchResult.tracks);
+        }
+      } catch (error) {
+        console.warn(`[Mix] Fallback ytmsearch failed for ${seedTrack.title}:`, error);
+      }
+    }
+
+    const seenIds = new Set<string>([seedTrack.identifier]);
+    const related: (Track | UnresolvedTrack)[] = [];
+    for (const candidate of candidatePool) {
+      if (candidate.info.isStream) continue;
+      const cid = candidate.info.identifier;
+      if (cid && seenIds.has(cid)) continue;
+      if (cid) seenIds.add(cid);
+      related.push(candidate);
+      if (related.length >= 10) break;
+    }
+
+    if (related.length > 0) {
+      await player.queue.add(related);
+    }
+
+    this.onStateChange(guildId);
+    return { added: related.length };
   }
 
   async playTrack(guildId: string, index: number): Promise<void> {

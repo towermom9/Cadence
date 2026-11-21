@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { Disc3, Play, Plus } from "lucide-react";
+import { useState, type FormEvent, type MouseEvent } from "react";
+import { Disc3, MoreVertical, Play, Plus } from "lucide-react";
 import type {
   EnqueueMode,
   GuildSettingsDTO,
@@ -8,8 +8,10 @@ import type {
   TrackDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
 import { SettingsView } from "./SettingsView";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   playlists: PlaylistDTO[];
@@ -22,9 +24,11 @@ interface Props {
   onCreatePlaylist: (name: string) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
-  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode) => void;
+  onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onLoadSettings: (guildId: string) => void;
   onSaveSettings: (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>) => void;
+  onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
+  onPlaylistContextMenu: (e: MouseEvent, playlist: PlaylistDTO) => void;
 }
 
 export function LibraryView({
@@ -41,6 +45,8 @@ export function LibraryView({
   onEnqueue,
   onLoadSettings,
   onSaveSettings,
+  onTrackContextMenu,
+  onPlaylistContextMenu,
 }: Props) {
   const [tab, setTab] = useState<"playlists" | "history" | "settings">(initialTab);
   const [newName, setNewName] = useState("");
@@ -130,6 +136,7 @@ export function LibraryView({
                 <div
                   key={pl.id}
                   onClick={() => onSelectPlaylist(pl.id)}
+                  onContextMenu={(e) => onPlaylistContextMenu(e, pl)}
                   className="group cursor-pointer space-y-2.5"
                 >
                   <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818] ring-1 ring-white/10">
@@ -175,19 +182,15 @@ export function LibraryView({
               {history.map((entry) => (
                 <div
                   key={entry.id}
-                  className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
+                  onClick={() => onEnqueue([entry.track], "now", "History")}
+                  onContextMenu={(e) => onTrackContextMenu(e, entry.track)}
+                  className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
                 >
-                  {entry.track.artworkUrl ? (
-                    <img
-                      src={entry.track.artworkUrl}
-                      alt={entry.track.title}
-                      className="h-10 w-10 shrink-0 rounded object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-500">
-                      <Disc3 className="h-4 w-4" />
-                    </div>
-                  )}
+                  <TrackArtwork
+                    track={entry.track}
+                    className="h-10 w-10 shrink-0 rounded"
+                    iconClassName="h-4 w-4"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{entry.track.title}</p>
                     <p className="truncate text-xs text-zinc-400">
@@ -195,22 +198,35 @@ export function LibraryView({
                       {formatMs(entry.track.duration)}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onEnqueue([entry.track], "now")}
-                    title="Play now"
-                    className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-0.5"
                   >
-                    <Play className="h-4 w-4 fill-current" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onEnqueue([entry.track], "end")}
-                    title="Add to queue"
-                    className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onEnqueue([entry.track], "now", "History")}
+                      title="Play now"
+                      className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <Play className="h-4 w-4 fill-current" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onEnqueue([entry.track], "end", "History")}
+                      title="Add to queue"
+                      className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => onTrackContextMenu(e, entry.track)}
+                      title="More options"
+                      className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
