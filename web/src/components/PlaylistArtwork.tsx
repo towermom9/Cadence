@@ -1,4 +1,4 @@
-import { Disc3 } from "lucide-react";
+import { Disc3, ThumbsUp } from "lucide-react";
 import type { PlaylistDTO, TrackDTO } from "@shared/types";
 import { TrackArtwork } from "./TrackArtwork";
 
@@ -8,6 +8,16 @@ interface Props {
 }
 
 export function PlaylistArtwork({ playlist, className = "h-full w-full" }: Props) {
+  if (playlist.isLiked) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-gradient-to-br from-[#6e56cf] via-[#b84fce] to-[#f45c9b] text-white ${className}`}
+      >
+        <ThumbsUp className="h-2/5 w-2/5 fill-current drop-shadow" />
+      </div>
+    );
+  }
+
   const seen = new Set<string>();
   const sampleTracks: TrackDTO[] = [];
 

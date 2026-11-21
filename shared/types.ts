@@ -11,6 +11,14 @@ export type AutoplayMood =
   | "chill"
   | "upbeat";
 
+export type PlaylistSortMode =
+  | "recent_activity"
+  | "recently_saved"
+  | "recently_played"
+  | "recent_sync"
+  | "manual"
+  | "alphabetical";
+
 export type FilterPreset =
   | "none"
   | "bassboost"
@@ -96,6 +104,9 @@ export interface PlaylistDTO {
   tracks: TrackDTO[];
   sourceUrl?: string | null;
   lastSyncedAt?: number | null;
+  lastPlayedAt?: number | null;
+  isLiked?: boolean;
+  sortOrder?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -226,7 +237,16 @@ export type WsClientMessage =
   | { type: "addTrackToPlaylist"; playlistId: string; track: TrackDTO }
   | { type: "addTracksToPlaylist"; playlistId: string; tracks: TrackDTO[] }
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
-  | { type: "playPlaylist"; guildId: string; playlistId: string; shuffle?: boolean }
+  | { type: "toggleLike"; track: TrackDTO }
+  | {
+      type: "playPlaylist";
+      guildId: string;
+      playlistId: string;
+      shuffle?: boolean;
+      startIndex?: number;
+    }
+  | { type: "setPlaylistSort"; sort: PlaylistSortMode }
+  | { type: "reorderPlaylists"; playlistIds: string[] }
   | { type: "getHistory" }
   | { type: "clearHistory" }
   | { type: "ping" };
@@ -245,7 +265,7 @@ export type WsServerMessage =
     }
   | { type: "lyrics"; guildId: string; lyrics: LyricsDTO | null; title?: string; artist?: string }
   | { type: "settings"; settings: GuildSettingsDTO }
-  | { type: "playlists"; playlists: PlaylistDTO[] }
+  | { type: "playlists"; playlists: PlaylistDTO[]; playlistSort?: PlaylistSortMode }
   | { type: "history"; entries: HistoryEntryDTO[] }
   | { type: "toast"; level: ToastLevel; message: string }
   | { type: "pong" };

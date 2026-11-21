@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Pin, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type {
   EnqueueMode,
   HistoryEntryDTO,
@@ -262,8 +262,20 @@ export function HomeView({
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-white">{pl.name}</p>
-                  <p className="truncate text-xs text-zinc-400">
-                    {pl.tracks.length} {pl.tracks.length === 1 ? "track" : "tracks"}
+                  <p className="flex items-center gap-1 truncate text-xs text-zinc-400">
+                    {pl.isLiked ? (
+                      <>
+                        <Pin className="h-3 w-3 shrink-0 fill-current text-zinc-400" />
+                        <span>
+                          Auto playlist • {pl.tracks.length}{" "}
+                          {pl.tracks.length === 1 ? "track" : "tracks"}
+                        </span>
+                      </>
+                    ) : (
+                      <span>
+                        {pl.tracks.length} {pl.tracks.length === 1 ? "track" : "tracks"}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>

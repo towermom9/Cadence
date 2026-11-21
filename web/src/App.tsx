@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
 import type {
   AppMetaDTO,
@@ -26,6 +26,7 @@ import { Sidebar, type MainView } from "./components/Sidebar";
 import { ToastStack } from "./components/ToastStack";
 import { TopBar } from "./components/TopBar";
 import { useCadenceSocket } from "./hooks/useCadenceSocket";
+import { sortPlaylists } from "./utils/playlists";
 
 interface MeResponse {
   authenticated: boolean;
@@ -134,9 +135,9 @@ export function App() {
   );
 
   const handlePlayPlaylist = useCallback(
-    (playlistId: string, shuffle = false) => {
+    (playlistId: string, shuffle = false, startIndex?: number) => {
       const playlist = socket.playlists.find((p) => p.id === playlistId);
-      socket.playPlaylist(playlistId, shuffle);
+      socket.playPlaylist(playlistId, shuffle, startIndex);
       setLyricsSubjectTrack(null);
       setPlaySourceLabel(playlist?.name || "Playlist");
       setNowPlayingTab("upnext");
@@ -207,6 +208,16 @@ export function App() {
     window.location.href = "/";
   };
 
+  const sortedPlaylists = useMemo(
+    () => sortPlaylists(socket.playlists, socket.playlistSort),
+    [socket.playlists, socket.playlistSort]
+  );
+
+  const likedTrackIds = useMemo(() => {
+    const liked = socket.playlists.find((p) => p.isLiked);
+    return new Set((liked?.tracks ?? []).map((t) => t.identifier));
+  }, [socket.playlists]);
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030303] text-zinc-400">
@@ -232,7 +243,7 @@ export function App() {
 
       <SaveToPlaylistModal
         tracks={saveModalTracks}
-        playlists={socket.playlists}
+        playlists={sortedPlaylists}
         onClose={() => setSaveModalTracks(null)}
         onSaveToPlaylist={socket.addTracksToPlaylist}
         onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
@@ -241,9 +252,11 @@ export function App() {
       <ContextMenu
         menu={contextMenu}
         privileged={Boolean(socket.playerState?.isPrivileged)}
+        likedTrackIds={likedTrackIds}
         onClose={() => setContextMenu(null)}
         onStartMix={handleStartMix}
         onEnqueue={handleEnqueue}
+        onToggleLike={socket.toggleLike}
         onOpenSaveModal={handleOpenSaveModal}
         onOpenArtist={handleOpenArtist}
         onViewLyrics={handleViewLyrics}
@@ -266,13 +279,16 @@ export function App() {
           activeView={activeView}
           nowPlayingOpen={nowPlayingOpen}
           selectedPlaylistId={selectedPlaylistId}
-          playlists={socket.playlists}
+          playlists={sortedPlaylists}
+          playlistSort={socket.playlistSort}
           onSelectView={navigateTo}
           onSelectPlaylist={(id) => {
             setSelectedPlaylistId(id);
             navigateTo("playlist");
           }}
           onCreatePlaylist={socket.createPlaylist}
+          onImportPlaylist={socket.importPlaylist}
+          onReorderPlaylists={socket.reorderPlaylists}
           onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
           onPlaylistContextMenu={handlePlaylistContextMenu}
           mobileOpen={mobileMenuOpen}
@@ -315,6 +331,8 @@ export function App() {
                   setLyricsSubjectTrack(null);
                   setNowPlayingTab(tab);
                 }}
+                onTogglePause={socket.togglePause}
+                onSeek={socket.seek}
                 onPlayTrack={socket.playTrack}
                 onPlayPrevious={socket.playPrevious}
                 onEnqueue={handleEnqueue}
@@ -336,7 +354,7 @@ export function App() {
                   <HomeView
                     user={user}
                     history={socket.history}
-                    playlists={socket.playlists}
+                    playlists={sortedPlaylists}
                     onMoodSearch={(q, src) => handleSearch(q, src ?? "ytmsearch")}
                     onEnqueue={handleEnqueue}
                     onSelectPlaylist={(id) => {
@@ -357,14 +375,13 @@ export function App() {
 
                 {activeView === "library" && (
                   <LibraryView
-                    playlists={socket.playlists}
+                    playlists={sortedPlaylists}
+                    playlistSort={socket.playlistSort}
                     history={socket.history}
-                    guildId={socket.selectedGuildId}
-                    guildName={currentGuild?.name || "Server"}
-                    canManage={Boolean(currentGuild?.canManage)}
-                    settings={socket.settings}
                     onCreatePlaylist={socket.createPlaylist}
                     onImportPlaylist={socket.importPlaylist}
+                    onSetPlaylistSort={socket.setPlaylistSort}
+                    onReorderPlaylists={socket.reorderPlaylists}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
                       navigateTo("playlist");
@@ -373,8 +390,6 @@ export function App() {
                     onEnqueue={handleEnqueue}
                     onClearHistory={socket.clearHistory}
                     onOpenArtist={handleOpenArtist}
-                    onLoadSettings={socket.requestSettings}
-                    onSaveSettings={socket.updateSettings}
                     onTrackContextMenu={handleTrackContextMenu}
                     onPlaylistContextMenu={handlePlaylistContextMenu}
                   />
@@ -389,7 +404,6 @@ export function App() {
                     onSyncPlaylist={socket.syncPlaylist}
                     onDeletePlaylist={socket.deletePlaylist}
                     onRemoveTrack={socket.removeTrackFromPlaylist}
-                    onEnqueueTrack={handleEnqueue}
                     onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}
                   />
@@ -437,8 +451,12 @@ export function App() {
 
       <PlayerBar
         playerState={socket.playerState}
+        playbackAnchor={socket.playbackAnchor}
         displayPosition={socket.displayPosition}
         drawerOpen={nowPlayingOpen}
+        isCurrentLiked={Boolean(
+          socket.playerState?.current && likedTrackIds.has(socket.playerState.current.identifier)
+        )}
         onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
         onTogglePause={socket.togglePause}
         onSkip={socket.skip}
@@ -450,6 +468,7 @@ export function App() {
         onToggleAutoplay={socket.toggleAutoplay}
         onSetFilter={socket.setFilter}
         onStop={socket.stop}
+        onToggleLike={socket.toggleLike}
         onOpenSaveModal={handleOpenSaveModal}
         onOpenArtist={handleOpenArtist}
         onTrackContextMenu={handleTrackContextMenu}

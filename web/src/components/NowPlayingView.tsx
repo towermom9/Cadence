@@ -5,6 +5,8 @@ import {
   ListPlus,
   Loader2,
   MoreVertical,
+  Pause,
+  Play,
   Plus,
   Radio,
   RefreshCw,
@@ -48,6 +50,8 @@ interface Props {
   activeTab: NowPlayingTab;
   playSourceLabel: string;
   onTabChange: (tab: NowPlayingTab) => void;
+  onTogglePause: () => void;
+  onSeek: (ms: number) => void;
   onPlayTrack: (index: number) => void;
   onPlayPrevious: (index: number) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
@@ -93,6 +97,8 @@ export function NowPlayingView({
   activeTab,
   playSourceLabel,
   onTabChange,
+  onTogglePause,
+  onSeek,
   onPlayTrack,
   onPlayPrevious,
   onEnqueue,
@@ -139,6 +145,12 @@ export function NowPlayingView({
   }, [queue]);
 
   const activeLyricsTrack = lyricsSubjectTrack ?? current;
+  const canSeekLyrics = Boolean(
+    current &&
+      !current.isStream &&
+      activeLyricsTrack &&
+      activeLyricsTrack.identifier === current.identifier
+  );
   const parsedSynced = useMemo(
     () => parseSyncedLyrics(lyricsState.lyrics?.syncedLyrics),
     [lyricsState.lyrics?.syncedLyrics]
@@ -216,21 +228,62 @@ export function NowPlayingView({
 
   return (
     <div className="mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
-      {/* Left Clean Artwork Column */}
+      {/* Left Clean Artwork Column (click to Play / Pause) */}
       <div className="flex min-h-0 flex-col items-center justify-center lg:col-span-7">
         <div className="flex w-full max-w-[460px] flex-col items-center">
           <div
+            role={current ? "button" : undefined}
+            tabIndex={current ? 0 : undefined}
+            aria-label={
+              current
+                ? playerState?.paused
+                  ? `Resume ${current.title}`
+                  : `Pause ${current.title}`
+                : undefined
+            }
+            title={
+              current ? (playerState?.paused ? "Click to play" : "Click to pause") : undefined
+            }
+            onClick={() => {
+              if (current) onTogglePause();
+            }}
+            onKeyDown={(e) => {
+              if (!current) return;
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onTogglePause();
+              }
+            }}
             onContextMenu={(e) => {
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            className="aspect-square w-full overflow-hidden rounded-xl bg-[#181818] shadow-2xl ring-1 ring-white/10"
+            className={`group relative aspect-square w-full overflow-hidden rounded-xl bg-[#181818] shadow-2xl ring-1 ring-white/10 ${
+              current ? "cursor-pointer" : ""
+            }`}
           >
             <TrackArtwork
               track={current}
-              className="h-full w-full"
+              className="h-full w-full transition duration-200 group-hover:brightness-90"
               iconClassName="h-20 w-20"
             />
+            {current && (
+              <div
+                className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${
+                  playerState?.paused
+                    ? "bg-black/35 opacity-100"
+                    : "bg-black/25 opacity-0 group-hover:opacity-100"
+                }`}
+              >
+                <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/65 text-white shadow-xl backdrop-blur-xs">
+                  {playerState?.paused ? (
+                    <Play className="ml-1 h-8 w-8 fill-current" />
+                  ) : (
+                    <Pause className="h-8 w-8 fill-current" />
+                  )}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 w-full text-center lg:hidden">
@@ -389,16 +442,28 @@ export function NowPlayingView({
                   onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
                   className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
                 >
-                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
+                  <button
+                    type="button"
+                    onClick={onTogglePause}
+                    title={playerState?.paused ? "Play" : "Pause"}
+                    className="group/thumb relative h-10 w-10 shrink-0 overflow-hidden rounded"
+                  >
                     <TrackArtwork
                       track={current}
                       className="h-10 w-10"
                       iconClassName="h-4 w-4"
                     />
                     <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                      <Volume2 className="h-4 w-4 text-white" />
+                      {playerState?.paused ? (
+                        <Play className="ml-0.5 h-4 w-4 fill-current text-white" />
+                      ) : (
+                        <>
+                          <Volume2 className="h-4 w-4 text-white group-hover/thumb:hidden" />
+                          <Pause className="hidden h-4 w-4 fill-current text-white group-hover/thumb:block" />
+                        </>
+                      )}
                     </div>
-                  </div>
+                  </button>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{current.title}</p>
                     <p className="truncate text-xs text-zinc-300">
@@ -663,9 +728,10 @@ export function NowPlayingView({
               </div>
             ) : parsedSynced.length > 0 ? (
               <div className="space-y-4 pb-6">
-                <div className="flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center justify-between gap-2 text-xs text-zinc-400">
                   <span className="truncate">
                     {activeLyricsTrack.title} • {lyricsState.lyrics?.source}
+                    {canSeekLyrics ? " • Click any line to jump" : ""}
                   </span>
                   <button
                     type="button"
@@ -682,19 +748,47 @@ export function NowPlayingView({
                     Refresh
                   </button>
                 </div>
-                <div className="space-y-2.5">
-                  {parsedSynced.map((line, i) => (
-                    <p
-                      key={`${line.timeMs}-${i}`}
-                      className={`text-base leading-relaxed transition ${
-                        i === activeSyncedIndex
-                          ? "font-semibold text-white"
-                          : "text-zinc-500"
-                      }`}
-                    >
-                      {line.text}
-                    </p>
-                  ))}
+                <div className="space-y-1">
+                  {parsedSynced.map((line, i) => {
+                    const activeLine = i === activeSyncedIndex;
+                    if (!canSeekLyrics) {
+                      return (
+                        <div
+                          key={`${line.timeMs}-${i}`}
+                          className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-base leading-relaxed text-zinc-400"
+                        >
+                          <span>{line.text}</span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-zinc-600">
+                            {formatMs(line.timeMs)}
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <button
+                        key={`${line.timeMs}-${i}`}
+                        type="button"
+                        onClick={() => onSeek(line.timeMs)}
+                        title={`Jump to ${formatMs(line.timeMs)}`}
+                        className={`group/line flex w-full items-baseline justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-base leading-relaxed transition ${
+                          activeLine
+                            ? "bg-white/[0.08] font-semibold text-white"
+                            : "text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
+                        }`}
+                      >
+                        <span>{line.text}</span>
+                        <span
+                          className={`shrink-0 text-[11px] tabular-nums transition-opacity ${
+                            activeLine
+                              ? "text-zinc-300 opacity-100"
+                              : "text-zinc-400 opacity-0 group-hover/line:opacity-100"
+                          }`}
+                        >
+                          {formatMs(line.timeMs)}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             ) : lyricsState.lyrics?.plainLyrics ? (

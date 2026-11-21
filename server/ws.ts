@@ -123,6 +123,14 @@ export class CadenceWsHub {
     this.send(rawWs, { type: "toast", level, message });
   }
 
+  private sendPlaylists(rawWs: RawSocket, userId: string): void {
+    this.send(rawWs, {
+      type: "playlists",
+      playlists: this.db.getUserPlaylists(userId),
+      playlistSort: this.db.getUserPlaylistSort(userId),
+    });
+  }
+
   private sendInitialSnapshot(
     rawWs: RawSocket,
     session: SessionRecord,
@@ -135,10 +143,7 @@ export class CadenceWsHub {
         state: this.bot.music.serializePlayer(selectedGuildId, session.user.id),
       });
     }
-    this.send(rawWs, {
-      type: "playlists",
-      playlists: this.db.getUserPlaylists(session.user.id),
-    });
+    this.sendPlaylists(rawWs, session.user.id);
     this.send(rawWs, {
       type: "history",
       entries: this.db.getPlayHistory(session.user.id),
@@ -375,7 +380,7 @@ export class CadenceWsHub {
         case "toggleAutoplay": {
           await this.requireSameVoice(msg.guildId, user.id);
           this.requirePrivileged(msg.guildId, user.id);
-          await this.bot.music.toggleAutoplay(msg.guildId, msg.enabled);
+          await this.bot.music.toggleAutoplay(msg.guildId, msg.enabled, user.id);
           this.sendToast(ws, "info", `Autoplay ${msg.enabled ? "enabled" : "disabled"}`);
           return;
         }
@@ -383,7 +388,7 @@ export class CadenceWsHub {
         case "setAutoplayMood": {
           await this.requireSameVoice(msg.guildId, user.id);
           this.requirePrivileged(msg.guildId, user.id);
-          await this.bot.music.setAutoplayMood(msg.guildId, msg.mood);
+          await this.bot.music.setAutoplayMood(msg.guildId, msg.mood, user.id);
           return;
         }
 
@@ -462,13 +467,13 @@ export class CadenceWsHub {
         }
 
         case "getPlaylists": {
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           return;
         }
 
         case "createPlaylist": {
           const created = this.db.createPlaylist(user.id, msg.name);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "success", `Created playlist "${created.name}"`);
           return;
         }
@@ -477,14 +482,14 @@ export class CadenceWsHub {
           const created = this.db.createPlaylist(user.id, msg.name);
           if (msg.tracks.length > 0) {
             const res = this.db.addTracksToPlaylist(user.id, created.id, msg.tracks);
-            this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+            this.sendPlaylists(ws, user.id);
             this.sendToast(
               ws,
               "success",
               `Created "${created.name}" with ${res.added} track${res.added === 1 ? "" : "s"}`
             );
           } else {
-            this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+            this.sendPlaylists(ws, user.id);
             this.sendToast(ws, "success", `Created playlist "${created.name}"`);
           }
           return;
@@ -507,7 +512,7 @@ export class CadenceWsHub {
             tracks,
             Boolean(customName)
           );
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(
             ws,
             "success",
@@ -530,7 +535,7 @@ export class CadenceWsHub {
             throw new Error("No tracks found at the linked URL.");
           }
           const res = this.db.syncPlaylistTracks(user.id, playlist.id, tracks, targetUrl);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           const delta =
             res.added || res.removed ? `, +${res.added} / -${res.removed}` : ", already up to date";
           this.sendToast(ws, "success", `Synced "${res.playlist.name}" (${res.total} tracks${delta})`);
@@ -539,28 +544,28 @@ export class CadenceWsHub {
 
         case "renamePlaylist": {
           const renamed = this.db.renamePlaylist(user.id, msg.playlistId, msg.name);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "success", `Renamed playlist to "${renamed.name}"`);
           return;
         }
 
         case "deletePlaylist": {
           this.db.deletePlaylist(user.id, msg.playlistId);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "info", "Deleted playlist");
           return;
         }
 
         case "addTrackToPlaylist": {
           const updated = this.db.addTrackToPlaylist(user.id, msg.playlistId, msg.track);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "success", `Added "${msg.track.title}" to "${updated.name}"`);
           return;
         }
 
         case "addTracksToPlaylist": {
           const res = this.db.addTracksToPlaylist(user.id, msg.playlistId, msg.tracks);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(
             ws,
             "success",
@@ -571,8 +576,33 @@ export class CadenceWsHub {
 
         case "removeTrackFromPlaylist": {
           this.db.removeTrackFromPlaylist(user.id, msg.playlistId, msg.index);
-          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "info", "Removed track from playlist");
+          return;
+        }
+
+        case "toggleLike": {
+          const res = this.db.toggleLikedTrack(user.id, msg.track);
+          this.sendPlaylists(ws, user.id);
+          this.sendToast(
+            ws,
+            res.liked ? "success" : "info",
+            res.liked
+              ? `Added "${msg.track.title}" to Liked Music`
+              : `Removed "${msg.track.title}" from Liked Music`
+          );
+          return;
+        }
+
+        case "setPlaylistSort": {
+          this.db.setUserPlaylistSort(user.id, msg.sort);
+          this.sendPlaylists(ws, user.id);
+          return;
+        }
+
+        case "reorderPlaylists": {
+          this.db.reorderPlaylists(user.id, msg.playlistIds);
+          this.sendPlaylists(ws, user.id);
           return;
         }
 
@@ -592,7 +622,27 @@ export class CadenceWsHub {
               [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
             }
           }
-          const res = await this.bot.music.enqueue(msg.guildId, vcId, tracks, "replace", requester);
+
+          this.db.markPlaylistPlayed(user.id, playlist.id);
+          this.sendPlaylists(ws, user.id);
+
+          const startIndex =
+            !msg.shuffle &&
+            typeof msg.startIndex === "number" &&
+            msg.startIndex > 0 &&
+            msg.startIndex < tracks.length
+              ? msg.startIndex
+              : 0;
+
+          const res = await this.bot.music.enqueue(
+            msg.guildId,
+            vcId,
+            startIndex > 0 ? tracks.slice(startIndex) : tracks,
+            "replace",
+            requester,
+            undefined,
+            startIndex > 0 ? { previousTracks: tracks.slice(0, startIndex) } : undefined
+          );
           this.sendToast(
             ws,
             "success",

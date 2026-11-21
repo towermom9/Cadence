@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Share2,
   Shuffle,
+  ThumbsUp,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -39,9 +40,11 @@ export type ContextMenuState =
 interface Props {
   menu: ContextMenuState | null;
   privileged: boolean;
+  likedTrackIds: Set<string>;
   onClose: () => void;
   onStartMix: (track: TrackDTO) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onToggleLike: (track: TrackDTO) => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
   onViewLyrics: (track: TrackDTO) => void;
@@ -84,9 +87,11 @@ async function copyText(text: string): Promise<boolean> {
 export function ContextMenu({
   menu,
   privileged,
+  likedTrackIds,
   onClose,
   onStartMix,
   onEnqueue,
+  onToggleLike,
   onOpenSaveModal,
   onOpenArtist,
   onViewLyrics,
@@ -220,6 +225,29 @@ export function ContextMenu({
           >
             <ListPlus className="h-4 w-4 text-zinc-300" />
             <span>Add to queue</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={menu.track.isStream}
+            onClick={() => {
+              onToggleLike(menu.track);
+              onClose();
+            }}
+            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+          >
+            <ThumbsUp
+              className={`h-4 w-4 ${
+                likedTrackIds.has(menu.track.identifier)
+                  ? "fill-current text-white"
+                  : "text-zinc-300"
+              }`}
+            />
+            <span>
+              {likedTrackIds.has(menu.track.identifier)
+                ? "Remove from liked songs"
+                : "Add to liked songs"}
+            </span>
           </button>
 
           <button
@@ -381,19 +409,23 @@ export function ContextMenu({
             </button>
           )}
 
-          <div className="my-1 border-t border-white/10" />
+          {!menu.playlist.isLiked && (
+            <>
+              <div className="my-1 border-t border-white/10" />
 
-          <button
-            type="button"
-            onClick={() => {
-              onDeletePlaylist(menu.playlist.id);
-              onClose();
-            }}
-            className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
-          >
-            <Trash2 className="h-4 w-4" />
-            <span>Delete playlist</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeletePlaylist(menu.playlist.id);
+                  onClose();
+                }}
+                className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Delete playlist</span>
+              </button>
+            </>
+          )}
         </>
       )}
     </div>

@@ -5,13 +5,14 @@ import {
   Link2,
   MoreVertical,
   Pencil,
+  Pin,
   Play,
   RefreshCw,
   Shuffle,
   Trash2,
   X,
 } from "lucide-react";
-import type { EnqueueMode, PlaylistDTO, TrackDTO } from "@shared/types";
+import type { PlaylistDTO, TrackDTO } from "@shared/types";
 import { formatMs, formatRelativeTime, sourceLabel } from "../utils/format";
 import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
@@ -20,12 +21,11 @@ import { TrackArtwork } from "./TrackArtwork";
 interface Props {
   playlist: PlaylistDTO | null;
   onBack: () => void;
-  onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
+  onPlayPlaylist: (playlistId: string, shuffle?: boolean, startIndex?: number) => void;
   onRenamePlaylist: (playlistId: string, name: string) => void;
   onSyncPlaylist: (playlistId: string, url?: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onRemoveTrack: (playlistId: string, index: number) => void;
-  onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
@@ -38,7 +38,6 @@ export function PlaylistDetailView({
   onSyncPlaylist,
   onDeletePlaylist,
   onRemoveTrack,
-  onEnqueueTrack,
   onOpenArtist,
   onTrackContextMenu,
 }: Props) {
@@ -101,6 +100,12 @@ export function PlaylistDetailView({
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
               Playlist
             </span>
+            {playlist.isLiked && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-200">
+                <Pin className="h-3 w-3 fill-current" />
+                Auto playlist
+              </span>
+            )}
             {playlist.sourceUrl && (
               <a
                 href={playlist.sourceUrl}
@@ -115,7 +120,7 @@ export function PlaylistDetailView({
             )}
           </div>
 
-          {renaming ? (
+          {renaming && !playlist.isLiked ? (
             <form onSubmit={handleRenameSubmit} className="flex max-w-md items-center gap-2">
               <input
                 type="text"
@@ -143,17 +148,19 @@ export function PlaylistDetailView({
               <h2 className="truncate text-3xl font-bold tracking-tight text-white">
                 {playlist.name}
               </h2>
-              <button
-                type="button"
-                onClick={() => {
-                  setRenameValue(playlist.name);
-                  setRenaming(true);
-                }}
-                title="Rename playlist"
-                className="rounded-full p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
-              >
-                <Pencil className="h-4 w-4" />
-              </button>
+              {!playlist.isLiked && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenameValue(playlist.name);
+                    setRenaming(true);
+                  }}
+                  title="Rename playlist"
+                  className="rounded-full p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              )}
             </div>
           )}
 
@@ -182,40 +189,44 @@ export function PlaylistDetailView({
               Shuffle
             </button>
 
-            {playlist.sourceUrl ? (
-              <button
-                type="button"
-                onClick={() => onSyncPlaylist(playlist.id)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Sync
-              </button>
-            ) : (
+            {!playlist.isLiked && (
+              playlist.sourceUrl ? (
+                <button
+                  type="button"
+                  onClick={() => onSyncPlaylist(playlist.id)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Sync
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUrlInput("");
+                    setLinkingUrl((v) => !v);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/15 hover:text-white"
+                >
+                  <Link2 className="h-4 w-4" />
+                  Link URL
+                </button>
+              )
+            )}
+
+            {!playlist.isLiked && (
               <button
                 type="button"
                 onClick={() => {
-                  setUrlInput("");
-                  setLinkingUrl((v) => !v);
+                  onDeletePlaylist(playlist.id);
+                  onBack();
                 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/15 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-200"
               >
-                <Link2 className="h-4 w-4" />
-                Link URL
+                <Trash2 className="h-4 w-4" />
+                Delete
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={() => {
-                onDeletePlaylist(playlist.id);
-                onBack();
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-200"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete
-            </button>
           </div>
 
           {linkingUrl && (
@@ -260,7 +271,7 @@ export function PlaylistDetailView({
           {playlist.tracks.map((track, idx) => (
             <div
               key={`${track.identifier}-${idx}`}
-              onClick={() => onEnqueueTrack([track], "now", playlist.name)}
+              onClick={() => onPlayPlaylist(playlist.id, false, idx)}
               onContextMenu={(e) =>
                 onTrackContextMenu(e, track, {
                   playlistId: playlist.id,
@@ -302,8 +313,8 @@ export function PlaylistDetailView({
               >
                 <button
                   type="button"
-                  onClick={() => onEnqueueTrack([track], "now", playlist.name)}
-                  title="Play now"
+                  onClick={() => onPlayPlaylist(playlist.id, false, idx)}
+                  title="Play playlist from here"
                   className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
                 >
                   <Play className="h-4 w-4 fill-current" />

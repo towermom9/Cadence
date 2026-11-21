@@ -6,6 +6,7 @@ import type {
   GuildSettingsDTO,
   HistoryEntryDTO,
   PlaylistDTO,
+  PlaylistSortMode,
   SearchSource,
   TrackDTO,
   UserProfileDTO,
@@ -60,6 +61,9 @@ interface PlaylistRow {
   tracks_json: string;
   source_url: string | null;
   last_synced_at: number | null;
+  last_played_at: number | null;
+  is_liked: number;
+  sort_order: number;
   created_at: number;
   updated_at: number;
 }
@@ -149,6 +153,11 @@ export class CadenceDatabase {
         setup_completed INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS user_preferences (
+        user_id TEXT PRIMARY KEY,
+        playlist_sort TEXT NOT NULL DEFAULT 'recent_activity',
+        updated_at INTEGER NOT NULL
+      );
     `);
 
     const playlistCols = this.db
@@ -160,6 +169,15 @@ export class CadenceDatabase {
     }
     if (!playlistCols.includes("last_synced_at")) {
       this.db.exec(`ALTER TABLE playlists ADD COLUMN last_synced_at INTEGER`);
+    }
+    if (!playlistCols.includes("is_liked")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN is_liked INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!playlistCols.includes("last_played_at")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN last_played_at INTEGER`);
+    }
+    if (!playlistCols.includes("sort_order")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
     }
   }
 
@@ -250,16 +268,57 @@ export class CadenceDatabase {
       tracks: this.safeParseTracks(row.tracks_json),
       sourceUrl: row.source_url ?? null,
       lastSyncedAt: row.last_synced_at ?? null,
+      lastPlayedAt: row.last_played_at ?? null,
+      isLiked: row.is_liked === 1,
+      sortOrder: row.sort_order ?? 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
+  ensureLikedPlaylist(userId: string): PlaylistDTO {
+    const existing = this.db
+      .query<PlaylistRow, [string]>(
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
+                last_played_at, is_liked, sort_order, created_at, updated_at
+         FROM playlists WHERE user_id = ? AND is_liked = 1 LIMIT 1`
+      )
+      .get(userId);
+    if (existing) {
+      return this.rowToPlaylist(existing);
+    }
+
+    const now = Date.now();
+    const id = randomUUID();
+    const sortOrder = -1_000_000;
+    this.db
+      .query(
+        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, sort_order, created_at, updated_at)
+         VALUES (?, ?, 'Liked Music', '[]', 1, ?, ?, ?)`
+      )
+      .run(id, userId, sortOrder, now, now);
+
+    return {
+      id,
+      name: "Liked Music",
+      tracks: [],
+      sourceUrl: null,
+      lastSyncedAt: null,
+      lastPlayedAt: null,
+      isLiked: true,
+      sortOrder,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
   getUserPlaylists(userId: string): PlaylistDTO[] {
+    this.ensureLikedPlaylist(userId);
     const rows = this.db
       .query<PlaylistRow, [string]>(
-        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
-         FROM playlists WHERE user_id = ? ORDER BY updated_at DESC`
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
+                last_played_at, is_liked, sort_order, created_at, updated_at
+         FROM playlists WHERE user_id = ? ORDER BY is_liked DESC, updated_at DESC`
       )
       .all(userId);
 
@@ -269,7 +328,8 @@ export class CadenceDatabase {
   getPlaylist(userId: string, playlistId: string): PlaylistDTO | null {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
-        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
+                last_played_at, is_liked, sort_order, created_at, updated_at
          FROM playlists WHERE id = ? AND user_id = ?`
       )
       .get(playlistId, userId);
@@ -280,7 +340,8 @@ export class CadenceDatabase {
   findPlaylistByName(userId: string, name: string): PlaylistDTO | null {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
-        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at,
+                last_played_at, is_liked, sort_order, created_at, updated_at
          FROM playlists WHERE user_id = ? AND lower(name) = lower(?) LIMIT 1`
       )
       .get(userId, name.trim());
@@ -295,21 +356,26 @@ export class CadenceDatabase {
     }
 
     const existing = this.getUserPlaylists(userId);
-    if (existing.length >= 25) {
+    if (existing.filter((p) => !p.isLiked).length >= 25) {
       throw new Error("Maximum of 25 playlists reached.");
     }
     if (existing.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
       throw new Error(`Playlist "${name}" already exists.`);
     }
 
+    const minOrder = existing
+      .filter((p) => !p.isLiked)
+      .reduce((min, p) => Math.min(min, p.sortOrder ?? 0), 0);
+    const sortOrder = minOrder - 1;
+
     const now = Date.now();
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO playlists (id, user_id, name, tracks_json, created_at, updated_at)
-         VALUES (?, ?, ?, '[]', ?, ?)`
+        `INSERT INTO playlists (id, user_id, name, tracks_json, is_liked, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, '[]', 0, ?, ?, ?)`
       )
-      .run(id, userId, name, now, now);
+      .run(id, userId, name, sortOrder, now, now);
 
     return {
       id,
@@ -317,6 +383,9 @@ export class CadenceDatabase {
       tracks: [],
       sourceUrl: null,
       lastSyncedAt: null,
+      lastPlayedAt: null,
+      isLiked: false,
+      sortOrder,
       createdAt: now,
       updatedAt: now,
     };
@@ -330,7 +399,7 @@ export class CadenceDatabase {
     customName = false
   ): PlaylistDTO {
     const existing = this.getUserPlaylists(userId);
-    if (existing.length >= 25) {
+    if (existing.filter((p) => !p.isLiked).length >= 25) {
       throw new Error("Maximum of 25 playlists reached.");
     }
 
@@ -350,15 +419,20 @@ export class CadenceDatabase {
       baseName = candidate;
     }
 
+    const minOrder = existing
+      .filter((p) => !p.isLiked)
+      .reduce((min, p) => Math.min(min, p.sortOrder ?? 0), 0);
+    const sortOrder = minOrder - 1;
+
     const saveable = tracks.filter((t) => !t.isStream).slice(0, 500);
     const now = Date.now();
     const id = randomUUID();
     this.db
       .query(
-        `INSERT INTO playlists (id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO playlists (id, user_id, name, tracks_json, source_url, last_synced_at, is_liked, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
       )
-      .run(id, userId, baseName, JSON.stringify(saveable), sourceUrl, now, now, now);
+      .run(id, userId, baseName, JSON.stringify(saveable), sourceUrl, now, sortOrder, now, now);
 
     return {
       id,
@@ -366,6 +440,9 @@ export class CadenceDatabase {
       tracks: saveable,
       sourceUrl,
       lastSyncedAt: now,
+      lastPlayedAt: null,
+      isLiked: false,
+      sortOrder,
       createdAt: now,
       updatedAt: now,
     };
@@ -433,6 +510,9 @@ export class CadenceDatabase {
     if (!target) {
       throw new Error("Playlist not found.");
     }
+    if (target.isLiked) {
+      throw new Error("Liked Music is an auto-playlist and cannot be renamed.");
+    }
     if (existing.some((p) => p.id !== playlistId && p.name.toLowerCase() === name.toLowerCase())) {
       throw new Error(`Playlist "${name}" already exists.`);
     }
@@ -446,10 +526,118 @@ export class CadenceDatabase {
   }
 
   deletePlaylist(userId: string, playlistId: string): boolean {
+    const target = this.getPlaylist(userId, playlistId);
+    if (target?.isLiked) {
+      throw new Error("Liked Music is an auto-playlist and cannot be deleted.");
+    }
     const result = this.db
       .query(`DELETE FROM playlists WHERE id = ? AND user_id = ?`)
       .run(playlistId, userId);
     return result.changes > 0;
+  }
+
+  toggleLikedTrack(
+    userId: string,
+    track: TrackDTO
+  ): { playlist: PlaylistDTO; liked: boolean } {
+    if (track.isStream) {
+      throw new Error("Live streams cannot be saved to Liked Music.");
+    }
+    const playlist = this.ensureLikedPlaylist(userId);
+    const alreadyLiked = playlist.tracks.some((t) => t.identifier === track.identifier);
+    const nextTracks = alreadyLiked
+      ? playlist.tracks.filter((t) => t.identifier !== track.identifier)
+      : [track, ...playlist.tracks].slice(0, 500);
+    const now = Date.now();
+    this.db
+      .query(`UPDATE playlists SET tracks_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
+      .run(JSON.stringify(nextTracks), now, playlist.id, userId);
+
+    return {
+      playlist: { ...playlist, tracks: nextTracks, updatedAt: now },
+      liked: !alreadyLiked,
+    };
+  }
+
+  markPlaylistPlayed(userId: string, playlistId: string): void {
+    this.db
+      .query(`UPDATE playlists SET last_played_at = ? WHERE id = ? AND user_id = ?`)
+      .run(Date.now(), playlistId, userId);
+  }
+
+  getUserPlaylistSort(userId: string): PlaylistSortMode {
+    const row = this.db
+      .query<{ playlist_sort: string }, [string]>(
+        `SELECT playlist_sort FROM user_preferences WHERE user_id = ?`
+      )
+      .get(userId);
+    const valid = new Set<PlaylistSortMode>([
+      "recent_activity",
+      "recently_saved",
+      "recently_played",
+      "recent_sync",
+      "manual",
+      "alphabetical",
+    ]);
+    if (row && valid.has(row.playlist_sort as PlaylistSortMode)) {
+      return row.playlist_sort as PlaylistSortMode;
+    }
+    return "recent_activity";
+  }
+
+  setUserPlaylistSort(userId: string, sort: PlaylistSortMode): PlaylistSortMode {
+    const valid = new Set<PlaylistSortMode>([
+      "recent_activity",
+      "recently_saved",
+      "recently_played",
+      "recent_sync",
+      "manual",
+      "alphabetical",
+    ]);
+    const safeSort: PlaylistSortMode = valid.has(sort) ? sort : "recent_activity";
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO user_preferences (user_id, playlist_sort, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET
+           playlist_sort = excluded.playlist_sort,
+           updated_at = excluded.updated_at`
+      )
+      .run(userId, safeSort, now);
+    return safeSort;
+  }
+
+  reorderPlaylists(userId: string, orderedIds: string[]): PlaylistDTO[] {
+    const custom = this.getUserPlaylists(userId).filter((p) => !p.isLiked);
+    const byId = new Map(custom.map((p) => [p.id, p]));
+    const nextOrder: string[] = [];
+    const seen = new Set<string>();
+
+    for (const id of orderedIds) {
+      if (!seen.has(id) && byId.has(id)) {
+        seen.add(id);
+        nextOrder.push(id);
+      }
+    }
+    for (const p of custom) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        nextOrder.push(p.id);
+      }
+    }
+
+    const updateStmt = this.db.query(
+      `UPDATE playlists SET sort_order = ? WHERE id = ? AND user_id = ?`
+    );
+    const tx = this.db.transaction((ids: string[]) => {
+      ids.forEach((id, idx) => {
+        updateStmt.run(idx, id, userId);
+      });
+    });
+    tx(nextOrder);
+    this.setUserPlaylistSort(userId, "manual");
+    return this.getUserPlaylists(userId);
   }
 
   addTrackToPlaylist(userId: string, playlistId: string, track: TrackDTO): PlaylistDTO {

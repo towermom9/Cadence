@@ -399,6 +399,21 @@ export function TopBar({
           </span>
         </button>
 
+        {currentGuild?.canManage && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpenMenu(null);
+              onOpenSettings();
+            }}
+            title={`Server settings for ${currentGuild.name}`}
+            aria-label="Server settings"
+            className="rounded-full border border-white/12 bg-white/[0.04] p-2 text-zinc-300 transition hover:border-white/30 hover:bg-white/10 hover:text-white"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setOpenMenu((m) => (m === "user" ? null : "user"))}

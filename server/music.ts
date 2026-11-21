@@ -129,7 +129,9 @@ export class MusicService {
   private activeFilters = new Map<string, FilterPreset>();
   private autoplayOverrides = new Map<string, boolean>();
   private autoplayMoods = new Map<string, AutoplayMood>();
-  private autoplayPopulating = new Set<string>();
+  private autoplayGeneration = new Map<string, number>();
+  private autoplayInFlight = new Set<string>();
+  private recentSeeks = new Map<string, { target: number; at: number }>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
@@ -220,13 +222,16 @@ export class MusicService {
       this.activeFilters.delete(player.guildId);
       this.autoplayOverrides.delete(player.guildId);
       this.autoplayMoods.delete(player.guildId);
-      this.autoplayPopulating.delete(player.guildId);
+      this.autoplayGeneration.delete(player.guildId);
+      this.autoplayInFlight.delete(player.guildId);
+      this.recentSeeks.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
     });
 
     this.manager.on("trackStart", (player, track) => {
       this.clearInactivityTimer(player.guildId);
+      this.recentSeeks.delete(player.guildId);
       if (track) {
         const dto = trackToDTO(track);
         const requesterId = dto.requester?.id;
@@ -303,8 +308,23 @@ export class MusicService {
 
     this.manager.on("playerUpdate", (_oldJson, player) => {
       const now = Date.now();
+      const recent = this.recentSeeks.get(player.guildId);
+      if (recent) {
+        const elapsed = now - recent.at;
+        if (elapsed < 2500) {
+          const expected = player.paused ? recent.target : recent.target + elapsed;
+          const actual = typeof player.position === "number" ? player.position : 0;
+          if (Math.abs(actual - expected) > 2000) {
+            return;
+          }
+          this.recentSeeks.delete(player.guildId);
+        } else {
+          this.recentSeeks.delete(player.guildId);
+        }
+      }
+
       const last = this.lastPositionBroadcast.get(player.guildId) ?? 0;
-      if (now - last >= 1000) {
+      if (now - last >= 1500) {
         this.lastPositionBroadcast.set(player.guildId, now);
         this.onStateChange(player.guildId);
       }
@@ -410,7 +430,7 @@ export class MusicService {
     };
   }
 
-  private dtoToLavalinkTrack(dto: TrackDTO, requester: RequesterInfo): Track | UnresolvedTrack {
+  private dtoToLavalinkTrack(dto: TrackDTO, requester?: RequesterInfo): Track | UnresolvedTrack {
     if (dto.encoded) {
       return this.manager.utils.buildTrack(
         {
@@ -613,7 +633,11 @@ export class MusicService {
     dtos: TrackDTO[],
     mode: EnqueueMode,
     requester: RequesterInfo,
-    textChannelId?: string
+    textChannelId?: string,
+    options?: {
+      skipAutoplayPopulate?: boolean;
+      previousTracks?: TrackDTO[];
+    }
   ): Promise<{ added: number; playingNow: TrackDTO | null }> {
     if (dtos.length === 0) {
       return { added: 0, playingNow: null };
@@ -651,8 +675,12 @@ export class MusicService {
       if (player.queue.tracks.length > 0) {
         await player.queue.splice(0, player.queue.tracks.length);
       }
-      if (player.queue.current) {
-        this.pushPrevious(player, player.queue.current);
+      player.queue.previous.splice(0, player.queue.previous.length);
+      if (options?.previousTracks && options.previousTracks.length > 0) {
+        const seededPrev = options.previousTracks.slice(-25);
+        for (const prevDto of seededPrev) {
+          this.pushPrevious(player, this.dtoToLavalinkTrack(prevDto, requester));
+        }
       }
       if (tracks.length > 1) {
         await player.queue.add(tracks.slice(1));
@@ -685,8 +713,12 @@ export class MusicService {
       }
     }
 
-    if ((mode === "now" || mode === "replace") && this.isAutoplayEnabled(guildId)) {
-      void this.populateAutoplayQueue(guildId, mode === "replace");
+    if (
+      !options?.skipAutoplayPopulate &&
+      (mode === "now" || mode === "replace") &&
+      this.isAutoplayEnabled(guildId)
+    ) {
+      void this.populateAutoplayQueue(guildId, mode === "replace", requester.id);
     }
 
     this.onStateChange(guildId);
@@ -705,7 +737,10 @@ export class MusicService {
   ): Promise<{ added: number }> {
     this.autoplayOverrides.set(guildId, true);
     this.autoplayMoods.set(guildId, "all");
-    await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId);
+    this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
+    await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId, {
+      skipAutoplayPopulate: true,
+    });
 
     const player = this.getPlayer(guildId);
     if (!player) {
@@ -717,12 +752,14 @@ export class MusicService {
       if (t.info.identifier) excludedIds.add(t.info.identifier);
     }
 
+    const listeners = this.getVoiceListenerIds(guildId, requester.id);
     const related = await this.getAutoplayCandidates(
       seedTrack,
       "all",
       excludedIds,
       requester,
-      10
+      10,
+      listeners
     );
     if (related.length > 0) {
       await player.queue.add(related);
@@ -741,12 +778,20 @@ export class MusicService {
     }
 
     const target = player.queue.tracks[index];
+    const wasAutoplay = this.isAutoplayTrack(target);
     this.clearAutoplayFlag(target);
     this.pushPrevious(player, player.queue.current);
-    for (let i = 0; i < index; i++) {
-      this.pushPrevious(player, player.queue.tracks[i]);
+
+    if (wasAutoplay) {
+      // Jumping to an autoplay suggestion further down plays only that song without promoting songs above it
+      await player.queue.splice(index, 1);
+    } else {
+      for (let i = 0; i < index; i++) {
+        this.pushPrevious(player, player.queue.tracks[i]);
+      }
+      await player.queue.splice(0, index + 1);
     }
-    await player.queue.splice(0, index + 1);
+
     await player.play({ clientTrack: target, paused: false });
     await player.queue.utils.save();
 
@@ -855,6 +900,7 @@ export class MusicService {
       throw new Error("Current track does not support seeking.");
     }
     const clamped = Math.max(0, Math.min(positionMs, player.queue.current.info.duration || positionMs));
+    this.recentSeeks.set(guildId, { target: clamped, at: Date.now() });
     await player.seek(clamped);
     this.onStateChange(guildId);
   }
@@ -956,12 +1002,29 @@ export class MusicService {
     await player.queue.utils.save();
   }
 
+  private getVoiceListenerIds(guildId: string, extraUserId?: string): string[] {
+    const ids = new Set<string>();
+    if (extraUserId) ids.add(extraUserId);
+    const guild = this.client.guilds.cache.get(guildId);
+    const player = this.getPlayer(guildId);
+    if (guild && player?.voiceChannelId) {
+      const vc = guild.channels.cache.get(player.voiceChannelId);
+      if (vc && vc.isVoiceBased()) {
+        for (const member of vc.members.values()) {
+          if (!member.user.bot) ids.add(member.id);
+        }
+      }
+    }
+    return [...ids];
+  }
+
   private async getAutoplayCandidates(
     seed: TrackDTO,
     mood: AutoplayMood,
     excludedIds: Set<string>,
     requester: RequesterInfo | undefined,
-    limit = 10
+    limit = 10,
+    listenerUserIds: string[] = []
   ): Promise<(Track | UnresolvedTrack)[]> {
     const normTitle = (raw: string) =>
       raw
@@ -971,61 +1034,188 @@ export class MusicService {
         .trim();
 
     const seedNormTitle = normTitle(seed.title || "");
-    const seedAuthor = (seed.author || "")
-      .replace(/\s*-\s*Topic$/i, "")
-      .trim()
-      .toLowerCase();
+    const cleanAuthor = (seed.author || "").replace(/\s*-\s*Topic$/i, "").trim();
+    const seedAuthor = cleanAuthor.toLowerCase();
+    const cleanTitle = (seed.title || "").replace(/\(.*?\)|\[.*?\]/g, "").trim();
 
-    const basePool = await this.fetchRelatedLavalinkTracks(seed, requester, 25);
-    let moodSearchPool: (Track | UnresolvedTrack)[] = [];
-
-    if (mood === "chill" || mood === "upbeat" || mood === "popular") {
+    const searchQuery = async (
+      query: string,
+      preferredSource: SearchPlatform = "ytmsearch"
+    ): Promise<(Track | UnresolvedTrack)[]> => {
+      const q = query.trim();
+      if (!q) return [];
       try {
         const node = this.getConnectedNode();
-        const suffix =
-          mood === "chill"
-            ? "chill acoustic"
-            : mood === "upbeat"
-              ? "upbeat energy"
-              : "top hits";
-        const q = `${seedAuthor || seed.title} ${suffix}`.trim();
-        const searchRes = await node.search({ query: q, source: "ytmsearch" }, requester);
-        if (searchRes.loadType !== "error") {
-          moodSearchPool = searchRes.tracks;
+        const res = await node.search({ query: q, source: preferredSource }, requester);
+        if (res.loadType !== "error" && res.tracks.length > 0) {
+          return res.tracks;
+        }
+        if (preferredSource !== "ytsearch") {
+          const fallback = await node.search({ query: q, source: "ytsearch" }, requester);
+          if (fallback.loadType !== "error") {
+            return fallback.tracks;
+          }
         }
       } catch {
-        // Fallback smoothly to RD mix pool
+        // Ignore transient search failures per mood branch
       }
-    }
+      return [];
+    };
 
     const isSameArtist = (t: Track | UnresolvedTrack) => {
       if (!seedAuthor) return false;
-      const a = (t.info.author || "").replace(/\s*-\s*Topic$/i, "").toLowerCase();
-      return a === seedAuthor || a.includes(seedAuthor) || seedAuthor.includes(a);
+      const a = (t.info.author || "").replace(/\s*-\s*Topic$/i, "").trim().toLowerCase();
+      return Boolean(a && (a === seedAuthor || a.includes(seedAuthor) || seedAuthor.includes(a)));
     };
 
+    const basePool = await this.fetchRelatedLavalinkTracks(seed, requester, 25);
+    const baseTopIds = new Set(
+      basePool
+        .slice(0, 8)
+        .map((t) => t.info.identifier)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    const userKnownTracks: TrackDTO[] = [];
+    const userKnownSeen = new Set<string>();
+    for (const uid of listenerUserIds) {
+      try {
+        const liked = this.db.ensureLikedPlaylist(uid);
+        for (const t of liked.tracks.slice(0, 25)) {
+          if (!t.isStream && !userKnownSeen.has(t.identifier)) {
+            userKnownSeen.add(t.identifier);
+            userKnownTracks.push(t);
+          }
+        }
+        const hist = this.db.getPlayHistory(uid, 40);
+        for (const h of hist) {
+          if (!h.track.isStream && !userKnownSeen.has(h.track.identifier)) {
+            userKnownSeen.add(h.track.identifier);
+            userKnownTracks.push(h.track);
+          }
+        }
+      } catch {
+        // Ignore if listener history lookup fails
+      }
+    }
+
     let orderedPool: (Track | UnresolvedTrack)[] = [];
+
     switch (mood) {
-      case "familiar":
-        orderedPool = [
-          ...basePool.filter((t) => isSameArtist(t)),
-          ...basePool.filter((t) => !isSameArtist(t)),
-        ];
+      case "familiar": {
+        const artistSongs = cleanAuthor ? await searchQuery(cleanAuthor, "ytmsearch") : [];
+        const baseSameArtist = basePool.filter((t) => isSameArtist(t));
+        const userLavalink = userKnownTracks
+          .filter((t) => !excludedIds.has(t.identifier) && t.identifier !== seed.identifier)
+          .map((t) => this.dtoToLavalinkTrack(t, requester));
+
+        const primaryFamiliar: (Track | UnresolvedTrack)[] = [];
+        const maxLen = Math.max(artistSongs.length, userLavalink.length);
+        for (let i = 0; i < maxLen; i++) {
+          if (i < userLavalink.length) primaryFamiliar.push(userLavalink[i]);
+          if (i < artistSongs.length) primaryFamiliar.push(artistSongs[i]);
+        }
+        orderedPool = [...primaryFamiliar, ...baseSameArtist, ...basePool];
         break;
-      case "discover":
-        orderedPool = [
-          ...basePool.filter((t) => !isSameArtist(t)),
-          ...basePool.filter((t) => isSameArtist(t)),
-        ];
+      }
+
+      case "discover": {
+        const knownIds = new Set<string>([
+          ...userKnownTracks.map((t) => t.identifier),
+          ...basePool
+            .slice(0, 6)
+            .map((t) => t.info.identifier)
+            .filter((id): id is string => Boolean(id)),
+        ]);
+
+        const nonSeedArtists = basePool.filter(
+          (t, idx) => !isSameArtist(t) && YOUTUBE_ID_REGEX.test(t.info.identifier || "") && idx >= 2
+        );
+        const hopSeed = nonSeedArtists[0] ?? basePool.find((t) => YOUTUBE_ID_REGEX.test(t.info.identifier || ""));
+        let secondHop: (Track | UnresolvedTrack)[] = [];
+        if (hopSeed?.info.identifier) {
+          try {
+            const node = this.getConnectedNode();
+            const hopRes = await node.search(
+              {
+                query: `https://www.youtube.com/watch?v=${hopSeed.info.identifier}&list=RD${hopSeed.info.identifier}`,
+              },
+              requester
+            );
+            if (hopRes.loadType !== "error") {
+              secondHop = hopRes.tracks;
+            }
+          } catch {
+            // Continue with discover search below
+          }
+        }
+        const discoverSearch = await searchQuery(
+          `similar artists to ${cleanAuthor || cleanTitle}`,
+          "ytmsearch"
+        );
+
+        const combined = [...secondHop, ...discoverSearch, ...basePool.filter((t) => !isSameArtist(t))];
+        const fresh = combined.filter(
+          (t) => !isSameArtist(t) && !knownIds.has(t.info.identifier || "")
+        );
+        const otherNonArtist = combined.filter((t) => !isSameArtist(t));
+        orderedPool = [...fresh, ...otherNonArtist, ...basePool];
         break;
-      case "deep_cuts":
-        orderedPool = [...basePool.slice(5), ...basePool.slice(0, 5)];
+      }
+
+      case "popular": {
+        const [artistHits, topicHits] = await Promise.all([
+          cleanAuthor ? searchQuery(`${cleanAuthor} greatest hits popular songs`) : Promise.resolve([]),
+          searchQuery(`${cleanTitle} ${cleanAuthor} top hits`),
+        ]);
+        const merged = [...artistHits, ...topicHits];
+        const fresh = merged.filter((t) => !baseTopIds.has(t.info.identifier || ""));
+        orderedPool = [...fresh, ...merged, ...basePool];
         break;
-      case "chill":
-      case "upbeat":
-      case "popular":
-        orderedPool = [...moodSearchPool, ...basePool];
+      }
+
+      case "deep_cuts": {
+        const [acousticLive, albumCuts] = await Promise.all([
+          cleanAuthor ? searchQuery(`${cleanAuthor} acoustic live version b-side`) : Promise.resolve([]),
+          cleanAuthor ? searchQuery(`${cleanAuthor} underrated album track`) : Promise.resolve([]),
+        ]);
+        const deepBase = basePool.slice(8).reverse();
+        const combined = [...acousticLive, ...deepBase, ...albumCuts];
+        const fresh = combined.filter((t) => !baseTopIds.has(t.info.identifier || ""));
+        orderedPool = [...fresh, ...combined, ...basePool.slice().reverse()];
         break;
+      }
+
+      case "chill": {
+        const [artistChill, songChill] = await Promise.all([
+          cleanAuthor ? searchQuery(`${cleanAuthor} chill acoustic slow`) : Promise.resolve([]),
+          searchQuery(`${cleanTitle} lofi chill acoustic`),
+        ]);
+        let chillPool = [...artistChill, ...songChill];
+        if (chillPool.length < 6) {
+          const genericChill = await searchQuery("chill mellow acoustic indie");
+          chillPool = [...chillPool, ...genericChill];
+        }
+        const fresh = chillPool.filter((t) => !baseTopIds.has(t.info.identifier || ""));
+        orderedPool = [...fresh, ...chillPool, ...basePool];
+        break;
+      }
+
+      case "upbeat": {
+        const [artistUpbeat, songUpbeat] = await Promise.all([
+          cleanAuthor ? searchQuery(`${cleanAuthor} upbeat remix energetic`) : Promise.resolve([]),
+          searchQuery(`${cleanTitle} upbeat dance pop`),
+        ]);
+        let upbeatPool = [...artistUpbeat, ...songUpbeat];
+        if (upbeatPool.length < 6) {
+          const genericUpbeat = await searchQuery("upbeat energetic pop electronic");
+          upbeatPool = [...upbeatPool, ...genericUpbeat];
+        }
+        const fresh = upbeatPool.filter((t) => !baseTopIds.has(t.info.identifier || ""));
+        orderedPool = [...fresh, ...upbeatPool, ...basePool];
+        break;
+      }
+
       case "all":
       default:
         orderedPool = basePool;
@@ -1053,14 +1243,21 @@ export class MusicService {
     return picked;
   }
 
-  async populateAutoplayQueue(guildId: string, replaceExisting = false): Promise<number> {
+  async populateAutoplayQueue(
+    guildId: string,
+    replaceExisting = false,
+    preferredUserId?: string
+  ): Promise<number> {
     if (!this.isAutoplayEnabled(guildId)) return 0;
-    if (this.autoplayPopulating.has(guildId)) return 0;
+    if (!replaceExisting && this.autoplayInFlight.has(guildId)) return 0;
 
     const player = this.getPlayer(guildId);
     if (!player) return 0;
 
-    this.autoplayPopulating.add(guildId);
+    const gen = (this.autoplayGeneration.get(guildId) ?? 0) + 1;
+    this.autoplayGeneration.set(guildId, gen);
+    this.autoplayInFlight.add(guildId);
+
     try {
       const manualTracks = player.queue.tracks.filter((t) => !this.isAutoplayTrack(t));
       const seedTrack =
@@ -1069,6 +1266,7 @@ export class MusicService {
 
       if (replaceExisting) {
         await this.clearAutoplayTracksFromQueue(player);
+        this.onStateChange(guildId);
       }
 
       const existingAutoCount = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
@@ -1090,15 +1288,21 @@ export class MusicService {
       const mood = this.autoplayMoods.get(guildId) ?? "all";
       const targetAdd = Math.max(8, 10 - existingAutoCount);
       const botRequester = this.client.user ? userToRequester(this.client.user) : undefined;
+      const listeners = this.getVoiceListenerIds(guildId, preferredUserId);
       const candidates = await this.getAutoplayCandidates(
         trackToDTO(seedTrack),
         mood,
         excludedIds,
         botRequester,
-        targetAdd
+        targetAdd,
+        listeners
       );
 
-      if (candidates.length > 0 && this.isAutoplayEnabled(guildId)) {
+      if (this.autoplayGeneration.get(guildId) !== gen || !this.isAutoplayEnabled(guildId)) {
+        return 0;
+      }
+
+      if (candidates.length > 0) {
         await player.queue.add(candidates);
         await player.queue.utils.save();
         this.onStateChange(guildId);
@@ -1108,19 +1312,27 @@ export class MusicService {
       console.warn(`[Autoplay] Failed to populate queue for guild ${guildId}:`, error);
       return 0;
     } finally {
-      this.autoplayPopulating.delete(guildId);
+      if (this.autoplayGeneration.get(guildId) === gen) {
+        this.autoplayInFlight.delete(guildId);
+      }
     }
   }
 
-  async toggleAutoplay(guildId: string, enabled: boolean): Promise<boolean> {
+  async toggleAutoplay(
+    guildId: string,
+    enabled: boolean,
+    preferredUserId?: string
+  ): Promise<boolean> {
     this.autoplayOverrides.set(guildId, enabled);
     this.onStateChange(guildId);
 
     const player = this.getPlayer(guildId);
     if (player) {
       if (enabled) {
-        await this.populateAutoplayQueue(guildId, false);
+        await this.populateAutoplayQueue(guildId, false, preferredUserId);
       } else {
+        this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
+        this.autoplayInFlight.delete(guildId);
         await this.clearAutoplayTracksFromQueue(player);
         this.onStateChange(guildId);
       }
@@ -1129,11 +1341,15 @@ export class MusicService {
     return enabled;
   }
 
-  async setAutoplayMood(guildId: string, mood: AutoplayMood): Promise<AutoplayMood> {
+  async setAutoplayMood(
+    guildId: string,
+    mood: AutoplayMood,
+    preferredUserId?: string
+  ): Promise<AutoplayMood> {
     this.autoplayMoods.set(guildId, mood);
     this.autoplayOverrides.set(guildId, true);
     this.onStateChange(guildId);
-    await this.populateAutoplayQueue(guildId, true);
+    await this.populateAutoplayQueue(guildId, true, preferredUserId);
     return mood;
   }
 
@@ -1203,12 +1419,14 @@ export class MusicService {
 
       const mood = this.getAutoplayMood(player.guildId);
       const botRequester = this.client.user ? userToRequester(this.client.user) : undefined;
+      const listeners = this.getVoiceListenerIds(player.guildId);
       const candidates = await this.getAutoplayCandidates(
         trackToDTO(lastPlayedTrack),
         mood,
         excludedIds,
         botRequester,
-        8
+        8,
+        listeners
       );
       if (candidates.length > 0) {
         await player.queue.add(candidates);
@@ -1355,6 +1573,19 @@ export class MusicService {
       };
     }
 
+    let position = typeof player.position === "number" ? player.position : 0;
+    const recent = this.recentSeeks.get(guildId);
+    if (recent) {
+      const elapsed = Date.now() - recent.at;
+      if (elapsed < 2500) {
+        const expected = player.paused ? recent.target : recent.target + elapsed;
+        if (Math.abs(position - expected) > 2000) {
+          const duration = player.queue.current?.info.duration || expected;
+          position = Math.min(duration, Math.max(0, Math.round(expected)));
+        }
+      }
+    }
+
     return {
       guildId,
       guildName: guild?.name || "Unknown Server",
@@ -1363,7 +1594,7 @@ export class MusicService {
       connected: Boolean(player.connected),
       playing: Boolean(player.playing),
       paused: Boolean(player.paused),
-      position: typeof player.position === "number" ? player.position : 0,
+      position,
       volume: typeof player.volume === "number" ? player.volume : settings.defaultVolume,
       repeatMode: player.repeatMode || "off",
       autoplay: this.isAutoplayEnabled(guildId),
