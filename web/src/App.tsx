@@ -228,7 +228,6 @@ export function App() {
           nowPlayingOpen={nowPlayingOpen}
           selectedPlaylistId={selectedPlaylistId}
           playlists={socket.playlists}
-          connected={socket.connected}
           onSelectView={(view) => {
             setNowPlayingOpen(false);
             setActiveView(view);
@@ -251,7 +250,6 @@ export function App() {
             meta={meta}
             guilds={guilds}
             selectedGuildId={socket.selectedGuildId}
-            playerConnected={Boolean(socket.playerState?.connected)}
             searching={socket.searching}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onSearch={handleSearch}

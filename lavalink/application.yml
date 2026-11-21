@@ -12,13 +12,14 @@ plugins:
         allowDirectPlaylistIds: true
         clients:
             - MUSIC
-            - WEB
-            - MWEB
-            - ANDROID_VR
+            - ANDROID
             - IOS
+            - TV
+            - ANDROID_VR
+            - MWEB
+            - WEB
             - WEBEMBEDDED
             - TVHTML5_SIMPLY
-            - TV
         oauth:
             enabled: ${YT_OAUTH_ENABLED:false}
             refreshToken: "${YT_OAUTH_REFRESH_TOKEN:}"
@@ -78,8 +79,8 @@ plugins:
 
 lavalink:
     plugins:
-        - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-          snapshot: false
+        - dependency: "dev.lavalink.youtube:youtube-plugin:e41dd95f8bd134b51e75080fb28cc805fecb431a"
+          snapshot: true
         - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
           snapshot: false
         - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:1.1.0"

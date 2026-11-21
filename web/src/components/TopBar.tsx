@@ -24,7 +24,6 @@ interface Props {
   meta: AppMetaDTO | null;
   guilds: GuildSummaryDTO[];
   selectedGuildId: string | null;
-  playerConnected?: boolean;
   searching: boolean;
   onOpenMobileMenu: () => void;
   onSearch: (query: string, source: SearchSource) => void;
@@ -46,7 +45,6 @@ export function TopBar({
   meta,
   guilds,
   selectedGuildId,
-  playerConnected = false,
   searching,
   onOpenMobileMenu,
   onSearch,
@@ -140,12 +138,12 @@ export function TopBar({
         </form>
       </div>
 
-      {/* Right controls: Discord Server Icon + User Avatar */}
+      {/* Right controls: Discord Server Pill (logo + name) + User Avatar */}
       <div className="relative flex items-center gap-2.5">
         <button
           type="button"
           onClick={() => setOpenMenu((m) => (m === "cast" ? null : "cast"))}
-          className="relative rounded-full ring-1 ring-white/15 transition hover:ring-white/40"
+          className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] py-1 pl-1.5 pr-3 text-xs font-medium text-zinc-100 transition hover:border-white/30 hover:bg-white/10"
           title={currentGuild ? `Server: ${currentGuild.name}` : "Select Discord server"}
           aria-label="Switch Discord server"
         >
@@ -154,10 +152,10 @@ export function TopBar({
               src={currentGuild.iconUrl}
               alt={currentGuild.name}
               referrerPolicy="no-referrer"
-              className="h-8 w-8 rounded-full object-cover"
+              className="h-6 w-6 shrink-0 rounded-full object-cover"
             />
           ) : currentGuild ? (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600/80 text-xs font-semibold text-white">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-600/80 text-[10px] font-semibold text-white">
               {currentGuild.name
                 .split(/\s+/)
                 .filter(Boolean)
@@ -166,14 +164,13 @@ export function TopBar({
                 .join("") || currentGuild.name.slice(0, 2).toUpperCase()}
             </div>
           ) : (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
-              <Disc3 className="h-4 w-4" />
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-300">
+              <Disc3 className="h-3.5 w-3.5" />
             </div>
           )}
-
-          {(currentGuild?.inVoice || playerConnected) && (
-            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#030303]" />
-          )}
+          <span className="max-w-28 truncate sm:max-w-40">
+            {currentGuild ? currentGuild.name : "Select Server"}
+          </span>
         </button>
 
         <button

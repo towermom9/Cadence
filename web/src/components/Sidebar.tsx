@@ -9,7 +9,6 @@ interface Props {
   nowPlayingOpen?: boolean;
   selectedPlaylistId: string | null;
   playlists: PlaylistDTO[];
-  connected: boolean;
   onSelectView: (view: MainView) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onCreatePlaylist: (name: string) => void;
@@ -30,7 +29,6 @@ export function Sidebar({
   nowPlayingOpen = false,
   selectedPlaylistId,
   playlists,
-  connected,
   onSelectView,
   onSelectPlaylist,
   onCreatePlaylist,
@@ -66,10 +64,6 @@ export function Sidebar({
             <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />
           </span>
           <span className="text-lg font-bold tracking-tight text-white">Cadence</span>
-          <span
-            title={connected ? "Connected" : "Reconnecting..."}
-            className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-amber-400"}`}
-          />
         </button>
 
         <button
