@@ -251,6 +251,7 @@ export function App() {
         onRemoveTrack={socket.removeTrack}
         onRemoveFromPlaylist={socket.removeTrackFromPlaylist}
         onPlayPlaylist={handlePlayPlaylist}
+        onSyncPlaylist={(id) => socket.syncPlaylist(id)}
         onDeletePlaylist={(id) => {
           socket.deletePlaylist(id);
           if (selectedPlaylistId === id && activeView === "playlist") {
@@ -323,7 +324,7 @@ export function App() {
                 onShuffle={socket.shuffle}
                 onClear={socket.clearQueue}
                 onToggleAutoplay={socket.toggleAutoplay}
-                onStop={socket.stop}
+                onSetAutoplayMood={socket.setAutoplayMood}
                 onFetchLyrics={socket.requestLyrics}
                 onOpenSaveModal={handleOpenSaveModal}
                 onOpenArtist={handleOpenArtist}
@@ -363,6 +364,7 @@ export function App() {
                     canManage={Boolean(currentGuild?.canManage)}
                     settings={socket.settings}
                     onCreatePlaylist={socket.createPlaylist}
+                    onImportPlaylist={socket.importPlaylist}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
                       navigateTo("playlist");
@@ -384,6 +386,7 @@ export function App() {
                     onBack={() => navigateTo("library")}
                     onPlayPlaylist={handlePlayPlaylist}
                     onRenamePlaylist={socket.renamePlaylist}
+                    onSyncPlaylist={socket.syncPlaylist}
                     onDeletePlaylist={socket.deletePlaylist}
                     onRemoveTrack={socket.removeTrackFromPlaylist}
                     onEnqueueTrack={handleEnqueue}
@@ -397,6 +400,7 @@ export function App() {
                     searching={socket.searching}
                     searchResults={socket.searchResults}
                     onEnqueue={handleEnqueue}
+                    onImportPlaylist={socket.importPlaylist}
                     onOpenSaveModal={handleOpenSaveModal}
                     onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}
@@ -445,6 +449,7 @@ export function App() {
         onShuffle={socket.shuffle}
         onToggleAutoplay={socket.toggleAutoplay}
         onSetFilter={socket.setFilter}
+        onStop={socket.stop}
         onOpenSaveModal={handleOpenSaveModal}
         onOpenArtist={handleOpenArtist}
         onTrackContextMenu={handleTrackContextMenu}

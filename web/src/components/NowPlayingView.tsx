@@ -9,15 +9,12 @@ import {
   Radio,
   RefreshCw,
   Shuffle,
-  Sliders,
-  Sparkles,
-  Square,
   Trash2,
-  Users,
   Volume2,
   X,
 } from "lucide-react";
 import type {
+  AutoplayMood,
   EnqueueMode,
   LyricsDTO,
   PlayerStateDTO,
@@ -28,6 +25,16 @@ import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
 export type NowPlayingTab = "upnext" | "lyrics" | "related";
+
+const AUTOPLAY_MOODS: { id: AutoplayMood; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "familiar", label: "Familiar" },
+  { id: "discover", label: "Discover" },
+  { id: "popular", label: "Popular" },
+  { id: "deep_cuts", label: "Deep cuts" },
+  { id: "chill", label: "Chill" },
+  { id: "upbeat", label: "Upbeat" },
+];
 
 interface Props {
   playerState: PlayerStateDTO | null;
@@ -50,7 +57,7 @@ interface Props {
   onShuffle: () => void;
   onClear: () => void;
   onToggleAutoplay: (enabled: boolean) => void;
-  onStop: () => void;
+  onSetAutoplayMood: (mood: AutoplayMood) => void;
   onFetchLyrics: (title?: string, artist?: string, duration?: number) => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
@@ -95,7 +102,7 @@ export function NowPlayingView({
   onShuffle,
   onClear,
   onToggleAutoplay,
-  onStop,
+  onSetAutoplayMood,
   onFetchLyrics,
   onOpenSaveModal,
   onOpenArtist,
@@ -106,6 +113,10 @@ export function NowPlayingView({
 
   const current = playerState?.current ?? null;
   const queue = playerState?.queue ?? [];
+  const autoplayEnabled = Boolean(playerState?.autoplay);
+  const autoplayMood = playerState?.autoplayMood ?? "all";
+  const privileged = Boolean(playerState?.isPrivileged);
+
   const previousEntries = useMemo(
     () =>
       (playerState?.previous ?? [])
@@ -113,8 +124,19 @@ export function NowPlayingView({
         .reverse(),
     [playerState?.previous]
   );
-  const privileged = Boolean(playerState?.isPrivileged);
-  const activeFilter = playerState?.activeFilter ?? "none";
+
+  const { manualEntries, autoplayEntries } = useMemo(() => {
+    const manual: { track: TrackDTO; queueIndex: number }[] = [];
+    const auto: { track: TrackDTO; queueIndex: number }[] = [];
+    queue.forEach((track, queueIndex) => {
+      if (track.isAutoplay) {
+        auto.push({ track, queueIndex });
+      } else {
+        manual.push({ track, queueIndex });
+      }
+    });
+    return { manualEntries: manual, autoplayEntries: auto };
+  }, [queue]);
 
   const activeLyricsTrack = lyricsSubjectTrack ?? current;
   const parsedSynced = useMemo(
@@ -194,39 +216,9 @@ export function NowPlayingView({
 
   return (
     <div className="mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
-      {/* Left Artwork Column */}
+      {/* Left Clean Artwork Column */}
       <div className="flex min-h-0 flex-col items-center justify-center lg:col-span-7">
-        <div className="flex w-full max-w-[440px] flex-col items-center">
-          {(playerState?.voiceChannelName || activeFilter !== "none" || (playerState?.connected && privileged)) && (
-            <div className="mb-4 flex w-full flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-              <div className="flex flex-wrap items-center gap-2">
-                {playerState?.voiceChannelName && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1 text-zinc-200">
-                    <Users className="h-3.5 w-3.5 text-emerald-400" />
-                    #{playerState.voiceChannelName} ({playerState.listeners.length})
-                  </span>
-                )}
-                {activeFilter !== "none" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-zinc-200">
-                    <Sliders className="h-3 w-3" />
-                    {activeFilter}
-                  </span>
-                )}
-              </div>
-
-              {playerState?.connected && privileged && (
-                <button
-                  type="button"
-                  onClick={onStop}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-zinc-300 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-200"
-                >
-                  <Square className="h-3 w-3 fill-current" />
-                  Disconnect
-                </button>
-              )}
-            </div>
-          )}
-
+        <div className="flex w-full max-w-[460px] flex-col items-center">
           <div
             onContextMenu={(e) => {
               if (!current) return;
@@ -295,7 +287,7 @@ export function NowPlayingView({
         {activeTab === "upnext" && (
           <div className="flex min-h-0 flex-1 flex-col pt-3">
             {/* Playing from header + white + Save pill */}
-            <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+            <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] text-zinc-400">Playing from</p>
                 <p className="truncate text-sm font-semibold text-white">
@@ -303,164 +295,294 @@ export function NowPlayingView({
                 </p>
               </div>
 
-              <button
-                type="button"
-                disabled={tracksToSave.length === 0}
-                onClick={() => onOpenSaveModal(tracksToSave)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
-              >
-                <ListPlus className="h-3.5 w-3.5" />
-                Save
-              </button>
-            </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {queue.length > 0 && privileged && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={queue.length < 2}
+                      onClick={onShuffle}
+                      title="Shuffle queue"
+                      className="rounded-full bg-white/[0.08] p-2 text-zinc-200 transition hover:bg-white/15 hover:text-white disabled:opacity-40"
+                    >
+                      <Shuffle className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onClear}
+                      title="Clear upcoming queue"
+                      className="rounded-full bg-white/[0.08] p-2 text-zinc-200 transition hover:bg-rose-500/20 hover:text-rose-200"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
 
-            {/* Autoplay + Shuffle + Clear strip */}
-            <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                disabled={!playerState}
-                onClick={() => onToggleAutoplay(!playerState?.autoplay)}
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition disabled:opacity-40 ${
-                  playerState?.autoplay
-                    ? "bg-emerald-500/20 text-emerald-300"
-                    : "bg-white/[0.06] text-zinc-300 hover:bg-white/12"
-                }`}
-              >
-                <Sparkles className="h-3 w-3" />
-                Autoplay {playerState?.autoplay ? "On" : "Off"}
-              </button>
-
-              {queue.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    disabled={!privileged || queue.length < 2}
-                    onClick={onShuffle}
-                    className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-zinc-200 transition hover:bg-white/12 disabled:opacity-40"
-                  >
-                    <Shuffle className="h-3 w-3" />
-                    Shuffle
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!privileged}
-                    onClick={onClear}
-                    className="inline-flex items-center gap-1 rounded-full bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-zinc-200 transition hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-40"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    Clear
-                  </button>
-                </div>
-              )}
+                <button
+                  type="button"
+                  disabled={tracksToSave.length === 0}
+                  onClick={() => onOpenSaveModal(tracksToSave)}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
+                >
+                  <ListPlus className="h-3.5 w-3.5" />
+                  Save
+                </button>
+              </div>
             </div>
 
             {/* Scrollable Queue Timeline */}
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
-              {!current && queue.length === 0 && previousEntries.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
+              {!current && queue.length === 0 && previousEntries.length === 0 && (
+                <div className="mb-3 rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-zinc-400">
                   Nothing in the queue yet. Search or click a song to play.
                 </div>
-              ) : (
-                <>
-                  {/* Previous tracks in queue timeline */}
-                  {previousEntries.map(({ track, prevIndex }) => (
-                    <div
-                      key={`prev-${track.identifier}-${prevIndex}`}
-                      onClick={() => onPlayPrevious(prevIndex)}
-                      onContextMenu={(e) => onTrackContextMenu(e, track)}
-                      className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
-                    >
-                      <TrackArtwork
-                        track={track}
-                        className="h-10 w-10 shrink-0 rounded"
-                        iconClassName="h-4 w-4"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
-                        <p className="truncate text-xs text-zinc-400">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenArtist(track.author);
-                            }}
-                            className="hover:text-white hover:underline"
-                          >
-                            {track.author}
-                          </button>
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
-                        {track.isStream ? "LIVE" : formatMs(track.duration)}
-                      </span>
+              )}
+
+              {/* Previous tracks in queue timeline */}
+              {previousEntries.map(({ track, prevIndex }) => (
+                <div
+                  key={`prev-${track.identifier}-${prevIndex}`}
+                  onClick={() => onPlayPrevious(prevIndex)}
+                  onContextMenu={(e) => onTrackContextMenu(e, track)}
+                  className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
+                >
+                  <TrackArtwork
+                    track={track}
+                    className="h-10 w-10 shrink-0 rounded"
+                    iconClassName="h-4 w-4"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
+                    <p className="truncate text-xs text-zinc-400">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onTrackContextMenu(e, track);
+                          onOpenArtist(track.author);
                         }}
-                        title="More options"
-                        className="hidden rounded-full p-1 text-zinc-300 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                        className="hover:text-white hover:underline"
                       >
-                        <MoreVertical className="h-4 w-4" />
+                        {track.author}
                       </button>
-                    </div>
-                  ))}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                    {track.isStream ? "LIVE" : formatMs(track.duration)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTrackContextMenu(e, track);
+                    }}
+                    title="More options"
+                    className="hidden rounded-full p-1 text-zinc-300 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
 
-                  {/* Currently playing highlighted row */}
-                  {current && (
-                    <div
-                      onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
-                      className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
-                    >
-                      <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
-                        <TrackArtwork
-                          track={current}
-                          className="h-10 w-10"
-                          iconClassName="h-4 w-4"
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/45">
-                          <Volume2 className="h-4 w-4 text-white" />
-                        </div>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-white">{current.title}</p>
-                        <p className="truncate text-xs text-zinc-300">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onOpenArtist(current.author);
-                            }}
-                            className="hover:text-white hover:underline"
-                          >
-                            {current.author}
-                          </button>
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
-                        {current.isStream ? "LIVE" : formatMs(current.duration)}
-                      </span>
+              {/* Currently playing highlighted row */}
+              {current && (
+                <div
+                  onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
+                  className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
+                >
+                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
+                    <TrackArtwork
+                      track={current}
+                      className="h-10 w-10"
+                      iconClassName="h-4 w-4"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                      <Volume2 className="h-4 w-4 text-white" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-white">{current.title}</p>
+                    <p className="truncate text-xs text-zinc-300">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onTrackContextMenu(e, current, { isCurrent: true });
+                          onOpenArtist(current.author);
                         }}
-                        title="More options"
-                        className="hidden rounded-full p-1 text-zinc-200 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                        className="hover:text-white hover:underline"
                       >
-                        <MoreVertical className="h-4 w-4" />
+                        {current.author}
                       </button>
-                    </div>
-                  )}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
+                    {current.isStream ? "LIVE" : formatMs(current.duration)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTrackContextMenu(e, current, { isCurrent: true });
+                    }}
+                    title="More options"
+                    className="hidden rounded-full p-1 text-zinc-200 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
 
-                  {/* Upcoming queued tracks */}
-                  {queue.map((track, idx) => (
+              {/* User-queued upcoming tracks */}
+              {manualEntries.map(({ track, queueIndex }) => (
+                <div
+                  key={`q-${track.identifier}-${queueIndex}`}
+                  onClick={() => onPlayTrack(queueIndex)}
+                  onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
+                  className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                >
+                  <TrackArtwork
+                    track={track}
+                    className="h-10 w-10 shrink-0 rounded"
+                    iconClassName="h-4 w-4"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                    <p className="truncate text-xs text-zinc-400">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenArtist(track.author);
+                        }}
+                        className="hover:text-white hover:underline"
+                      >
+                        {track.author}
+                      </button>
+                    </p>
+                  </div>
+
+                  <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                    {track.isStream ? "LIVE" : formatMs(track.duration)}
+                  </span>
+
+                  <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                    {privileged && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={queueIndex === 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMoveTrack(queueIndex, queueIndex - 1);
+                          }}
+                          title="Move up"
+                          className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={queueIndex === queue.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onMoveTrack(queueIndex, queueIndex + 1);
+                          }}
+                          title="Move down"
+                          className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveTrack(queueIndex);
+                          }}
+                          title="Remove from queue"
+                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTrackContextMenu(e, track, { queueIndex });
+                      }}
+                      title="More options"
+                      className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      <MoreVertical className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* YouTube Music Autoplay Switch Section */}
+              <div className="mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white">Autoplay</p>
+                    <p className="text-xs text-zinc-400">
+                      Add similar content to the end of the queue
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={autoplayEnabled}
+                    disabled={!playerState}
+                    onClick={() => onToggleAutoplay(!autoplayEnabled)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-40 ${
+                      autoplayEnabled ? "bg-[#3ea6ff]" : "bg-zinc-600"
+                    }`}
+                    title={autoplayEnabled ? "Disable Autoplay" : "Enable Autoplay"}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        autoplayEnabled ? "translate-x-4" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {autoplayEnabled && (
+                  <div className="mt-3.5 space-y-2.5">
+                    <p className="text-sm font-medium text-zinc-400">Autoplay is on</p>
+
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1.5">
+                      {AUTOPLAY_MOODS.map((chip) => {
+                        const selected = autoplayMood === chip.id;
+                        return (
+                          <button
+                            key={chip.id}
+                            type="button"
+                            onClick={() => onSetAutoplayMood(chip.id)}
+                            className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                              selected
+                                ? "bg-white text-black"
+                                : "bg-white/10 text-zinc-200 hover:bg-white/15"
+                            }`}
+                          >
+                            {chip.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Autoplay Upcoming Track List */}
+              {autoplayEnabled && (
+                autoplayEntries.length > 0 ? (
+                  autoplayEntries.map(({ track, queueIndex }) => (
                     <div
-                      key={`q-${track.identifier}-${idx}`}
-                      onClick={() => onPlayTrack(idx)}
-                      onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex: idx })}
+                      key={`auto-${track.identifier}-${queueIndex}`}
+                      onClick={() => onPlayTrack(queueIndex)}
+                      onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
                       className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
                     >
                       <TrackArtwork
@@ -490,49 +612,23 @@ export function NowPlayingView({
 
                       <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
                         {privileged && (
-                          <>
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onMoveTrack(idx, idx - 1);
-                              }}
-                              title="Move up"
-                              className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                            >
-                              <ArrowUp className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === queue.length - 1}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onMoveTrack(idx, idx + 1);
-                              }}
-                              title="Move down"
-                              className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
-                            >
-                              <ArrowDown className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveTrack(idx);
-                              }}
-                              title="Remove from queue"
-                              className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveTrack(queueIndex);
+                            }}
+                            title="Remove suggestion"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         )}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            onTrackContextMenu(e, track, { queueIndex: idx });
+                            onTrackContextMenu(e, track, { queueIndex });
                           }}
                           title="More options"
                           className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
@@ -541,8 +637,13 @@ export function NowPlayingView({
                         </button>
                       </div>
                     </div>
-                  ))}
-                </>
+                  ))
+                ) : current ? (
+                  <div className="flex items-center gap-2 px-2.5 py-3 text-xs text-zinc-400">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-300" />
+                    <span>Finding similar tracks...</span>
+                  </div>
+                ) : null
               )}
             </div>
           </div>

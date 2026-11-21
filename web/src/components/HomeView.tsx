@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type {
   EnqueueMode,
   HistoryEntryDTO,
@@ -238,6 +238,14 @@ export function HomeView({
               >
                 <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818] ring-1 ring-white/10">
                   <PlaylistArtwork playlist={pl} className="h-full w-full transition duration-300 group-hover:brightness-75" />
+                  {pl.sourceUrl && (
+                    <span
+                      title="Synced online playlist"
+                      className="absolute left-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-zinc-200 shadow"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </span>
+                  )}
                   {pl.tracks.length > 0 && (
                     <button
                       type="button"

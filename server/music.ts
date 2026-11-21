@@ -9,6 +9,7 @@ import {
 } from "lavalink-client";
 import type {
   ArtistProfileDTO,
+  AutoplayMood,
   EnqueueMode,
   FilterPreset,
   ListenerDTO,
@@ -62,6 +63,7 @@ function extractRequester(raw: unknown): RequesterInfo | undefined {
 }
 
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+const YTIMG_PATH_REGEX = /^\/vi(?:_webp)?\/([A-Za-z0-9_-]{11})\/(?:default|mqdefault|hqdefault|sddefault)\.(?:jpg|webp)$/i;
 
 export function normalizeArtworkUrl(
   rawUrl: string | null | undefined,
@@ -72,11 +74,17 @@ export function normalizeArtworkUrl(
   if (rawUrl) {
     try {
       const parsed = new URL(rawUrl);
-      if (
-        parsed.hostname === "yt3.googleusercontent.com" ||
-        parsed.hostname === "lh3.googleusercontent.com"
-      ) {
-        return rawUrl.replace(/=w\d+-h\d+[^/?#]*$/i, "=w544-h544-l90-rj");
+      const host = parsed.hostname.toLowerCase();
+      if (host === "yt3.googleusercontent.com" || host === "lh3.googleusercontent.com") {
+        return rawUrl
+          .replace(/=w\d+-h\d+[^/?#]*$/i, "=w1000-h1000-l90-rj")
+          .replace(/=s\d+(-[^/?#]*)?$/i, "=s1000$1");
+      }
+      if (host === "i.ytimg.com" || host === "img.youtube.com") {
+        const match = parsed.pathname.match(YTIMG_PATH_REGEX);
+        if (match) {
+          return `https://i.ytimg.com/vi/${match[1]}/maxresdefault.jpg`;
+        }
       }
       return rawUrl;
     } catch {
@@ -88,7 +96,7 @@ export function normalizeArtworkUrl(
     sourceName === "youtube" ||
     Boolean(uri && (uri.includes("youtube.com") || uri.includes("youtu.be")));
   if (looksLikeYouTube && YOUTUBE_ID_REGEX.test(identifier)) {
-    return `https://i.ytimg.com/vi/${identifier}/hqdefault.jpg`;
+    return `https://i.ytimg.com/vi/${identifier}/maxresdefault.jpg`;
   }
 
   return null;
@@ -99,6 +107,7 @@ export function trackToDTO(track: Track | UnresolvedTrack): TrackDTO {
   const identifier = info.identifier || `${info.title ?? "unknown"}:${info.author ?? "unknown"}`;
   const sourceName = info.sourceName || "unknown";
   const rawArtwork = info.artworkUrl ?? track.pluginInfo?.artworkUrl ?? null;
+  const userData = track.userData as Record<string, unknown> | undefined;
 
   return {
     encoded: track.encoded || "",
@@ -110,6 +119,7 @@ export function trackToDTO(track: Track | UnresolvedTrack): TrackDTO {
     artworkUrl: normalizeArtworkUrl(rawArtwork, sourceName, identifier, info.uri),
     sourceName,
     isStream: Boolean(info.isStream),
+    isAutoplay: Boolean(userData?.isAutoplay),
     requester: extractRequester(track.requester) ?? extractRequester(track.userData?.requester),
   };
 }
@@ -118,6 +128,8 @@ export class MusicService {
   readonly manager: LavalinkManager;
   private activeFilters = new Map<string, FilterPreset>();
   private autoplayOverrides = new Map<string, boolean>();
+  private autoplayMoods = new Map<string, AutoplayMood>();
+  private autoplayPopulating = new Set<string>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
@@ -207,6 +219,8 @@ export class MusicService {
       this.clearInactivityTimer(player.guildId);
       this.activeFilters.delete(player.guildId);
       this.autoplayOverrides.delete(player.guildId);
+      this.autoplayMoods.delete(player.guildId);
+      this.autoplayPopulating.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
     });
@@ -230,6 +244,14 @@ export class MusicService {
           }
         }
       }
+
+      if (this.isAutoplayEnabled(player.guildId)) {
+        const autoplayRemaining = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
+        if (autoplayRemaining < 4) {
+          void this.populateAutoplayQueue(player.guildId, false);
+        }
+      }
+
       this.onStateChange(player.guildId);
     });
 
@@ -472,7 +494,23 @@ export class MusicService {
             { query: fallbackQuery, source: "ytmsearch" },
             requester
           );
-          if (searchResult.loadType !== "error") {
+          if (searchResult.loadType !== "error" && searchResult.tracks.length > 0) {
+            if (!looksLikeYouTube) {
+              const ytMatch = searchResult.tracks.find((t) =>
+                YOUTUBE_ID_REGEX.test(t.info.identifier || "")
+              );
+              if (ytMatch?.info.identifier) {
+                try {
+                  const mixUrl = `https://www.youtube.com/watch?v=${ytMatch.info.identifier}&list=RD${ytMatch.info.identifier}`;
+                  const mixResult = await node.search({ query: mixUrl }, requester);
+                  if (mixResult.loadType !== "error") {
+                    candidatePool.push(...mixResult.tracks);
+                  }
+                } catch {
+                  // Continue with ytmsearch tracks if RD mix lookup fails
+                }
+              }
+            }
             candidatePool.push(...searchResult.tracks);
           }
         }
@@ -636,10 +674,19 @@ export class MusicService {
         await player.play();
       }
     } else {
-      await player.queue.add(tracks);
+      const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+      if (firstAutoIdx >= 0) {
+        await player.queue.add(tracks, firstAutoIdx);
+      } else {
+        await player.queue.add(tracks);
+      }
       if (!player.playing && !player.paused && !player.queue.current) {
         await player.play();
       }
+    }
+
+    if ((mode === "now" || mode === "replace") && this.isAutoplayEnabled(guildId)) {
+      void this.populateAutoplayQueue(guildId, mode === "replace");
     }
 
     this.onStateChange(guildId);
@@ -656,17 +703,30 @@ export class MusicService {
     requester: RequesterInfo,
     textChannelId?: string
   ): Promise<{ added: number }> {
-    await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId);
     this.autoplayOverrides.set(guildId, true);
+    this.autoplayMoods.set(guildId, "all");
+    await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId);
 
     const player = this.getPlayer(guildId);
     if (!player) {
       return { added: 0 };
     }
 
-    const related = await this.fetchRelatedLavalinkTracks(seedTrack, requester, 10);
+    const excludedIds = new Set<string>([seedTrack.identifier]);
+    for (const t of player.queue.tracks) {
+      if (t.info.identifier) excludedIds.add(t.info.identifier);
+    }
+
+    const related = await this.getAutoplayCandidates(
+      seedTrack,
+      "all",
+      excludedIds,
+      requester,
+      10
+    );
     if (related.length > 0) {
       await player.queue.add(related);
+      await player.queue.utils.save();
     }
 
     this.onStateChange(guildId);
@@ -681,6 +741,7 @@ export class MusicService {
     }
 
     const target = player.queue.tracks[index];
+    this.clearAutoplayFlag(target);
     this.pushPrevious(player, player.queue.current);
     for (let i = 0; i < index; i++) {
       this.pushPrevious(player, player.queue.tracks[i]);
@@ -688,6 +749,14 @@ export class MusicService {
     await player.queue.splice(0, index + 1);
     await player.play({ clientTrack: target, paused: false });
     await player.queue.utils.save();
+
+    if (this.isAutoplayEnabled(guildId)) {
+      const remainingAuto = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
+      if (remainingAuto < 4) {
+        void this.populateAutoplayQueue(guildId, false);
+      }
+    }
+
     this.onStateChange(guildId);
   }
 
@@ -862,10 +931,210 @@ export class MusicService {
     this.onStateChange(guildId);
   }
 
-  toggleAutoplay(guildId: string, enabled: boolean): boolean {
+  private isAutoplayTrack(track: Track | UnresolvedTrack): boolean {
+    const userData = track.userData as Record<string, unknown> | undefined;
+    return userData?.isAutoplay === 1 || userData?.isAutoplay === true;
+  }
+
+  private markAsAutoplay(track: Track | UnresolvedTrack): void {
+    track.userData = { ...(track.userData ?? {}), isAutoplay: 1 };
+  }
+
+  private clearAutoplayFlag(track: Track | UnresolvedTrack): void {
+    if (track.userData && typeof track.userData === "object") {
+      track.userData = { ...track.userData, isAutoplay: 0 };
+    }
+  }
+
+  private async clearAutoplayTracksFromQueue(player: Player): Promise<void> {
+    if (!player.queue.tracks.some((t) => this.isAutoplayTrack(t))) return;
+    const manualTracks = player.queue.tracks.filter((t) => !this.isAutoplayTrack(t));
+    await player.queue.splice(0, player.queue.tracks.length);
+    if (manualTracks.length > 0) {
+      await player.queue.add(manualTracks);
+    }
+    await player.queue.utils.save();
+  }
+
+  private async getAutoplayCandidates(
+    seed: TrackDTO,
+    mood: AutoplayMood,
+    excludedIds: Set<string>,
+    requester: RequesterInfo | undefined,
+    limit = 10
+  ): Promise<(Track | UnresolvedTrack)[]> {
+    const normTitle = (raw: string) =>
+      raw
+        .toLowerCase()
+        .replace(/\(.*?\)|\[.*?\]/g, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+
+    const seedNormTitle = normTitle(seed.title || "");
+    const seedAuthor = (seed.author || "")
+      .replace(/\s*-\s*Topic$/i, "")
+      .trim()
+      .toLowerCase();
+
+    const basePool = await this.fetchRelatedLavalinkTracks(seed, requester, 25);
+    let moodSearchPool: (Track | UnresolvedTrack)[] = [];
+
+    if (mood === "chill" || mood === "upbeat" || mood === "popular") {
+      try {
+        const node = this.getConnectedNode();
+        const suffix =
+          mood === "chill"
+            ? "chill acoustic"
+            : mood === "upbeat"
+              ? "upbeat energy"
+              : "top hits";
+        const q = `${seedAuthor || seed.title} ${suffix}`.trim();
+        const searchRes = await node.search({ query: q, source: "ytmsearch" }, requester);
+        if (searchRes.loadType !== "error") {
+          moodSearchPool = searchRes.tracks;
+        }
+      } catch {
+        // Fallback smoothly to RD mix pool
+      }
+    }
+
+    const isSameArtist = (t: Track | UnresolvedTrack) => {
+      if (!seedAuthor) return false;
+      const a = (t.info.author || "").replace(/\s*-\s*Topic$/i, "").toLowerCase();
+      return a === seedAuthor || a.includes(seedAuthor) || seedAuthor.includes(a);
+    };
+
+    let orderedPool: (Track | UnresolvedTrack)[] = [];
+    switch (mood) {
+      case "familiar":
+        orderedPool = [
+          ...basePool.filter((t) => isSameArtist(t)),
+          ...basePool.filter((t) => !isSameArtist(t)),
+        ];
+        break;
+      case "discover":
+        orderedPool = [
+          ...basePool.filter((t) => !isSameArtist(t)),
+          ...basePool.filter((t) => isSameArtist(t)),
+        ];
+        break;
+      case "deep_cuts":
+        orderedPool = [...basePool.slice(5), ...basePool.slice(0, 5)];
+        break;
+      case "chill":
+      case "upbeat":
+      case "popular":
+        orderedPool = [...moodSearchPool, ...basePool];
+        break;
+      case "all":
+      default:
+        orderedPool = basePool;
+        break;
+    }
+
+    const seenIds = new Set<string>(excludedIds);
+    const seenTitles = new Set<string>(seedNormTitle ? [seedNormTitle] : []);
+    const picked: (Track | UnresolvedTrack)[] = [];
+
+    for (const candidate of orderedPool) {
+      if (candidate.info.isStream) continue;
+      const cid = candidate.info.identifier;
+      if (cid && seenIds.has(cid)) continue;
+      const cTitle = normTitle(candidate.info.title || "");
+      if (cTitle && seenTitles.has(cTitle)) continue;
+
+      if (cid) seenIds.add(cid);
+      if (cTitle) seenTitles.add(cTitle);
+      this.markAsAutoplay(candidate);
+      picked.push(candidate);
+      if (picked.length >= limit) break;
+    }
+
+    return picked;
+  }
+
+  async populateAutoplayQueue(guildId: string, replaceExisting = false): Promise<number> {
+    if (!this.isAutoplayEnabled(guildId)) return 0;
+    if (this.autoplayPopulating.has(guildId)) return 0;
+
+    const player = this.getPlayer(guildId);
+    if (!player) return 0;
+
+    this.autoplayPopulating.add(guildId);
+    try {
+      const manualTracks = player.queue.tracks.filter((t) => !this.isAutoplayTrack(t));
+      const seedTrack =
+        manualTracks[manualTracks.length - 1] ?? player.queue.current ?? player.queue.previous[0];
+      if (!seedTrack) return 0;
+
+      if (replaceExisting) {
+        await this.clearAutoplayTracksFromQueue(player);
+      }
+
+      const existingAutoCount = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
+      if (!replaceExisting && existingAutoCount >= 6) {
+        return 0;
+      }
+
+      const excludedIds = new Set<string>();
+      if (player.queue.current?.info.identifier) {
+        excludedIds.add(player.queue.current.info.identifier);
+      }
+      for (const prev of player.queue.previous.slice(0, 20)) {
+        if (prev.info.identifier) excludedIds.add(prev.info.identifier);
+      }
+      for (const qTrack of player.queue.tracks) {
+        if (qTrack.info.identifier) excludedIds.add(qTrack.info.identifier);
+      }
+
+      const mood = this.autoplayMoods.get(guildId) ?? "all";
+      const targetAdd = Math.max(8, 10 - existingAutoCount);
+      const botRequester = this.client.user ? userToRequester(this.client.user) : undefined;
+      const candidates = await this.getAutoplayCandidates(
+        trackToDTO(seedTrack),
+        mood,
+        excludedIds,
+        botRequester,
+        targetAdd
+      );
+
+      if (candidates.length > 0 && this.isAutoplayEnabled(guildId)) {
+        await player.queue.add(candidates);
+        await player.queue.utils.save();
+        this.onStateChange(guildId);
+      }
+      return candidates.length;
+    } catch (error) {
+      console.warn(`[Autoplay] Failed to populate queue for guild ${guildId}:`, error);
+      return 0;
+    } finally {
+      this.autoplayPopulating.delete(guildId);
+    }
+  }
+
+  async toggleAutoplay(guildId: string, enabled: boolean): Promise<boolean> {
     this.autoplayOverrides.set(guildId, enabled);
     this.onStateChange(guildId);
+
+    const player = this.getPlayer(guildId);
+    if (player) {
+      if (enabled) {
+        await this.populateAutoplayQueue(guildId, false);
+      } else {
+        await this.clearAutoplayTracksFromQueue(player);
+        this.onStateChange(guildId);
+      }
+    }
+
     return enabled;
+  }
+
+  async setAutoplayMood(guildId: string, mood: AutoplayMood): Promise<AutoplayMood> {
+    this.autoplayMoods.set(guildId, mood);
+    this.autoplayOverrides.set(guildId, true);
+    this.onStateChange(guildId);
+    await this.populateAutoplayQueue(guildId, true);
+    return mood;
   }
 
   isAutoplayEnabled(guildId: string): boolean {
@@ -873,6 +1142,10 @@ export class MusicService {
       return Boolean(this.autoplayOverrides.get(guildId));
     }
     return this.db.getGuildSettings(guildId).autoplay;
+  }
+
+  getAutoplayMood(guildId: string): AutoplayMood {
+    return this.autoplayMoods.get(guildId) ?? "all";
   }
 
   async applyFilter(guildId: string, preset: FilterPreset): Promise<FilterPreset> {
@@ -921,23 +1194,25 @@ export class MusicService {
 
     try {
       const excludedIds = new Set<string>([lastPlayedTrack.info.identifier]);
-      for (const prev of player.queue.previous.slice(0, 12)) {
-        excludedIds.add(prev.info.identifier);
+      for (const prev of player.queue.previous.slice(0, 20)) {
+        if (prev.info.identifier) excludedIds.add(prev.info.identifier);
+      }
+      for (const qTrack of player.queue.tracks) {
+        if (qTrack.info.identifier) excludedIds.add(qTrack.info.identifier);
       }
 
-      const query = `${lastPlayedTrack.info.author} ${lastPlayedTrack.info.title}`.trim();
-      const result = await player.search(
-        { query, source: "ytmsearch" },
-        this.client.user ? userToRequester(this.client.user) : undefined
+      const mood = this.getAutoplayMood(player.guildId);
+      const botRequester = this.client.user ? userToRequester(this.client.user) : undefined;
+      const candidates = await this.getAutoplayCandidates(
+        trackToDTO(lastPlayedTrack),
+        mood,
+        excludedIds,
+        botRequester,
+        8
       );
-
-      const candidate = result.tracks.find(
-        (track) =>
-          !track.info.isStream &&
-          (!track.info.identifier || !excludedIds.has(track.info.identifier))
-      );
-      if (candidate) {
-        await player.queue.add(candidate);
+      if (candidates.length > 0) {
+        await player.queue.add(candidates);
+        await player.queue.utils.save();
       }
     } catch (error) {
       console.warn(`[Autoplay] Failed for guild ${player.guildId}:`, error);
@@ -1069,6 +1344,7 @@ export class MusicService {
         volume: settings.defaultVolume,
         repeatMode: "off",
         autoplay: this.isAutoplayEnabled(guildId),
+        autoplayMood: this.getAutoplayMood(guildId),
         activeFilter: "none",
         current: null,
         queue: [],
@@ -1091,6 +1367,7 @@ export class MusicService {
       volume: typeof player.volume === "number" ? player.volume : settings.defaultVolume,
       repeatMode: player.repeatMode || "off",
       autoplay: this.isAutoplayEnabled(guildId),
+      autoplayMood: this.getAutoplayMood(guildId),
       activeFilter: this.activeFilters.get(guildId) ?? "none",
       current: player.queue.current ? trackToDTO(player.queue.current) : null,
       queue: player.queue.tracks.map(trackToDTO),

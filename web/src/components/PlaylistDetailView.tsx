@@ -1,7 +1,18 @@
 import { useState, type FormEvent, type MouseEvent } from "react";
-import { ArrowLeft, MoreVertical, Pencil, Play, Shuffle, Trash2, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  Link2,
+  MoreVertical,
+  Pencil,
+  Play,
+  RefreshCw,
+  Shuffle,
+  Trash2,
+  X,
+} from "lucide-react";
 import type { EnqueueMode, PlaylistDTO, TrackDTO } from "@shared/types";
-import { formatMs, sourceLabel } from "../utils/format";
+import { formatMs, formatRelativeTime, sourceLabel } from "../utils/format";
 import type { TrackMenuContext } from "./ContextMenu";
 import { PlaylistArtwork } from "./PlaylistArtwork";
 import { TrackArtwork } from "./TrackArtwork";
@@ -11,6 +22,7 @@ interface Props {
   onBack: () => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
   onRenamePlaylist: (playlistId: string, name: string) => void;
+  onSyncPlaylist: (playlistId: string, url?: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onRemoveTrack: (playlistId: string, index: number) => void;
   onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
@@ -23,6 +35,7 @@ export function PlaylistDetailView({
   onBack,
   onPlayPlaylist,
   onRenamePlaylist,
+  onSyncPlaylist,
   onDeletePlaylist,
   onRemoveTrack,
   onEnqueueTrack,
@@ -31,6 +44,8 @@ export function PlaylistDetailView({
 }: Props) {
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [linkingUrl, setLinkingUrl] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
 
   if (!playlist) {
     return (
@@ -56,6 +71,14 @@ export function PlaylistDetailView({
     setRenaming(false);
   };
 
+  const handleLinkSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!urlInput.trim()) return;
+    onSyncPlaylist(playlist.id, urlInput.trim());
+    setLinkingUrl(false);
+    setUrlInput("");
+  };
+
   return (
     <div className="space-y-8">
       <button
@@ -74,9 +97,23 @@ export function PlaylistDetailView({
         </div>
 
         <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Playlist
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              Playlist
+            </span>
+            {playlist.sourceUrl && (
+              <a
+                href={playlist.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-zinc-200 transition hover:bg-white/15"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Synced {formatRelativeTime(playlist.lastSyncedAt)}
+                <ExternalLink className="h-2.5 w-2.5 opacity-70" />
+              </a>
+            )}
+          </div>
 
           {renaming ? (
             <form onSubmit={handleRenameSubmit} className="flex max-w-md items-center gap-2">
@@ -144,6 +181,30 @@ export function PlaylistDetailView({
               <Shuffle className="h-4 w-4" />
               Shuffle
             </button>
+
+            {playlist.sourceUrl ? (
+              <button
+                type="button"
+                onClick={() => onSyncPlaylist(playlist.id)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Sync
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlInput("");
+                  setLinkingUrl((v) => !v);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-medium text-zinc-200 transition hover:bg-white/15 hover:text-white"
+              >
+                <Link2 className="h-4 w-4" />
+                Link URL
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
@@ -156,6 +217,36 @@ export function PlaylistDetailView({
               Delete
             </button>
           </div>
+
+          {linkingUrl && (
+            <form
+              onSubmit={handleLinkSubmit}
+              className="flex max-w-xl flex-wrap items-center gap-2 pt-2"
+            >
+              <input
+                type="url"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="Paste online playlist URL to sync..."
+                autoFocus
+                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#121212] px-3 py-1.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
+              />
+              <button
+                type="submit"
+                disabled={!urlInput.trim()}
+                className="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-40"
+              >
+                Save &amp; Sync
+              </button>
+              <button
+                type="button"
+                onClick={() => setLinkingUrl(false)}
+                className="rounded-full px-3 py-1.5 text-xs text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </button>
+            </form>
+          )}
         </div>
       </div>
 

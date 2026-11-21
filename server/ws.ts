@@ -375,8 +375,15 @@ export class CadenceWsHub {
         case "toggleAutoplay": {
           await this.requireSameVoice(msg.guildId, user.id);
           this.requirePrivileged(msg.guildId, user.id);
-          this.bot.music.toggleAutoplay(msg.guildId, msg.enabled);
+          await this.bot.music.toggleAutoplay(msg.guildId, msg.enabled);
           this.sendToast(ws, "info", `Autoplay ${msg.enabled ? "enabled" : "disabled"}`);
+          return;
+        }
+
+        case "setAutoplayMood": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.setAutoplayMood(msg.guildId, msg.mood);
           return;
         }
 
@@ -480,6 +487,53 @@ export class CadenceWsHub {
             this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
             this.sendToast(ws, "success", `Created playlist "${created.name}"`);
           }
+          return;
+        }
+
+        case "importPlaylist": {
+          const url = msg.url.trim();
+          if (!/^https?:\/\/\S+$/i.test(url)) {
+            throw new Error("Please provide a valid http:// or https:// playlist URL.");
+          }
+          const { tracks, playlistName } = await this.bot.music.search(url, "auto", requester);
+          if (tracks.length === 0) {
+            throw new Error("No tracks found at that playlist URL.");
+          }
+          const customName = msg.name?.trim();
+          const created = this.db.createSyncedPlaylist(
+            user.id,
+            customName || playlistName || "Imported Playlist",
+            url,
+            tracks,
+            Boolean(customName)
+          );
+          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          this.sendToast(
+            ws,
+            "success",
+            `Saved & synced "${created.name}" (${created.tracks.length} tracks)`
+          );
+          return;
+        }
+
+        case "syncPlaylist": {
+          const playlist = this.db.getPlaylist(user.id, msg.playlistId);
+          if (!playlist) {
+            throw new Error("Playlist not found.");
+          }
+          const targetUrl = (msg.url?.trim() || playlist.sourceUrl || "").trim();
+          if (!/^https?:\/\/\S+$/i.test(targetUrl)) {
+            throw new Error("No valid source URL linked to this playlist.");
+          }
+          const { tracks } = await this.bot.music.search(targetUrl, "auto", requester);
+          if (tracks.length === 0) {
+            throw new Error("No tracks found at the linked URL.");
+          }
+          const res = this.db.syncPlaylistTracks(user.id, playlist.id, tracks, targetUrl);
+          this.send(ws, { type: "playlists", playlists: this.db.getUserPlaylists(user.id) });
+          const delta =
+            res.added || res.removed ? `, +${res.added} / -${res.removed}` : ", already up to date";
+          this.sendToast(ws, "success", `Synced "${res.playlist.name}" (${res.total} tracks${delta})`);
           return;
         }
 

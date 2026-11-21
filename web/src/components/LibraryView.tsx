@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type MouseEvent } from "react";
-import { Disc3, MoreVertical, Play, Plus, Trash2 } from "lucide-react";
+import { Disc3, Link2, MoreVertical, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type {
   EnqueueMode,
   GuildSettingsDTO,
@@ -22,6 +22,7 @@ interface Props {
   settings: GuildSettingsDTO | null;
   initialTab?: "playlists" | "history" | "settings";
   onCreatePlaylist: (name: string) => void;
+  onImportPlaylist: (url: string, name?: string) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
@@ -42,6 +43,7 @@ export function LibraryView({
   settings,
   initialTab = "playlists",
   onCreatePlaylist,
+  onImportPlaylist,
   onSelectPlaylist,
   onPlayPlaylist,
   onEnqueue,
@@ -54,12 +56,24 @@ export function LibraryView({
 }: Props) {
   const [tab, setTab] = useState<"playlists" | "history" | "settings">(initialTab);
   const [newName, setNewName] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importUrl, setImportUrl] = useState("");
+  const [importName, setImportName] = useState("");
 
   const handleCreate = (e: FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
     onCreatePlaylist(newName.trim());
     setNewName("");
+  };
+
+  const handleImportSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!importUrl.trim()) return;
+    onImportPlaylist(importUrl.trim(), importName.trim() || undefined);
+    setImportUrl("");
+    setImportName("");
+    setImportOpen(false);
   };
 
   return (
@@ -104,23 +118,38 @@ export function LibraryView({
         </div>
 
         {tab === "playlists" && (
-          <form onSubmit={handleCreate} className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="New playlist name..."
-              className="rounded-full border border-white/15 bg-[#121212] px-4 py-1.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
-            />
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              type="submit"
-              disabled={!newName.trim()}
-              className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:opacity-40"
+              type="button"
+              onClick={() => setImportOpen((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition ${
+                importOpen
+                  ? "border-white bg-white/15 text-white"
+                  : "border-white/15 bg-white/[0.06] text-zinc-200 hover:bg-white/12"
+              }`}
             >
-              <Plus className="h-4 w-4" />
-              Create
+              <Link2 className="h-4 w-4" />
+              Import URL
             </button>
-          </form>
+
+            <form onSubmit={handleCreate} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="New playlist name..."
+                className="rounded-full border border-white/15 bg-[#121212] px-4 py-1.5 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
+              />
+              <button
+                type="submit"
+                disabled={!newName.trim()}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" />
+                Create
+              </button>
+            </form>
+          </div>
         )}
 
         {tab === "history" && history.length > 0 && (
@@ -137,12 +166,52 @@ export function LibraryView({
 
       {tab === "playlists" && (
         <>
+          {importOpen && (
+            <form
+              onSubmit={handleImportSubmit}
+              className="flex flex-col gap-2.5 rounded-xl border border-white/12 bg-[#141414] p-4 sm:flex-row sm:items-center"
+            >
+              <input
+                type="url"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="Paste YouTube, Spotify, or SoundCloud playlist URL..."
+                autoFocus
+                className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
+              />
+              <input
+                type="text"
+                value={importName}
+                onChange={(e) => setImportName(e.target.value)}
+                placeholder="Custom name (optional)"
+                className="sm:w-52 rounded-lg border border-white/15 bg-[#0b0b0b] px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-white/40"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={!importUrl.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Save &amp; Sync
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportOpen(false)}
+                  className="rounded-full px-3 py-2 text-xs text-zinc-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           {playlists.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/10 bg-[#121212] p-12 text-center">
               <Disc3 className="mx-auto h-10 w-10 text-zinc-600" />
               <p className="mt-3 text-sm font-medium text-white">No playlists yet</p>
               <p className="mt-1 text-xs text-zinc-400">
-                Create a playlist above and save tracks from search results or the player bar.
+                Create a playlist above, or click Import URL to save and sync an online playlist.
               </p>
             </div>
           ) : (
@@ -159,6 +228,14 @@ export function LibraryView({
                       playlist={pl}
                       className="h-full w-full transition duration-300 group-hover:brightness-75"
                     />
+                    {pl.sourceUrl && (
+                      <span
+                        title="Synced with online playlist"
+                        className="absolute left-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-zinc-200 shadow"
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                      </span>
+                    )}
                     {pl.tracks.length > 0 && (
                       <button
                         type="button"

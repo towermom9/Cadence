@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type MouseEvent } from "react";
-import { Bookmark, Compass, Home, Menu, Play, Plus, X } from "lucide-react";
+import { Bookmark, Compass, Home, Menu, Play, Plus, RefreshCw, X } from "lucide-react";
 import type { PlaylistDTO } from "@shared/types";
 
 export type MainView =
@@ -165,7 +165,15 @@ export function Sidebar({
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium leading-tight">{pl.name}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-sm font-medium leading-tight">{pl.name}</p>
+                    {pl.sourceUrl && (
+                      <RefreshCw
+                        className="h-3 w-3 shrink-0 text-zinc-400"
+                        aria-label="Synced online playlist"
+                      />
+                    )}
+                  </div>
                   <p className="mt-0.5 truncate text-[11px] text-zinc-500">
                     {pl.tracks.length} {pl.tracks.length === 1 ? "track" : "tracks"}
                   </p>

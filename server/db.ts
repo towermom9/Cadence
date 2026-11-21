@@ -58,6 +58,8 @@ interface PlaylistRow {
   user_id: string;
   name: string;
   tracks_json: string;
+  source_url: string | null;
+  last_synced_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -148,6 +150,17 @@ export class CadenceDatabase {
         updated_at INTEGER NOT NULL DEFAULT 0
       );
     `);
+
+    const playlistCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(playlists)`)
+      .all()
+      .map((col) => col.name);
+    if (!playlistCols.includes("source_url")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN source_url TEXT`);
+    }
+    if (!playlistCols.includes("last_synced_at")) {
+      this.db.exec(`ALTER TABLE playlists ADD COLUMN last_synced_at INTEGER`);
+    }
   }
 
   getGuildSettings(guildId: string): GuildSettingsDTO {
@@ -230,57 +243,49 @@ export class CadenceDatabase {
     return next;
   }
 
+  private rowToPlaylist(row: PlaylistRow): PlaylistDTO {
+    return {
+      id: row.id,
+      name: row.name,
+      tracks: this.safeParseTracks(row.tracks_json),
+      sourceUrl: row.source_url ?? null,
+      lastSyncedAt: row.last_synced_at ?? null,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
   getUserPlaylists(userId: string): PlaylistDTO[] {
     const rows = this.db
       .query<PlaylistRow, [string]>(
-        `SELECT id, user_id, name, tracks_json, created_at, updated_at
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
          FROM playlists WHERE user_id = ? ORDER BY updated_at DESC`
       )
       .all(userId);
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      tracks: this.safeParseTracks(row.tracks_json),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    return rows.map((row) => this.rowToPlaylist(row));
   }
 
   getPlaylist(userId: string, playlistId: string): PlaylistDTO | null {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
-        `SELECT id, user_id, name, tracks_json, created_at, updated_at
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
          FROM playlists WHERE id = ? AND user_id = ?`
       )
       .get(playlistId, userId);
 
-    if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      tracks: this.safeParseTracks(row.tracks_json),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    return row ? this.rowToPlaylist(row) : null;
   }
 
   findPlaylistByName(userId: string, name: string): PlaylistDTO | null {
     const row = this.db
       .query<PlaylistRow, [string, string]>(
-        `SELECT id, user_id, name, tracks_json, created_at, updated_at
+        `SELECT id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at
          FROM playlists WHERE user_id = ? AND lower(name) = lower(?) LIMIT 1`
       )
       .get(userId, name.trim());
 
-    if (!row) return null;
-    return {
-      id: row.id,
-      name: row.name,
-      tracks: this.safeParseTracks(row.tracks_json),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    return row ? this.rowToPlaylist(row) : null;
   }
 
   createPlaylist(userId: string, rawName: string): PlaylistDTO {
@@ -306,7 +311,115 @@ export class CadenceDatabase {
       )
       .run(id, userId, name, now, now);
 
-    return { id, name, tracks: [], createdAt: now, updatedAt: now };
+    return {
+      id,
+      name,
+      tracks: [],
+      sourceUrl: null,
+      lastSyncedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  createSyncedPlaylist(
+    userId: string,
+    rawName: string,
+    sourceUrl: string,
+    tracks: TrackDTO[],
+    customName = false
+  ): PlaylistDTO {
+    const existing = this.getUserPlaylists(userId);
+    if (existing.length >= 25) {
+      throw new Error("Maximum of 25 playlists reached.");
+    }
+
+    let baseName = rawName.trim().slice(0, 60) || "Imported Playlist";
+    if (customName) {
+      if (existing.some((p) => p.name.toLowerCase() === baseName.toLowerCase())) {
+        throw new Error(`Playlist "${baseName}" already exists.`);
+      }
+    } else {
+      let candidate = baseName;
+      let suffix = 2;
+      const lowerNames = new Set(existing.map((p) => p.name.toLowerCase()));
+      while (lowerNames.has(candidate.toLowerCase())) {
+        const tag = ` (${suffix++})`;
+        candidate = `${baseName.slice(0, Math.max(1, 60 - tag.length))}${tag}`;
+      }
+      baseName = candidate;
+    }
+
+    const saveable = tracks.filter((t) => !t.isStream).slice(0, 500);
+    const now = Date.now();
+    const id = randomUUID();
+    this.db
+      .query(
+        `INSERT INTO playlists (id, user_id, name, tracks_json, source_url, last_synced_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(id, userId, baseName, JSON.stringify(saveable), sourceUrl, now, now, now);
+
+    return {
+      id,
+      name: baseName,
+      tracks: saveable,
+      sourceUrl,
+      lastSyncedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  syncPlaylistTracks(
+    userId: string,
+    playlistId: string,
+    tracks: TrackDTO[],
+    sourceUrl?: string
+  ): { playlist: PlaylistDTO; added: number; removed: number; total: number } {
+    const playlist = this.getPlaylist(userId, playlistId);
+    if (!playlist) {
+      throw new Error("Playlist not found.");
+    }
+
+    const nextTracks = tracks.filter((t) => !t.isStream).slice(0, 500);
+    const oldIds = new Set(playlist.tracks.map((t) => t.identifier));
+    const newIds = new Set(nextTracks.map((t) => t.identifier));
+
+    let added = 0;
+    for (const id of newIds) {
+      if (!oldIds.has(id)) added++;
+    }
+    let removed = 0;
+    for (const id of oldIds) {
+      if (!newIds.has(id)) removed++;
+    }
+
+    const resolvedUrl = sourceUrl?.trim() || playlist.sourceUrl || null;
+    const now = Date.now();
+    this.db
+      .query(
+        `UPDATE playlists
+         SET tracks_json = ?,
+             source_url = COALESCE(?, source_url),
+             last_synced_at = ?,
+             updated_at = ?
+         WHERE id = ? AND user_id = ?`
+      )
+      .run(JSON.stringify(nextTracks), resolvedUrl, now, now, playlistId, userId);
+
+    return {
+      playlist: {
+        ...playlist,
+        tracks: nextTracks,
+        sourceUrl: resolvedUrl,
+        lastSyncedAt: now,
+        updatedAt: now,
+      },
+      added,
+      removed,
+      total: nextTracks.length,
+    };
   }
 
   renamePlaylist(userId: string, playlistId: string, rawName: string): PlaylistDTO {

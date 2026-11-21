@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { ListPlus, Loader2, MoreVertical, Play, Plus, SkipForward } from "lucide-react";
+import { ListPlus, Loader2, MoreVertical, Play, Plus, RefreshCw, SkipForward } from "lucide-react";
 import type { EnqueueMode, SearchSource, TrackDTO } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
 import type { TrackMenuContext } from "./ContextMenu";
@@ -14,6 +14,7 @@ interface Props {
     playlistName: string | null;
   } | null;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onImportPlaylist: (url: string, name?: string) => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
@@ -23,6 +24,7 @@ export function SearchResultsView({
   searching,
   searchResults,
   onEnqueue,
+  onImportPlaylist,
   onOpenSaveModal,
   onOpenArtist,
   onTrackContextMenu,
@@ -74,14 +76,28 @@ export function SearchResultsView({
         </div>
 
         {searchResults.tracks.length > 1 && (
-          <button
-            type="button"
-            onClick={() => onEnqueue(searchResults.tracks, "end", resultLabel)}
-            className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
-          >
-            <ListPlus className="h-4 w-4" />
-            Queue all ({searchResults.tracks.length})
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {searchResults.playlistName && /^https?:\/\/\S+$/i.test(searchResults.query.trim()) && (
+              <button
+                type="button"
+                onClick={() =>
+                  onImportPlaylist(searchResults.query.trim(), searchResults.playlistName || undefined)
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Save &amp; Sync
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onEnqueue(searchResults.tracks, "end", resultLabel)}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200"
+            >
+              <ListPlus className="h-4 w-4" />
+              Queue all ({searchResults.tracks.length})
+            </button>
+          </div>
         )}
       </div>
 

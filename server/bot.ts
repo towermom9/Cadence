@@ -878,7 +878,7 @@ export class CadenceBot {
           this.requireSameVoice(guildId, member);
           this.requirePrivileged(guildId, member.id);
           const next = !this.music.isAutoplayEnabled(guildId);
-          this.music.toggleAutoplay(guildId, next);
+          await this.music.toggleAutoplay(guildId, next);
           await interaction.reply(`Autoplay is now **${next ? "enabled" : "disabled"}**.`);
           return;
         }

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
 import {
   ChevronDown,
   ChevronUp,
   ListPlus,
   Pause,
+  PhoneOff,
   Play,
   Radio,
   Repeat,
@@ -53,6 +54,7 @@ interface Props {
   onShuffle: () => void;
   onToggleAutoplay: (enabled: boolean) => void;
   onSetFilter: (preset: FilterPreset) => void;
+  onStop: () => void;
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
@@ -72,6 +74,7 @@ export function PlayerBar({
   onShuffle,
   onToggleAutoplay,
   onSetFilter,
+  onStop,
   onOpenSaveModal,
   onOpenArtist,
   onTrackContextMenu,
@@ -79,6 +82,9 @@ export function PlayerBar({
   const [isSeeking, setIsSeeking] = useState(false);
   const [scrubPosition, setScrubPosition] = useState(0);
   const [effectsOpen, setEffectsOpen] = useState(false);
+  const [volumeDraft, setVolumeDraft] = useState(String(playerState?.volume ?? 100));
+  const [isEditingVolume, setIsEditingVolume] = useState(false);
+
   const scrubPosRef = useRef(0);
   const isSeekingRef = useRef(false);
   const effectsRef = useRef<HTMLDivElement>(null);
@@ -91,6 +97,13 @@ export function PlayerBar({
   const hasPlayer = Boolean(playerState?.connected && track);
   const activeFilter = playerState?.activeFilter ?? "none";
   const privileged = Boolean(playerState?.isPrivileged);
+  const serverVolume = playerState?.volume ?? 100;
+
+  useEffect(() => {
+    if (!isEditingVolume) {
+      setVolumeDraft(String(serverVolume));
+    }
+  }, [isEditingVolume, serverVolume]);
 
   useEffect(() => {
     if (!isSeeking) return;
@@ -130,6 +143,31 @@ export function PlayerBar({
     onRepeat(next);
   };
 
+  const commitVolumeDraft = () => {
+    setIsEditingVolume(false);
+    const parsed = Number.parseInt(volumeDraft.replace(/[^0-9]/g, ""), 10);
+    if (!Number.isFinite(parsed)) {
+      setVolumeDraft(String(serverVolume));
+      return;
+    }
+    const clamped = Math.max(0, Math.min(150, parsed));
+    setVolumeDraft(String(clamped));
+    if (clamped !== serverVolume) {
+      onVolume(clamped);
+    }
+  };
+
+  const handleVolumeKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+    } else if (e.key === "Escape") {
+      setVolumeDraft(String(serverVolume));
+      setIsEditingVolume(false);
+      e.currentTarget.blur();
+    }
+  };
+
   return (
     <footer className="relative z-40 bg-[#212121]">
       {/* Thin YouTube Music red seek bar across the top edge */}
@@ -165,7 +203,6 @@ export function PlayerBar({
             scrubPosRef.current = val;
             setScrubPosition(val);
             if (!isSeekingRef.current) {
-              // Keyboard/assistive click changes without pointerdown
               isSeekingRef.current = true;
               setIsSeeking(true);
             }
@@ -302,17 +339,17 @@ export function PlayerBar({
           )}
         </div>
 
-        {/* Right: Volume, Effects, Repeat, Shuffle, Autoplay, Now Playing toggle */}
+        {/* Right: Volume + Percentage, Effects, Repeat, Shuffle, Autoplay, Disconnect, Now Playing toggle */}
         <div className="flex items-center gap-1 sm:gap-1.5">
           <div className="hidden items-center gap-1.5 md:flex">
             <button
               type="button"
-              disabled={!playerState?.connected}
-              onClick={() => onVolume(playerState?.volume === 0 ? 100 : 0)}
+              disabled={!playerState?.connected || !privileged}
+              onClick={() => onVolume(serverVolume === 0 ? 100 : 0)}
               title="Mute / Unmute"
               className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
             >
-              {playerState?.volume === 0 ? (
+              {serverVolume === 0 ? (
                 <VolumeX className="h-4 w-4" />
               ) : (
                 <Volume2 className="h-4 w-4" />
@@ -322,12 +359,34 @@ export function PlayerBar({
               type="range"
               min={0}
               max={150}
-              value={playerState?.volume ?? 100}
-              disabled={!playerState?.connected}
-              onChange={(e) => onVolume(Number(e.target.value))}
-              aria-label="Volume"
+              value={serverVolume}
+              disabled={!playerState?.connected || !privileged}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setVolumeDraft(String(v));
+                onVolume(v);
+              }}
+              aria-label="Volume slider"
               className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/25 accent-white disabled:opacity-40"
             />
+            <div className="flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 focus-within:border-white/35">
+              <input
+                type="text"
+                inputMode="numeric"
+                aria-label="Volume percentage"
+                disabled={!playerState?.connected || !privileged}
+                value={volumeDraft}
+                onFocus={(e) => {
+                  setIsEditingVolume(true);
+                  e.currentTarget.select();
+                }}
+                onChange={(e) => setVolumeDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+                onBlur={commitVolumeDraft}
+                onKeyDown={handleVolumeKeyDown}
+                className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
+              />
+              <span className="ml-0.5 text-[11px] text-zinc-400">%</span>
+            </div>
           </div>
 
           {/* DSP Audio Effects Popover */}
@@ -427,6 +486,20 @@ export function PlayerBar({
             }`}
           >
             <Sparkles className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
+            disabled={!playerState?.connected || !privileged}
+            onClick={onStop}
+            title={
+              playerState?.voiceChannelName
+                ? `Disconnect from #${playerState.voiceChannelName}`
+                : "Disconnect"
+            }
+            className="rounded-full p-2 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-35"
+          >
+            <PhoneOff className="h-4 w-4" />
           </button>
 
           <button

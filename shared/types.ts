@@ -2,6 +2,15 @@ export type SearchSource = "auto" | "ytsearch" | "ytmsearch" | "spsearch" | "dzs
 
 export type RepeatModeType = "off" | "track" | "queue";
 
+export type AutoplayMood =
+  | "all"
+  | "familiar"
+  | "discover"
+  | "popular"
+  | "deep_cuts"
+  | "chill"
+  | "upbeat";
+
 export type FilterPreset =
   | "none"
   | "bassboost"
@@ -23,6 +32,7 @@ export interface TrackDTO {
   artworkUrl: string | null;
   sourceName: string;
   isStream: boolean;
+  isAutoplay?: boolean;
   requester?: {
     id: string;
     username: string;
@@ -48,6 +58,7 @@ export interface PlayerStateDTO {
   volume: number;
   repeatMode: RepeatModeType;
   autoplay: boolean;
+  autoplayMood: AutoplayMood;
   activeFilter: FilterPreset;
   current: TrackDTO | null;
   queue: TrackDTO[];
@@ -83,6 +94,8 @@ export interface PlaylistDTO {
   id: string;
   name: string;
   tracks: TrackDTO[];
+  sourceUrl?: string | null;
+  lastSyncedAt?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -194,6 +207,7 @@ export type WsClientMessage =
   | { type: "clearQueue"; guildId: string }
   | { type: "stop"; guildId: string }
   | { type: "toggleAutoplay"; guildId: string; enabled: boolean }
+  | { type: "setAutoplayMood"; guildId: string; mood: AutoplayMood }
   | { type: "setFilter"; guildId: string; preset: FilterPreset }
   | { type: "getLyrics"; guildId: string; title?: string; artist?: string; duration?: number }
   | { type: "getSettings"; guildId: string }
@@ -205,6 +219,8 @@ export type WsClientMessage =
   | { type: "getPlaylists" }
   | { type: "createPlaylist"; name: string }
   | { type: "createPlaylistWithTracks"; name: string; tracks: TrackDTO[] }
+  | { type: "importPlaylist"; url: string; name?: string }
+  | { type: "syncPlaylist"; playlistId: string; url?: string }
   | { type: "renamePlaylist"; playlistId: string; name: string }
   | { type: "deletePlaylist"; playlistId: string }
   | { type: "addTrackToPlaylist"; playlistId: string; track: TrackDTO }

@@ -7,6 +7,7 @@ import {
   Mic2,
   Play,
   Radio,
+  RefreshCw,
   Share2,
   Shuffle,
   Trash2,
@@ -48,6 +49,7 @@ interface Props {
   onRemoveTrack: (index: number) => void;
   onRemoveFromPlaylist: (playlistId: string, index: number) => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
+  onSyncPlaylist: (playlistId: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onToast: (level: ToastLevel, message: string) => void;
 }
@@ -92,6 +94,7 @@ export function ContextMenu({
   onRemoveTrack,
   onRemoveFromPlaylist,
   onPlayPlaylist,
+  onSyncPlaylist,
   onDeletePlaylist,
   onToast,
 }: Props) {
@@ -363,6 +366,20 @@ export function ContextMenu({
             <ListPlus className="h-4 w-4 text-zinc-300" />
             <span>Add to queue</span>
           </button>
+
+          {menu.playlist.sourceUrl && (
+            <button
+              type="button"
+              onClick={() => {
+                onSyncPlaylist(menu.playlist.id);
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+            >
+              <RefreshCw className="h-4 w-4 text-zinc-300" />
+              <span>Sync playlist</span>
+            </button>
+          )}
 
           <div className="my-1 border-t border-white/10" />
 

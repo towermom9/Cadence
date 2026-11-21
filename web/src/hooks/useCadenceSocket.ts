@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AutoplayMood,
   EnqueueMode,
   FilterPreset,
   GuildSettingsDTO,
@@ -336,6 +337,8 @@ export function useCadenceSocket(enabled: boolean) {
     toggleAutoplay: (enabledValue: boolean) =>
       selectedGuildId &&
       send({ type: "toggleAutoplay", guildId: selectedGuildId, enabled: enabledValue }),
+    setAutoplayMood: (mood: AutoplayMood) =>
+      selectedGuildId && send({ type: "setAutoplayMood", guildId: selectedGuildId, mood }),
     setFilter: (preset: FilterPreset) =>
       selectedGuildId && send({ type: "setFilter", guildId: selectedGuildId, preset }),
     requestLyrics,
@@ -344,6 +347,10 @@ export function useCadenceSocket(enabled: boolean) {
     createPlaylist: (name: string) => send({ type: "createPlaylist", name }),
     createPlaylistWithTracks: (name: string, tracks: TrackDTO[]) =>
       send({ type: "createPlaylistWithTracks", name, tracks }),
+    importPlaylist: (url: string, name?: string) =>
+      send({ type: "importPlaylist", url, name }),
+    syncPlaylist: (playlistId: string, url?: string) =>
+      send({ type: "syncPlaylist", playlistId, url }),
     renamePlaylist: (playlistId: string, name: string) =>
       send({ type: "renamePlaylist", playlistId, name }),
     deletePlaylist: (playlistId: string) => send({ type: "deletePlaylist", playlistId }),
