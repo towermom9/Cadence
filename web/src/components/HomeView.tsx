@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Play, Plus } from "lucide-react";
+import { Play, Plus, Trash2 } from "lucide-react";
 import type {
   EnqueueMode,
   HistoryEntryDTO,
@@ -21,6 +21,8 @@ interface Props {
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
+  onClearHistory: () => void;
+  onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
   onPlaylistContextMenu: (e: MouseEvent, playlist: PlaylistDTO) => void;
 }
@@ -79,6 +81,8 @@ export function HomeView({
   onEnqueue,
   onSelectPlaylist,
   onPlayPlaylist,
+  onClearHistory,
+  onOpenArtist,
   onTrackContextMenu,
   onPlaylistContextMenu,
 }: Props) {
@@ -109,24 +113,37 @@ export function HomeView({
 
       {/* Listen Again */}
       <section className="space-y-4">
-        <div className="flex items-center gap-3">
-          {user.avatarUrl ? (
-            <img
-              src={user.avatarUrl}
-              alt={user.username}
-              className="h-9 w-9 rounded-full object-cover"
-            />
-          ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
-              {user.username.slice(0, 2).toUpperCase()}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {user.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.username}
+                className="h-9 w-9 rounded-full object-cover"
+              />
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
+                {user.username.slice(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
+                {user.globalName || user.username}
+              </p>
+              <h2 className="text-2xl font-bold tracking-tight text-white">Listen again</h2>
             </div>
-          )}
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
-              {user.globalName || user.username}
-            </p>
-            <h2 className="text-2xl font-bold tracking-tight text-white">Listen again</h2>
           </div>
+
+          {uniqueHistory.length > 0 && (
+            <button
+              type="button"
+              onClick={onClearHistory}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear history
+            </button>
+          )}
         </div>
 
         {uniqueHistory.length > 0 ? (
@@ -165,7 +182,17 @@ export function HomeView({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-white">{track.title}</p>
                   <p className="truncate text-xs text-zinc-400">
-                    {track.author} • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenArtist(track.author);
+                      }}
+                      className="hover:text-white hover:underline"
+                    >
+                      {track.author}
+                    </button>
+                    <span> • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}</span>
                   </p>
                 </div>
               </div>

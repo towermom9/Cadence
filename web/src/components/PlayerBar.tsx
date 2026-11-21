@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -8,22 +8,40 @@ import {
   Radio,
   Repeat,
   Repeat1,
+  RotateCcw,
   Shuffle,
   SkipBack,
   SkipForward,
+  Sliders,
   Sparkles,
   Volume2,
   VolumeX,
 } from "lucide-react";
-import type { PlayerStateDTO, PlaylistDTO, RepeatModeType, TrackDTO } from "@shared/types";
+import type {
+  FilterPreset,
+  PlayerStateDTO,
+  RepeatModeType,
+  TrackDTO,
+} from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
+const FILTER_PRESETS: { id: FilterPreset; name: string }[] = [
+  { id: "none", name: "Clean / Off" },
+  { id: "bassboost", name: "Bass Boost" },
+  { id: "nightcore", name: "Nightcore" },
+  { id: "vaporwave", name: "Vaporwave" },
+  { id: "8d", name: "8D Audio" },
+  { id: "karaoke", name: "Karaoke" },
+  { id: "lowpass", name: "Low Pass" },
+  { id: "tremolo", name: "Tremolo" },
+  { id: "vibrato", name: "Vibrato" },
+];
+
 interface Props {
   playerState: PlayerStateDTO | null;
   displayPosition: number;
-  playlists: PlaylistDTO[];
   drawerOpen: boolean;
   onToggleDrawer: () => void;
   onTogglePause: () => void;
@@ -34,14 +52,15 @@ interface Props {
   onRepeat: (mode: RepeatModeType) => void;
   onShuffle: () => void;
   onToggleAutoplay: (enabled: boolean) => void;
-  onAddToPlaylist: (playlistId: string, track: TrackDTO) => void;
+  onSetFilter: (preset: FilterPreset) => void;
+  onOpenSaveModal: (tracks: TrackDTO[]) => void;
+  onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
 export function PlayerBar({
   playerState,
   displayPosition,
-  playlists,
   drawerOpen,
   onToggleDrawer,
   onTogglePause,
@@ -52,16 +71,57 @@ export function PlayerBar({
   onRepeat,
   onShuffle,
   onToggleAutoplay,
-  onAddToPlaylist,
+  onSetFilter,
+  onOpenSaveModal,
+  onOpenArtist,
   onTrackContextMenu,
 }: Props) {
-  const [playlistMenuOpen, setPlaylistMenuOpen] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+  const [scrubPosition, setScrubPosition] = useState(0);
+  const [effectsOpen, setEffectsOpen] = useState(false);
+  const scrubPosRef = useRef(0);
+  const isSeekingRef = useRef(false);
+  const effectsRef = useRef<HTMLDivElement>(null);
 
   const track = playerState?.current ?? null;
   const duration = track?.duration || 0;
   const clampedPos = duration > 0 ? Math.min(duration, Math.max(0, displayPosition)) : 0;
-  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (clampedPos / duration) * 100)) : 0;
+  const effectivePos = isSeeking ? scrubPosition : clampedPos;
+  const progressPct = duration > 0 ? Math.min(100, Math.max(0, (effectivePos / duration) * 100)) : 0;
   const hasPlayer = Boolean(playerState?.connected && track);
+  const activeFilter = playerState?.activeFilter ?? "none";
+  const privileged = Boolean(playerState?.isPrivileged);
+
+  useEffect(() => {
+    if (!isSeeking) return;
+
+    const commitSeek = () => {
+      if (!isSeekingRef.current) return;
+      isSeekingRef.current = false;
+      setIsSeeking(false);
+      onSeek(scrubPosRef.current);
+    };
+
+    window.addEventListener("pointerup", commitSeek);
+    window.addEventListener("pointercancel", commitSeek);
+    window.addEventListener("touchend", commitSeek);
+    return () => {
+      window.removeEventListener("pointerup", commitSeek);
+      window.removeEventListener("pointercancel", commitSeek);
+      window.removeEventListener("touchend", commitSeek);
+    };
+  }, [isSeeking, onSeek]);
+
+  useEffect(() => {
+    if (!effectsOpen) return;
+    const onDocClick = (e: globalThis.MouseEvent) => {
+      if (effectsRef.current && !effectsRef.current.contains(e.target as Node)) {
+        setEffectsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [effectsOpen]);
 
   const cycleRepeat = () => {
     const current = playerState?.repeatMode ?? "off";
@@ -82,9 +142,49 @@ export function PlayerBar({
           type="range"
           min={0}
           max={duration > 0 ? duration : 100}
-          value={duration > 0 ? clampedPos : 0}
+          value={duration > 0 ? effectivePos : 0}
           disabled={!hasPlayer || Boolean(track?.isStream)}
-          onChange={(e) => onSeek(Number(e.target.value))}
+          onPointerDown={(e) => {
+            if (!hasPlayer || track?.isStream) return;
+            const val = Number(e.currentTarget.value);
+            isSeekingRef.current = true;
+            scrubPosRef.current = val;
+            setScrubPosition(val);
+            setIsSeeking(true);
+          }}
+          onTouchStart={(e) => {
+            if (!hasPlayer || track?.isStream) return;
+            const val = Number(e.currentTarget.value);
+            isSeekingRef.current = true;
+            scrubPosRef.current = val;
+            setScrubPosition(val);
+            setIsSeeking(true);
+          }}
+          onChange={(e) => {
+            const val = Number(e.target.value);
+            scrubPosRef.current = val;
+            setScrubPosition(val);
+            if (!isSeekingRef.current) {
+              // Keyboard/assistive click changes without pointerdown
+              isSeekingRef.current = true;
+              setIsSeeking(true);
+            }
+          }}
+          onKeyUp={(e) => {
+            if (
+              e.key === "ArrowLeft" ||
+              e.key === "ArrowRight" ||
+              e.key === "Home" ||
+              e.key === "End" ||
+              e.key === "PageUp" ||
+              e.key === "PageDown"
+            ) {
+              const val = Number(e.currentTarget.value);
+              isSeekingRef.current = false;
+              setIsSeeking(false);
+              onSeek(val);
+            }
+          }}
           aria-label="Seek track position"
           className="ytm-progress absolute inset-x-0 -top-1.5 h-4 w-full disabled:cursor-default"
         />
@@ -134,21 +234,28 @@ export function PlayerBar({
                 LIVE
               </span>
             ) : (
-              `${formatMs(clampedPos)} / ${formatMs(duration)}`
+              `${formatMs(effectivePos)} / ${formatMs(duration)}`
             )}
           </span>
         </div>
 
         {/* Center: Track info (click toggles Now Playing view) */}
-        <div className="flex min-w-0 max-w-md flex-1 items-center justify-center gap-3">
-          <button
-            type="button"
+        <div className="flex min-w-0 max-w-md flex-1 items-center justify-center gap-2">
+          <div
             onClick={onToggleDrawer}
             onContextMenu={(e) => {
               if (!track) return;
               onTrackContextMenu(e, track, { isCurrent: true });
             }}
-            className="flex min-w-0 items-center gap-3 rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.06]"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggleDrawer();
+              }
+            }}
+            className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.06]"
           >
             <TrackArtwork
               track={track}
@@ -160,51 +267,42 @@ export function PlayerBar({
                 {track ? track.title : "Nothing playing"}
               </p>
               <p className="truncate text-xs text-zinc-400">
-                {track
-                  ? `${track.author} • ${sourceLabel(track.sourceName)}`
-                  : playerState?.voiceChannelName
-                    ? `Connected to #${playerState.voiceChannelName}`
-                    : "Search or pick a track to play"}
+                {track ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenArtist(track.author);
+                      }}
+                      className="hover:text-white hover:underline"
+                    >
+                      {track.author}
+                    </button>
+                    <span> • {sourceLabel(track.sourceName)}</span>
+                  </>
+                ) : playerState?.voiceChannelName ? (
+                  `Connected to #${playerState.voiceChannelName}`
+                ) : (
+                  "Search or pick a track to play"
+                )}
               </p>
             </div>
-          </button>
+          </div>
 
-          {track && playlists.length > 0 && (
-            <div className="relative hidden sm:block">
-              <button
-                type="button"
-                onClick={() => setPlaylistMenuOpen((v) => !v)}
-                title="Save to playlist"
-                className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
-              >
-                <ListPlus className="h-4 w-4" />
-              </button>
-              {playlistMenuOpen && (
-                <div className="absolute bottom-11 left-0 z-50 w-48 rounded-xl border border-white/12 bg-[#282828] p-1.5 shadow-2xl">
-                  <p className="px-2.5 py-1 text-[11px] font-medium text-zinc-400">
-                    Save to playlist
-                  </p>
-                  {playlists.map((pl) => (
-                    <button
-                      key={pl.id}
-                      type="button"
-                      onClick={() => {
-                        onAddToPlaylist(pl.id, track);
-                        setPlaylistMenuOpen(false);
-                      }}
-                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-200 hover:bg-white/10"
-                    >
-                      <span className="truncate">{pl.name}</span>
-                      <span className="text-[10px] text-zinc-500">{pl.tracks.length}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          {track && (
+            <button
+              type="button"
+              onClick={() => onOpenSaveModal([track])}
+              title="Save to playlist"
+              className="hidden rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white sm:inline-flex"
+            >
+              <ListPlus className="h-4 w-4" />
+            </button>
           )}
         </div>
 
-        {/* Right: Volume, Repeat, Shuffle, Autoplay, Drawer toggle */}
+        {/* Right: Volume, Effects, Repeat, Shuffle, Autoplay, Now Playing toggle */}
         <div className="flex items-center gap-1 sm:gap-1.5">
           <div className="hidden items-center gap-1.5 md:flex">
             <button
@@ -230,6 +328,67 @@ export function PlayerBar({
               aria-label="Volume"
               className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/25 accent-white disabled:opacity-40"
             />
+          </div>
+
+          {/* DSP Audio Effects Popover */}
+          <div ref={effectsRef} className="relative hidden sm:block">
+            <button
+              type="button"
+              disabled={!playerState?.connected || !privileged}
+              onClick={() => setEffectsOpen((v) => !v)}
+              title="Audio effects"
+              className={`rounded-full p-2 transition hover:bg-white/10 disabled:opacity-40 ${
+                activeFilter !== "none" ? "text-[#ff0033]" : "text-zinc-400 hover:text-white"
+              }`}
+            >
+              <Sliders className="h-4 w-4" />
+            </button>
+
+            {effectsOpen && (
+              <div className="absolute bottom-11 right-0 z-50 w-52 rounded-xl border border-white/12 bg-[#212121] p-1.5 shadow-2xl">
+                <div className="flex items-center justify-between px-2.5 py-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                    Audio effects
+                  </span>
+                  {activeFilter !== "none" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSetFilter("none");
+                        setEffectsOpen(false);
+                      }}
+                      className="inline-flex items-center gap-1 text-[11px] text-zinc-300 hover:text-white"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Reset
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 space-y-0.5">
+                  {FILTER_PRESETS.map((preset) => {
+                    const selected = activeFilter === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          onSetFilter(selected && preset.id !== "none" ? "none" : preset.id);
+                          setEffectsOpen(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
+                          selected
+                            ? "bg-white/15 font-semibold text-white"
+                            : "text-zinc-300 hover:bg-white/10"
+                        }`}
+                      >
+                        <span>{preset.name}</span>
+                        {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           <button
@@ -273,7 +432,7 @@ export function PlayerBar({
           <button
             type="button"
             onClick={onToggleDrawer}
-            title={drawerOpen ? "Close Now Playing" : "Open Up Next, Lyrics & Effects"}
+            title={drawerOpen ? "Close Now Playing" : "Open Up Next, Lyrics & Related"}
             className="inline-flex items-center gap-1 rounded-full p-2 text-zinc-200 transition hover:bg-white/10 hover:text-white"
           >
             {drawerOpen ? (

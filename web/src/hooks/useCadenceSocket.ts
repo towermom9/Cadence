@@ -27,6 +27,11 @@ export function useCadenceSocket(enabled: boolean) {
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const retryCountRef = useRef(0);
   const toastIdRef = useRef(1);
+  const seekLockRef = useRef<{
+    target: number;
+    until: number;
+    trackId: string | null;
+  } | null>(null);
 
   const [connected, setConnected] = useState(false);
   const [selectedGuildId, setSelectedGuildId] = useState<string | null>(null);
@@ -106,11 +111,30 @@ export function useCadenceSocket(enabled: boolean) {
           case "ready":
             setSelectedGuildId(msg.selectedGuildId);
             break;
-          case "playerState":
-            setPlayerState(msg.state);
-            setSelectedGuildId(msg.state.guildId);
-            setDisplayPosition(msg.state.position);
+          case "playerState": {
+            const lock = seekLockRef.current;
+            const incomingTrackId = msg.state.current?.identifier ?? null;
+            let nextState = msg.state;
+            if (lock) {
+              if (Date.now() < lock.until && incomingTrackId === lock.trackId) {
+                if (Math.abs(msg.state.position - lock.target) > 2500) {
+                  nextState = {
+                    ...msg.state,
+                    position: lock.target,
+                    updatedAt: Date.now(),
+                  };
+                } else {
+                  seekLockRef.current = null;
+                }
+              } else {
+                seekLockRef.current = null;
+              }
+            }
+            setPlayerState(nextState);
+            setSelectedGuildId(nextState.guildId);
+            setDisplayPosition(nextState.position);
             break;
+          }
           case "searchResults":
             setSearching(false);
             setSearchResults({
@@ -185,7 +209,7 @@ export function useCadenceSocket(enabled: boolean) {
       const max = playerState.current?.duration ?? 0;
       const estimated = Math.min(max, Math.max(0, playerState.position + elapsed));
       setDisplayPosition(estimated);
-    }, 500);
+    }, 250);
 
     return () => clearInterval(interval);
   }, [playerState]);
@@ -277,6 +301,8 @@ export function useCadenceSocket(enabled: boolean) {
     startMix,
     playTrack: (index: number) =>
       selectedGuildId && send({ type: "playTrack", guildId: selectedGuildId, index }),
+    playPrevious: (index: number) =>
+      selectedGuildId && send({ type: "playPrevious", guildId: selectedGuildId, index }),
     togglePause: () => {
       if (!selectedGuildId || !playerState) return;
       send({ type: playerState.paused ? "resume" : "pause", guildId: selectedGuildId });
@@ -285,7 +311,15 @@ export function useCadenceSocket(enabled: boolean) {
     previous: () => selectedGuildId && send({ type: "previous", guildId: selectedGuildId }),
     seek: (position: number) => {
       if (!selectedGuildId) return;
+      seekLockRef.current = {
+        target: position,
+        until: Date.now() + 2000,
+        trackId: playerState?.current?.identifier ?? null,
+      };
       setDisplayPosition(position);
+      setPlayerState((prev) =>
+        prev ? { ...prev, position, updatedAt: Date.now() } : prev
+      );
       send({ type: "seek", guildId: selectedGuildId, position });
     },
     setVolume: (volume: number) =>
@@ -322,5 +356,6 @@ export function useCadenceSocket(enabled: boolean) {
     playPlaylist: (playlistId: string, shuffle = false) =>
       selectedGuildId && send({ type: "playPlaylist", guildId: selectedGuildId, playlistId, shuffle }),
     refreshHistory: () => send({ type: "getHistory" }),
+    clearHistory: () => send({ type: "clearHistory" }),
   };
 }

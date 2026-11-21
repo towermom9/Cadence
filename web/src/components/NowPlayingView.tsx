@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
-  Check,
   ListPlus,
   Loader2,
   MoreVertical,
   Plus,
+  Radio,
   RefreshCw,
-  RotateCcw,
   Shuffle,
   Sliders,
   Sparkles,
@@ -20,17 +19,15 @@ import {
 } from "lucide-react";
 import type {
   EnqueueMode,
-  FilterPreset,
   LyricsDTO,
   PlayerStateDTO,
-  PlaylistDTO,
   TrackDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
 
-export type NowPlayingTab = "upnext" | "lyrics" | "effects";
+export type NowPlayingTab = "upnext" | "lyrics" | "related";
 
 interface Props {
   playerState: PlayerStateDTO | null;
@@ -41,12 +38,13 @@ interface Props {
     loading: boolean;
   };
   lyricsSubjectTrack: TrackDTO | null;
-  playlists: PlaylistDTO[];
   activeTab: NowPlayingTab;
   playSourceLabel: string;
   onTabChange: (tab: NowPlayingTab) => void;
   onPlayTrack: (index: number) => void;
+  onPlayPrevious: (index: number) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onStartMix: (track: TrackDTO) => void;
   onMoveTrack: (from: number, to: number) => void;
   onRemoveTrack: (index: number) => void;
   onShuffle: () => void;
@@ -54,23 +52,10 @@ interface Props {
   onToggleAutoplay: (enabled: boolean) => void;
   onStop: () => void;
   onFetchLyrics: (title?: string, artist?: string, duration?: number) => void;
-  onSetFilter: (preset: FilterPreset) => void;
-  onAddTracksToPlaylist: (playlistId: string, tracks: TrackDTO[]) => void;
-  onCreatePlaylistWithTracks: (name: string, tracks: TrackDTO[]) => void;
+  onOpenSaveModal: (tracks: TrackDTO[]) => void;
+  onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
-
-const FILTER_PRESETS: { id: FilterPreset; name: string; description: string }[] = [
-  { id: "none", name: "Clean / Off", description: "Disable all DSP audio filters." },
-  { id: "bassboost", name: "Bass Boost", description: "Punchier low-end equalizer curve." },
-  { id: "nightcore", name: "Nightcore", description: "Faster tempo and higher pitch." },
-  { id: "vaporwave", name: "Vaporwave", description: "Slowed-down, pitched-down vibe." },
-  { id: "8d", name: "8D Audio", description: "Smooth stereo panning rotation." },
-  { id: "karaoke", name: "Karaoke", description: "Attenuates center vocal frequencies." },
-  { id: "lowpass", name: "Low Pass", description: "Warm muffled underwater tone." },
-  { id: "tremolo", name: "Tremolo", description: "Rhythmic volume oscillation." },
-  { id: "vibrato", name: "Vibrato", description: "Subtle pitch modulation wave." },
-];
 
 interface SyncedLine {
   timeMs: number;
@@ -98,12 +83,13 @@ export function NowPlayingView({
   displayPosition,
   lyricsState,
   lyricsSubjectTrack,
-  playlists,
   activeTab,
   playSourceLabel,
   onTabChange,
   onPlayTrack,
+  onPlayPrevious,
   onEnqueue,
+  onStartMix,
   onMoveTrack,
   onRemoveTrack,
   onShuffle,
@@ -111,18 +97,22 @@ export function NowPlayingView({
   onToggleAutoplay,
   onStop,
   onFetchLyrics,
-  onSetFilter,
-  onAddTracksToPlaylist,
-  onCreatePlaylistWithTracks,
+  onOpenSaveModal,
+  onOpenArtist,
   onTrackContextMenu,
 }: Props) {
-  const [saveOpen, setSaveOpen] = useState(false);
-  const [newPlaylistName, setNewPlaylistName] = useState("");
-  const saveRef = useRef<HTMLDivElement>(null);
+  const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
+  const [relatedLoading, setRelatedLoading] = useState(false);
 
   const current = playerState?.current ?? null;
   const queue = playerState?.queue ?? [];
-  const previousTracks = (playerState?.previous ?? []).slice(0, 5).reverse();
+  const previousEntries = useMemo(
+    () =>
+      (playerState?.previous ?? [])
+        .map((track, prevIndex) => ({ track, prevIndex }))
+        .reverse(),
+    [playerState?.previous]
+  );
   const privileged = Boolean(playerState?.isPrivileged);
   const activeFilter = playerState?.activeFilter ?? "none";
 
@@ -159,16 +149,37 @@ export function NowPlayingView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, current?.identifier, lyricsSubjectTrack?.identifier]);
 
-  useEffect(() => {
-    if (!saveOpen) return;
-    const onDocClick = (e: globalThis.MouseEvent) => {
-      if (saveRef.current && !saveRef.current.contains(e.target as Node)) {
-        setSaveOpen(false);
+  const loadRelated = useCallback(async (seed: TrackDTO, force = false) => {
+    if (!force && relatedCache[seed.identifier]) return;
+    setRelatedLoading(true);
+    try {
+      const params = new URLSearchParams({
+        id: seed.identifier,
+        title: seed.title,
+        author: seed.author,
+        source: seed.sourceName,
+      });
+      if (seed.uri) params.set("uri", seed.uri);
+      const res = await fetch(`/api/related?${params.toString()}`);
+      if (res.ok) {
+        const data = (await res.json()) as { tracks?: TrackDTO[] };
+        setRelatedCache((prev) => ({
+          ...prev,
+          [seed.identifier]: data.tracks ?? [],
+        }));
       }
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [saveOpen]);
+    } catch {
+      // Ignore transient lookup errors
+    } finally {
+      setRelatedLoading(false);
+    }
+  }, [relatedCache]);
+
+  useEffect(() => {
+    if (activeTab === "related" && current && !relatedCache[current.identifier]) {
+      void loadRelated(current);
+    }
+  }, [activeTab, current, loadRelated, relatedCache]);
 
   const tracksToSave: TrackDTO[] = useMemo(() => {
     const items: TrackDTO[] = [];
@@ -179,14 +190,7 @@ export function NowPlayingView({
     return items;
   }, [current, queue]);
 
-  const handleCreateAndSave = (e: FormEvent) => {
-    e.preventDefault();
-    const trimmed = newPlaylistName.trim();
-    if (!trimmed || tracksToSave.length === 0) return;
-    onCreatePlaylistWithTracks(trimmed, tracksToSave);
-    setNewPlaylistName("");
-    setSaveOpen(false);
-  };
+  const relatedTracks = current ? relatedCache[current.identifier] ?? [] : [];
 
   return (
     <div className="mx-auto grid h-full min-h-0 w-full max-w-7xl gap-6 lg:grid-cols-12 lg:gap-10">
@@ -242,7 +246,14 @@ export function NowPlayingView({
               <>
                 <h2 className="truncate text-lg font-bold text-white">{current.title}</h2>
                 <p className="mt-0.5 truncate text-xs text-zinc-400">
-                  {current.author} • {sourceLabel(current.sourceName)}
+                  <button
+                    type="button"
+                    onClick={() => onOpenArtist(current.author)}
+                    className="hover:text-white hover:underline"
+                  >
+                    {current.author}
+                  </button>
+                  <span> • {sourceLabel(current.sourceName)}</span>
                 </p>
               </>
             ) : (
@@ -252,14 +263,14 @@ export function NowPlayingView({
         </div>
       </div>
 
-      {/* Right Queue / Lyrics / Effects Column */}
+      {/* Right Queue / Lyrics / Related Column */}
       <div className="flex min-h-0 flex-col lg:col-span-5">
         <div className="flex shrink-0 items-center border-b border-white/10">
           {(
             [
               { id: "upnext", label: "Up next" },
               { id: "lyrics", label: "Lyrics" },
-              { id: "effects", label: "Effects" },
+              { id: "related", label: "Related" },
             ] as const
           ).map((item) => {
             const active = activeTab === item.id;
@@ -292,67 +303,15 @@ export function NowPlayingView({
                 </p>
               </div>
 
-              <div ref={saveRef} className="relative shrink-0">
-                <button
-                  type="button"
-                  disabled={tracksToSave.length === 0}
-                  onClick={() => setSaveOpen((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
-                >
-                  <ListPlus className="h-3.5 w-3.5" />
-                  Save
-                </button>
-
-                {saveOpen && (
-                  <div className="absolute right-0 top-10 z-30 w-60 rounded-xl border border-white/12 bg-[#212121] p-2 shadow-2xl">
-                    <p className="px-2 py-1 text-[11px] font-medium text-zinc-400">
-                      Save {tracksToSave.length} {tracksToSave.length === 1 ? "track" : "tracks"} to playlist
-                    </p>
-
-                    <div className="mt-1 max-h-44 space-y-0.5 overflow-y-auto">
-                      {playlists.length === 0 ? (
-                        <p className="px-2 py-2 text-xs text-zinc-500">No playlists yet.</p>
-                      ) : (
-                        playlists.map((pl) => (
-                          <button
-                            key={pl.id}
-                            type="button"
-                            onClick={() => {
-                              onAddTracksToPlaylist(pl.id, tracksToSave);
-                              setSaveOpen(false);
-                            }}
-                            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs text-zinc-200 transition hover:bg-white/10"
-                          >
-                            <span className="truncate">{pl.name}</span>
-                            <span className="text-[10px] text-zinc-500">{pl.tracks.length}</span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-
-                    <form
-                      onSubmit={handleCreateAndSave}
-                      className="mt-2 flex items-center gap-1 border-t border-white/10 pt-2"
-                    >
-                      <input
-                        type="text"
-                        value={newPlaylistName}
-                        onChange={(e) => setNewPlaylistName(e.target.value)}
-                        placeholder="New playlist name..."
-                        className="min-w-0 flex-1 rounded-lg bg-[#161616] px-2.5 py-1.5 text-xs text-white placeholder-zinc-500 outline-none focus:ring-1 focus:ring-white/30"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!newPlaylistName.trim()}
-                        title="Create playlist"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white text-black transition hover:bg-zinc-200 disabled:opacity-40"
-                      >
-                        {newPlaylistName.trim() ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                      </button>
-                    </form>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                disabled={tracksToSave.length === 0}
+                onClick={() => onOpenSaveModal(tracksToSave)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
+              >
+                <ListPlus className="h-3.5 w-3.5" />
+                Save
+              </button>
             </div>
 
             {/* Autoplay + Shuffle + Clear strip */}
@@ -395,19 +354,19 @@ export function NowPlayingView({
               )}
             </div>
 
-            {/* Scrollable Queue Rows */}
+            {/* Scrollable Queue Timeline */}
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
-              {!current && queue.length === 0 && previousTracks.length === 0 ? (
+              {!current && queue.length === 0 && previousEntries.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                   Nothing in the queue yet. Search or click a song to play.
                 </div>
               ) : (
                 <>
-                  {/* Recent previous tracks (like YTM Up Next scrollback) */}
-                  {previousTracks.map((track, idx) => (
+                  {/* Previous tracks in queue timeline */}
+                  {previousEntries.map(({ track, prevIndex }) => (
                     <div
-                      key={`prev-${track.identifier}-${idx}`}
-                      onClick={() => onEnqueue([track], "now")}
+                      key={`prev-${track.identifier}-${prevIndex}`}
+                      onClick={() => onPlayPrevious(prevIndex)}
                       onContextMenu={(e) => onTrackContextMenu(e, track)}
                       className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
                     >
@@ -418,7 +377,18 @@ export function NowPlayingView({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
-                        <p className="truncate text-xs text-zinc-400">{track.author}</p>
+                        <p className="truncate text-xs text-zinc-400">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenArtist(track.author);
+                            }}
+                            className="hover:text-white hover:underline"
+                          >
+                            {track.author}
+                          </button>
+                        </p>
                       </div>
                       <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
                         {track.isStream ? "LIVE" : formatMs(track.duration)}
@@ -455,7 +425,18 @@ export function NowPlayingView({
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-white">{current.title}</p>
-                        <p className="truncate text-xs text-zinc-300">{current.author}</p>
+                        <p className="truncate text-xs text-zinc-300">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenArtist(current.author);
+                            }}
+                            className="hover:text-white hover:underline"
+                          >
+                            {current.author}
+                          </button>
+                        </p>
                       </div>
                       <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
                         {current.isStream ? "LIVE" : formatMs(current.duration)}
@@ -489,7 +470,18 @@ export function NowPlayingView({
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{track.title}</p>
-                        <p className="truncate text-xs text-zinc-400">{track.author}</p>
+                        <p className="truncate text-xs text-zinc-400">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenArtist(track.author);
+                            }}
+                            className="hover:text-white hover:underline"
+                          >
+                            {track.author}
+                          </button>
+                        </p>
                       </div>
 
                       <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
@@ -637,53 +629,116 @@ export function NowPlayingView({
           </div>
         )}
 
-        {/* EFFECTS */}
-        {activeTab === "effects" && (
-          <div className="min-h-0 flex-1 overflow-y-auto pt-4">
-            <div className="space-y-4 pb-6">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-zinc-400">
-                  {!playerState?.connected
-                    ? "Play audio in a voice channel to apply DSP filters."
-                    : !privileged
-                      ? "Requires Manage Server, DJ role, or being alone in voice."
-                      : "Select a Lavalink audio filter."}
-                </p>
-                <button
-                  type="button"
-                  disabled={!playerState?.connected || !privileged || activeFilter === "none"}
-                  onClick={() => onSetFilter("none")}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/12 disabled:opacity-40"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  Reset
-                </button>
+        {/* RELATED / SUGGESTIONS */}
+        {activeTab === "related" && (
+          <div className="flex min-h-0 flex-1 flex-col pt-3">
+            {!current ? (
+              <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
+                Play a track to see related song suggestions.
               </div>
-
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                {FILTER_PRESETS.map((preset) => {
-                  const isActive = activeFilter === preset.id;
-                  return (
+            ) : (
+              <>
+                <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-zinc-400">Related to</p>
+                    <p className="truncate text-sm font-semibold text-white">
+                      {current.title}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
                     <button
-                      key={preset.id}
                       type="button"
-                      disabled={!playerState?.connected || !privileged}
-                      onClick={() =>
-                        onSetFilter(isActive && preset.id !== "none" ? "none" : preset.id)
-                      }
-                      className={`rounded-xl border p-3.5 text-left transition disabled:cursor-not-allowed disabled:opacity-45 ${
-                        isActive
-                          ? "border-white bg-white/15"
-                          : "border-white/10 bg-[#181818] hover:border-white/25 hover:bg-[#222222]"
-                      }`}
+                      onClick={() => onStartMix(current)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-black transition hover:bg-zinc-200"
                     >
-                      <p className="text-sm font-medium text-white">{preset.name}</p>
-                      <p className="mt-1 text-xs text-zinc-400">{preset.description}</p>
+                      <Radio className="h-3.5 w-3.5" />
+                      Start mix
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                    <button
+                      type="button"
+                      disabled={relatedLoading}
+                      onClick={() => void loadRelated(current, true)}
+                      title="Refresh suggestions"
+                      className="rounded-full bg-white/[0.06] p-1.5 text-zinc-300 transition hover:bg-white/12 hover:text-white disabled:opacity-40"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${relatedLoading ? "animate-spin" : ""}`} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+                  {relatedLoading && relatedTracks.length === 0 ? (
+                    <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-400">
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
+                      Finding related tracks...
+                    </div>
+                  ) : relatedTracks.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
+                      No related suggestions available for this track yet.
+                    </div>
+                  ) : (
+                    relatedTracks.map((track, idx) => (
+                      <div
+                        key={`rel-${track.identifier}-${idx}`}
+                        onClick={() =>
+                          onEnqueue([track], "now", `Related • ${current.title}`)
+                        }
+                        onContextMenu={(e) => onTrackContextMenu(e, track)}
+                        className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                      >
+                        <TrackArtwork
+                          track={track}
+                          className="h-10 w-10 shrink-0 rounded"
+                          iconClassName="h-4 w-4"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                          <p className="truncate text-xs text-zinc-400">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenArtist(track.author);
+                              }}
+                              className="hover:text-white hover:underline"
+                            >
+                              {track.author}
+                            </button>
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                          {track.isStream ? "LIVE" : formatMs(track.duration)}
+                        </span>
+                        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEnqueue([track], "end", `Related • ${current.title}`);
+                            }}
+                            title="Add to queue"
+                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onTrackContextMenu(e, track);
+                            }}
+                            title="More options"
+                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

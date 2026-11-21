@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Check,
   Disc3,
@@ -15,9 +22,13 @@ import type {
   AppMetaDTO,
   GuildSummaryDTO,
   SearchSource,
+  SearchSuggestResponseDTO,
+  TrackDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { formatMs } from "../utils/format";
 import { MobileMenuButton } from "./Sidebar";
+import { TrackArtwork } from "./TrackArtwork";
 
 interface Props {
   user: UserProfileDTO;
@@ -27,6 +38,9 @@ interface Props {
   searching: boolean;
   onOpenMobileMenu: () => void;
   onSearch: (query: string, source: SearchSource) => void;
+  onPlayTrack: (track: TrackDTO, sourceLabel?: string) => void;
+  onOpenArtist: (artistName: string) => void;
+  onTrackContextMenu: (e: ReactMouseEvent, track: TrackDTO) => void;
   onSelectGuild: (guildId: string) => void;
   onOpenSettings: () => void;
   onLogout: () => void;
@@ -48,6 +62,9 @@ export function TopBar({
   searching,
   onOpenMobileMenu,
   onSearch,
+  onPlayTrack,
+  onOpenArtist,
+  onTrackContextMenu,
   onSelectGuild,
   onOpenSettings,
   onLogout,
@@ -55,6 +72,13 @@ export function TopBar({
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchSource>("auto");
   const [openMenu, setOpenMenu] = useState<"cast" | "user" | null>(null);
+
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestTracks, setSuggestTracks] = useState<TrackDTO[]>([]);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
   const containerRef = useRef<HTMLDivElement>(null);
 
   const botGuilds = guilds.filter((g) => g.botPresent);
@@ -62,19 +86,115 @@ export function TopBar({
   const currentGuild = guilds.find((g) => g.id === selectedGuildId) ?? null;
 
   useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
+    const onDocClick = (e: globalThis.MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpenMenu(null);
+        setSuggestOpen(false);
       }
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2 || /^https?:\/\//i.test(trimmed)) {
+      setSuggestions([]);
+      setSuggestTracks([]);
+      setSuggestLoading(false);
+      setActiveIndex(-1);
+      return;
+    }
+
+    const controller = new AbortController();
+    setSuggestLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/search/suggest?q=${encodeURIComponent(trimmed)}&source=${encodeURIComponent(source)}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) {
+          setSuggestLoading(false);
+          return;
+        }
+        const data = (await res.json()) as SearchSuggestResponseDTO;
+        setSuggestions(data.suggestions ?? []);
+        setSuggestTracks(data.tracks ?? []);
+        setActiveIndex(-1);
+        setSuggestOpen(true);
+      } catch {
+        // Ignore aborted or transient suggest errors
+      } finally {
+        if (!controller.signal.aborted) {
+          setSuggestLoading(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, source]);
+
+  const totalSuggestItems = suggestions.length + suggestTracks.length;
+  const showDropdown = suggestOpen && query.trim().length >= 2 && (totalSuggestItems > 0 || suggestLoading);
+
+  const runSearch = (text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    setSuggestOpen(false);
+    setActiveIndex(-1);
+    onSearch(clean, source);
+  };
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
-    onSearch(query.trim(), source);
+    if (showDropdown && activeIndex >= 0) {
+      if (activeIndex < suggestions.length) {
+        const text = suggestions[activeIndex];
+        setQuery(text);
+        runSearch(text);
+        return;
+      }
+      const track = suggestTracks[activeIndex - suggestions.length];
+      if (track) {
+        setSuggestOpen(false);
+        setActiveIndex(-1);
+        onPlayTrack(track, query.trim());
+        return;
+      }
+    }
+    runSearch(query);
+  };
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!showDropdown || totalSuggestItems === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev + 1 >= totalSuggestItems ? 0 : prev + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev <= 0 ? totalSuggestItems - 1 : prev - 1));
+    } else if (e.key === "Escape") {
+      setSuggestOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+
+  const renderHighlightedSuggestion = (text: string) => {
+    const cleanTyped = query.trim();
+    if (cleanTyped && text.toLowerCase().startsWith(cleanTyped.toLowerCase())) {
+      return (
+        <>
+          <span className="font-semibold text-white">{text.slice(0, cleanTyped.length)}</span>
+          <span className="text-zinc-400">{text.slice(cleanTyped.length)}</span>
+        </>
+      );
+    }
+    return <span className="text-zinc-200">{text}</span>;
   };
 
   const buildInviteLink = (guildId: string) => {
@@ -90,15 +210,21 @@ export function TopBar({
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <MobileMenuButton onClick={onOpenMobileMenu} />
 
-        {/* YTM-style search pill */}
-        <form onSubmit={handleSubmit} className="w-full max-w-xl">
-          <div className="flex items-center gap-2 rounded-lg border border-white/12 bg-white/[0.08] px-3 py-1.5 transition focus-within:border-white/30 focus-within:bg-[#121212]">
+        {/* YTM-style search pill + live autofill dropdown */}
+        <form onSubmit={handleSubmit} className="relative w-full max-w-xl">
+          <div
+            className={`flex items-center gap-2 border border-white/12 px-3 py-1.5 transition ${
+              showDropdown
+                ? "rounded-t-lg border-white/25 bg-[#0f0f0f]"
+                : "rounded-lg bg-white/[0.08] focus-within:border-white/30 focus-within:bg-[#121212]"
+            }`}
+          >
             <button
               type="submit"
               className="text-zinc-400 transition hover:text-white"
               aria-label="Search"
             >
-              {searching ? (
+              {searching || suggestLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-white" />
               ) : (
                 <Search className="h-4 w-4" />
@@ -107,14 +233,30 @@ export function TopBar({
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => {
+                if (totalSuggestItems > 0) setSuggestOpen(true);
+              }}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (e.target.value.trim().length >= 2) {
+                  setSuggestOpen(true);
+                } else {
+                  setSuggestOpen(false);
+                }
+              }}
+              onKeyDown={handleKeyDown}
               placeholder="Search songs, albums, artists, URLs..."
               className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-zinc-400 outline-none"
             />
             {query && (
               <button
                 type="button"
-                onClick={() => setQuery("")}
+                onClick={() => {
+                  setQuery("");
+                  setSuggestions([]);
+                  setSuggestTracks([]);
+                  setSuggestOpen(false);
+                }}
                 className="rounded-full p-0.5 text-zinc-400 hover:text-white"
                 aria-label="Clear search"
               >
@@ -135,6 +277,90 @@ export function TopBar({
               ))}
             </select>
           </div>
+
+          {showDropdown && (
+            <div className="absolute inset-x-0 top-full z-40 overflow-hidden rounded-b-xl border border-t-0 border-white/20 bg-[#0f0f0f] shadow-2xl">
+              {suggestions.length > 0 && (
+                <div className="py-1.5">
+                  {suggestions.map((text, idx) => {
+                    const highlighted = activeIndex === idx;
+                    return (
+                      <button
+                        key={`${text}-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setQuery(text);
+                          runSearch(text);
+                        }}
+                        className={`flex w-full items-center gap-3.5 px-3.5 py-2 text-left text-sm transition ${
+                          highlighted ? "bg-white/12" : "hover:bg-white/[0.08]"
+                        }`}
+                      >
+                        <Search className="h-4 w-4 shrink-0 text-zinc-400" />
+                        <span className="truncate">{renderHighlightedSuggestion(text)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {suggestTracks.length > 0 && (
+                <div
+                  className={
+                    suggestions.length > 0 ? "border-t border-white/10 py-1.5" : "py-1.5"
+                  }
+                >
+                  {suggestTracks.map((track, idx) => {
+                    const itemIdx = suggestions.length + idx;
+                    const highlighted = activeIndex === itemIdx;
+                    return (
+                      <div
+                        key={`suggest-${track.identifier}-${idx}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setSuggestOpen(false);
+                          setActiveIndex(-1);
+                          onPlayTrack(track, query.trim());
+                        }}
+                        onContextMenu={(e) => {
+                          setSuggestOpen(false);
+                          onTrackContextMenu(e, track);
+                        }}
+                        className={`flex cursor-pointer items-center gap-3 px-3.5 py-2 transition ${
+                          highlighted ? "bg-white/12" : "hover:bg-white/[0.08]"
+                        }`}
+                      >
+                        <TrackArtwork
+                          track={track}
+                          className="h-10 w-10 shrink-0 rounded"
+                          iconClassName="h-4 w-4"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                          <p className="truncate text-xs text-zinc-400">
+                            <span>Song • </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSuggestOpen(false);
+                                onOpenArtist(track.author);
+                              }}
+                              className="hover:text-white hover:underline"
+                            >
+                              {track.author}
+                            </button>
+                            <span> • {track.isStream ? "LIVE" : formatMs(track.duration)}</span>
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </form>
       </div>
 
@@ -239,6 +465,7 @@ export function TopBar({
                         <img
                           src={guild.iconUrl}
                           alt={guild.name}
+                          referrerPolicy="no-referrer"
                           className="h-7 w-7 shrink-0 rounded-full object-cover"
                         />
                       ) : (

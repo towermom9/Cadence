@@ -14,7 +14,12 @@ import {
   setSessionCookie,
 } from "./auth";
 import type { CadenceBot } from "./bot";
-import { config } from "./config";
+import type {
+  SearchSuggestResponseDTO,
+  SearchSource,
+  TrackDTO,
+} from "@shared/types";
+import { config, VALID_SEARCH_SOURCES } from "./config";
 import type { CadenceDatabase } from "./db";
 import { registerSetupRoutes } from "./setup";
 import type { CadenceWsHub } from "./ws";
@@ -238,6 +243,114 @@ export function createWebApp(
       });
     } catch {
       return c.json({ error: "Artwork fetch failed" }, 502);
+    }
+  });
+
+  app.get("/api/search/suggest", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const q = (c.req.query("q") || "").trim();
+    if (q.length < 2) {
+      return c.json({ query: q, suggestions: [], tracks: [] } satisfies SearchSuggestResponseDTO);
+    }
+
+    const rawSource = (c.req.query("source") || "auto") as SearchSource;
+    const source: SearchSource = VALID_SEARCH_SOURCES.has(rawSource) ? rawSource : "auto";
+    const requester = {
+      id: session.user.id,
+      username: session.user.globalName || session.user.username,
+      avatarUrl: session.user.avatarUrl,
+    };
+
+    const [suggestRes, trackRes] = await Promise.allSettled([
+      (async () => {
+        const res = await fetch(
+          `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(q)}`,
+          {
+            signal: AbortSignal.timeout(3000),
+            headers: { "User-Agent": "Mozilla/5.0" },
+          }
+        );
+        if (!res.ok) return [] as string[];
+        const data = (await res.json()) as unknown;
+        if (!Array.isArray(data) || !Array.isArray(data[1])) return [] as string[];
+        return data[1]
+          .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          .slice(0, 6);
+      })(),
+      bot.music.search(q, source, requester),
+    ]);
+
+    const suggestions = suggestRes.status === "fulfilled" ? suggestRes.value : [];
+    const tracks =
+      trackRes.status === "fulfilled" ? trackRes.value.tracks.slice(0, 4) : ([] as TrackDTO[]);
+
+    return c.json({ query: q, suggestions, tracks } satisfies SearchSuggestResponseDTO);
+  });
+
+  app.get("/api/artist", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const name = (c.req.query("name") || "").trim();
+    if (!name) {
+      return c.json({ error: "Missing artist name" }, 400);
+    }
+
+    const requester = {
+      id: session.user.id,
+      username: session.user.globalName || session.user.username,
+      avatarUrl: session.user.avatarUrl,
+    };
+
+    try {
+      const profile = await bot.music.getArtistProfile(name, requester);
+      return c.json(profile);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to load artist profile.";
+      const status = msg.includes("not connected") ? 503 : 502;
+      return c.json({ error: msg }, status);
+    }
+  });
+
+  app.get("/api/related", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const id = (c.req.query("id") || "").trim();
+    const title = (c.req.query("title") || "").trim();
+    const author = (c.req.query("author") || "").trim();
+    const sourceName = (c.req.query("source") || "youtube").trim();
+    const uri = (c.req.query("uri") || "").trim() || null;
+
+    if (!id && !title) {
+      return c.json({ tracks: [] });
+    }
+
+    const requester = {
+      id: session.user.id,
+      username: session.user.globalName || session.user.username,
+      avatarUrl: session.user.avatarUrl,
+    };
+
+    try {
+      const tracks = await bot.music.getRelatedTracks(
+        { identifier: id, title, author, sourceName, uri },
+        requester,
+        20
+      );
+      return c.json({ tracks });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to load related tracks.";
+      const status = msg.includes("not connected") ? 503 : 502;
+      return c.json({ error: msg, tracks: [] }, status);
     }
   });
 

@@ -8,6 +8,7 @@ import {
   type UnresolvedTrack,
 } from "lavalink-client";
 import type {
+  ArtistProfileDTO,
   EnqueueMode,
   FilterPreset,
   ListenerDTO,
@@ -422,87 +423,23 @@ export class MusicService {
     );
   }
 
-  async enqueue(
-    guildId: string,
-    voiceChannelId: string,
-    dtos: TrackDTO[],
-    mode: EnqueueMode,
-    requester: RequesterInfo,
-    textChannelId?: string
-  ): Promise<{ added: number; playingNow: TrackDTO | null }> {
-    if (dtos.length === 0) {
-      return { added: 0, playingNow: null };
+  private pushPrevious(
+    player: Player,
+    track: Track | UnresolvedTrack | null | undefined
+  ): void {
+    if (!track) return;
+    player.queue.previous.unshift(track as Track);
+    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
+    if (player.queue.previous.length > maxPrev) {
+      player.queue.previous.splice(maxPrev);
     }
-
-    const settings = this.db.getGuildSettings(guildId);
-    const player = await this.ensurePlayer(guildId, voiceChannelId, textChannelId);
-    this.clearInactivityTimer(guildId);
-
-    let filtered = dtos;
-    if (!settings.allowDuplicates) {
-      const existingIds = new Set<string>();
-      if (player.queue.current) {
-        existingIds.add(player.queue.current.info.identifier);
-      }
-      for (const item of player.queue.tracks) {
-        if (item.info.identifier) {
-          existingIds.add(item.info.identifier);
-        }
-      }
-      filtered = dtos.filter((t) => {
-        if (existingIds.has(t.identifier)) return false;
-        existingIds.add(t.identifier);
-        return true;
-      });
-    }
-
-    if (filtered.length === 0) {
-      throw new Error("Duplicate tracks are disabled on this server.");
-    }
-
-    const tracks = filtered.map((dto) => this.dtoToLavalinkTrack(dto, requester));
-
-    if (mode === "now") {
-      await player.queue.add(tracks, 0);
-      if (player.playing || player.paused || player.queue.current) {
-        await player.skip(0, false);
-      } else {
-        await player.play();
-      }
-    } else if (mode === "next") {
-      await player.queue.add(tracks, 0);
-      if (!player.playing && !player.paused && !player.queue.current) {
-        await player.play();
-      }
-    } else {
-      await player.queue.add(tracks);
-      if (!player.playing && !player.paused && !player.queue.current) {
-        await player.play();
-      }
-    }
-
-    this.onStateChange(guildId);
-    return {
-      added: tracks.length,
-      playingNow: player.queue.current ? trackToDTO(player.queue.current) : filtered[0] ?? null,
-    };
   }
 
-  async startMix(
-    guildId: string,
-    voiceChannelId: string,
-    seedTrack: TrackDTO,
-    requester: RequesterInfo,
-    textChannelId?: string
-  ): Promise<{ added: number }> {
-    await this.enqueue(guildId, voiceChannelId, [seedTrack], "now", requester, textChannelId);
-    this.autoplayOverrides.set(guildId, true);
-
-    const player = this.getPlayer(guildId);
-    if (!player) {
-      return { added: 0 };
-    }
-
+  private async fetchRelatedLavalinkTracks(
+    seedTrack: Pick<TrackDTO, "identifier" | "title" | "author" | "sourceName" | "uri">,
+    requester?: RequesterInfo,
+    limit = 20
+  ): Promise<(Track | UnresolvedTrack)[]> {
     const node = this.getConnectedNode();
     const candidatePool: (Track | UnresolvedTrack)[] = [];
 
@@ -529,20 +466,22 @@ export class MusicService {
     );
     if (nonSeedFromMix.length < 2) {
       try {
-        const fallbackQuery = `${seedTrack.author} ${seedTrack.title}`.trim();
-        const searchResult = await node.search(
-          { query: fallbackQuery, source: "ytmsearch" },
-          requester
-        );
-        if (searchResult.loadType !== "error") {
-          candidatePool.push(...searchResult.tracks);
+        const fallbackQuery = `${seedTrack.author} ${seedTrack.title}`.trim() || seedTrack.title;
+        if (fallbackQuery) {
+          const searchResult = await node.search(
+            { query: fallbackQuery, source: "ytmsearch" },
+            requester
+          );
+          if (searchResult.loadType !== "error") {
+            candidatePool.push(...searchResult.tracks);
+          }
         }
       } catch (error) {
         console.warn(`[Mix] Fallback ytmsearch failed for ${seedTrack.title}:`, error);
       }
     }
 
-    const seenIds = new Set<string>([seedTrack.identifier]);
+    const seenIds = new Set<string>(seedTrack.identifier ? [seedTrack.identifier] : []);
     const related: (Track | UnresolvedTrack)[] = [];
     for (const candidate of candidatePool) {
       if (candidate.info.isStream) continue;
@@ -550,9 +489,182 @@ export class MusicService {
       if (cid && seenIds.has(cid)) continue;
       if (cid) seenIds.add(cid);
       related.push(candidate);
-      if (related.length >= 10) break;
+      if (related.length >= limit) break;
     }
 
+    return related;
+  }
+
+  async getRelatedTracks(
+    seedTrack: Pick<TrackDTO, "identifier" | "title" | "author" | "sourceName" | "uri">,
+    requester?: RequesterInfo,
+    limit = 20
+  ): Promise<TrackDTO[]> {
+    const rawTracks = await this.fetchRelatedLavalinkTracks(seedTrack, requester, limit);
+    return rawTracks.map((t) => trackToDTO(t));
+  }
+
+  async getArtistProfile(
+    artistName: string,
+    requester?: RequesterInfo
+  ): Promise<ArtistProfileDTO> {
+    const cleanName = artistName.trim();
+    if (!cleanName) {
+      throw new Error("Artist name is required.");
+    }
+
+    const node = this.getConnectedNode();
+    const result = await node.search(
+      { query: cleanName, source: "ytmsearch" },
+      requester
+    );
+    if (result.loadType === "error") {
+      throw new Error(result.exception?.message || "Failed to load artist tracks.");
+    }
+
+    const needle = cleanName.toLowerCase();
+    const exactMatches: TrackDTO[] = [];
+    const fallbackTracks: TrackDTO[] = [];
+    const seen = new Set<string>();
+
+    for (const rawTrack of result.tracks) {
+      if (rawTrack.info.isStream) continue;
+      const dto = trackToDTO(rawTrack);
+      if (seen.has(dto.identifier)) continue;
+      seen.add(dto.identifier);
+
+      const authorLower = dto.author.toLowerCase();
+      const artistParts = authorLower
+        .split(/[,&•/]|feat\.|ft\./i)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      const isArtistMatch =
+        authorLower === needle ||
+        artistParts.includes(needle) ||
+        authorLower.includes(needle);
+
+      if (isArtistMatch) {
+        exactMatches.push(dto);
+      } else {
+        fallbackTracks.push(dto);
+      }
+    }
+
+    const topSongs =
+      exactMatches.length >= 4
+        ? exactMatches.slice(0, 20)
+        : [...exactMatches, ...fallbackTracks].slice(0, 20);
+    const usedIds = new Set(topSongs.map((t) => t.identifier));
+    const relatedTracks = fallbackTracks
+      .filter((t) => !usedIds.has(t.identifier))
+      .slice(0, 12);
+
+    return {
+      name: cleanName,
+      artworkUrl: topSongs[0]?.artworkUrl ?? null,
+      trackCount: topSongs.length,
+      topSongs,
+      relatedTracks,
+    };
+  }
+
+  async enqueue(
+    guildId: string,
+    voiceChannelId: string,
+    dtos: TrackDTO[],
+    mode: EnqueueMode,
+    requester: RequesterInfo,
+    textChannelId?: string
+  ): Promise<{ added: number; playingNow: TrackDTO | null }> {
+    if (dtos.length === 0) {
+      return { added: 0, playingNow: null };
+    }
+
+    const settings = this.db.getGuildSettings(guildId);
+    const player = await this.ensurePlayer(guildId, voiceChannelId, textChannelId);
+    this.clearInactivityTimer(guildId);
+
+    let filtered = dtos;
+    if (!settings.allowDuplicates && (mode === "end" || mode === "next")) {
+      const existingIds = new Set<string>();
+      if (player.queue.current) {
+        existingIds.add(player.queue.current.info.identifier);
+      }
+      for (const item of player.queue.tracks) {
+        if (item.info.identifier) {
+          existingIds.add(item.info.identifier);
+        }
+      }
+      filtered = dtos.filter((t) => {
+        if (existingIds.has(t.identifier)) return false;
+        existingIds.add(t.identifier);
+        return true;
+      });
+    }
+
+    if (filtered.length === 0) {
+      throw new Error("Duplicate tracks are disabled on this server.");
+    }
+
+    const tracks = filtered.map((dto) => this.dtoToLavalinkTrack(dto, requester));
+
+    if (mode === "replace") {
+      if (player.queue.tracks.length > 0) {
+        await player.queue.splice(0, player.queue.tracks.length);
+      }
+      if (player.queue.current) {
+        this.pushPrevious(player, player.queue.current);
+      }
+      if (tracks.length > 1) {
+        await player.queue.add(tracks.slice(1));
+      }
+      await player.play({ clientTrack: tracks[0], paused: false });
+      await player.queue.utils.save();
+    } else if (mode === "now") {
+      if (player.queue.current) {
+        this.pushPrevious(player, player.queue.current);
+      }
+      if (tracks.length > 1) {
+        await player.queue.add(tracks.slice(1), 0);
+      }
+      await player.play({ clientTrack: tracks[0], paused: false });
+      await player.queue.utils.save();
+    } else if (mode === "next") {
+      await player.queue.add(tracks, 0);
+      if (!player.playing && !player.paused && !player.queue.current) {
+        await player.play();
+      }
+    } else {
+      await player.queue.add(tracks);
+      if (!player.playing && !player.paused && !player.queue.current) {
+        await player.play();
+      }
+    }
+
+    this.onStateChange(guildId);
+    return {
+      added: tracks.length,
+      playingNow: player.queue.current ? trackToDTO(player.queue.current) : filtered[0] ?? null,
+    };
+  }
+
+  async startMix(
+    guildId: string,
+    voiceChannelId: string,
+    seedTrack: TrackDTO,
+    requester: RequesterInfo,
+    textChannelId?: string
+  ): Promise<{ added: number }> {
+    await this.enqueue(guildId, voiceChannelId, [seedTrack], "replace", requester, textChannelId);
+    this.autoplayOverrides.set(guildId, true);
+
+    const player = this.getPlayer(guildId);
+    if (!player) {
+      return { added: 0 };
+    }
+
+    const related = await this.fetchRelatedLavalinkTracks(seedTrack, requester, 10);
     if (related.length > 0) {
       await player.queue.add(related);
     }
@@ -569,14 +681,37 @@ export class MusicService {
     }
 
     const target = player.queue.tracks[index];
-    await player.queue.splice(index, 1);
-    await player.queue.add(target, 0);
-
-    if (player.playing || player.paused || player.queue.current) {
-      await player.skip(0, false);
-    } else {
-      await player.play();
+    this.pushPrevious(player, player.queue.current);
+    for (let i = 0; i < index; i++) {
+      this.pushPrevious(player, player.queue.tracks[i]);
     }
+    await player.queue.splice(0, index + 1);
+    await player.play({ clientTrack: target, paused: false });
+    await player.queue.utils.save();
+    this.onStateChange(guildId);
+  }
+
+  async playPrevious(guildId: string, previousIndex: number): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    if (previousIndex < 0 || previousIndex >= player.queue.previous.length) {
+      throw new Error("No previous track at that position.");
+    }
+
+    const target = player.queue.previous[previousIndex];
+    const skippedBack = player.queue.previous.slice(0, previousIndex).reverse();
+    const toRequeue: (Track | UnresolvedTrack)[] = [...skippedBack];
+    if (player.queue.current) {
+      toRequeue.push(player.queue.current);
+    }
+
+    player.queue.previous.splice(0, previousIndex + 1);
+    if (toRequeue.length > 0) {
+      await player.queue.add(toRequeue, 0);
+    }
+
+    await player.play({ clientTrack: target, paused: false });
+    await player.queue.utils.save();
     this.onStateChange(guildId);
   }
 
@@ -628,16 +763,18 @@ export class MusicService {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
 
-    const prev = await player.queue.shiftPrevious();
-    if (!prev) {
-      throw new Error("No previous track in history.");
+    if (player.queue.previous.length > 0) {
+      await this.playPrevious(guildId, 0);
+      return;
     }
 
-    if (player.queue.current) {
-      await player.queue.add(player.queue.current, 0);
+    if (player.queue.current?.info.isSeekable) {
+      await player.seek(0);
+      this.onStateChange(guildId);
+      return;
     }
-    await player.play({ clientTrack: prev });
-    this.onStateChange(guildId);
+
+    throw new Error("No previous track in history.");
   }
 
   async seek(guildId: string, positionMs: number): Promise<void> {
@@ -957,7 +1094,7 @@ export class MusicService {
       activeFilter: this.activeFilters.get(guildId) ?? "none",
       current: player.queue.current ? trackToDTO(player.queue.current) : null,
       queue: player.queue.tracks.map(trackToDTO),
-      previous: player.queue.previous.slice(0, 15).map(trackToDTO),
+      previous: player.queue.previous.slice(0, 25).map(trackToDTO),
       listeners,
       isPrivileged: userId ? this.isPrivileged(guildId, userId) : false,
       updatedAt: Date.now(),

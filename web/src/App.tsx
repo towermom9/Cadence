@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
 import type {
   AppMetaDTO,
@@ -9,6 +9,7 @@ import type {
   TrackDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { ArtistView } from "./components/ArtistView";
 import { ContextMenu, type ContextMenuState, type TrackMenuContext } from "./components/ContextMenu";
 import { ExploreView } from "./components/ExploreView";
 import { HomeView } from "./components/HomeView";
@@ -18,6 +19,7 @@ import { NowPlayingView, type NowPlayingTab } from "./components/NowPlayingView"
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PlayerBar } from "./components/PlayerBar";
 import { PlaylistDetailView } from "./components/PlaylistDetailView";
+import { SaveToPlaylistModal } from "./components/SaveToPlaylistModal";
 import { SearchResultsView } from "./components/SearchResultsView";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar, type MainView } from "./components/Sidebar";
@@ -39,11 +41,14 @@ export function App() {
   const [guilds, setGuilds] = useState<GuildSummaryDTO[]>([]);
 
   const [activeView, setActiveView] = useState<MainView>("home");
+  const prevViewRef = useRef<MainView>("home");
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
+  const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
   const [playSourceLabel, setPlaySourceLabel] = useState("Queue");
   const [lyricsSubjectTrack, setLyricsSubjectTrack] = useState<TrackDTO | null>(null);
+  const [saveModalTracks, setSaveModalTracks] = useState<TrackDTO[] | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -86,19 +91,26 @@ export function App() {
     }
   }, [guilds, socket]);
 
+  const navigateTo = useCallback((view: MainView) => {
+    setNowPlayingOpen(false);
+    if (view !== "artist") {
+      prevViewRef.current = view;
+    }
+    setActiveView(view);
+  }, []);
+
   const handleSearch = useCallback(
     (query: string, source: SearchSource = "auto") => {
-      setNowPlayingOpen(false);
-      setActiveView("search");
+      navigateTo("search");
       socket.search(query, source);
     },
-    [socket]
+    [navigateTo, socket]
   );
 
   const handleEnqueue = useCallback(
     (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => {
       socket.enqueue(tracks, mode);
-      if (mode === "now") {
+      if (mode === "now" || mode === "replace") {
         setLyricsSubjectTrack(null);
         if (sourceLabel) {
           setPlaySourceLabel(sourceLabel);
@@ -132,6 +144,25 @@ export function App() {
     },
     [socket]
   );
+
+  const handleOpenArtist = useCallback(
+    (artistName: string) => {
+      const clean = artistName.trim();
+      if (!clean) return;
+      if (activeView !== "artist") {
+        prevViewRef.current = activeView;
+      }
+      setSelectedArtist(clean);
+      setNowPlayingOpen(false);
+      setActiveView("artist");
+    },
+    [activeView]
+  );
+
+  const handleOpenSaveModal = useCallback((tracks: TrackDTO[]) => {
+    if (tracks.length === 0) return;
+    setSaveModalTracks(tracks);
+  }, []);
 
   const handleViewLyrics = useCallback(
     (track: TrackDTO) => {
@@ -199,15 +230,22 @@ export function App() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#030303] text-zinc-100">
       <ToastStack toasts={socket.toasts} onDismiss={socket.dismissToast} />
 
+      <SaveToPlaylistModal
+        tracks={saveModalTracks}
+        playlists={socket.playlists}
+        onClose={() => setSaveModalTracks(null)}
+        onSaveToPlaylist={socket.addTracksToPlaylist}
+        onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
+      />
+
       <ContextMenu
         menu={contextMenu}
-        playlists={socket.playlists}
         privileged={Boolean(socket.playerState?.isPrivileged)}
         onClose={() => setContextMenu(null)}
         onStartMix={handleStartMix}
         onEnqueue={handleEnqueue}
-        onAddToPlaylist={socket.addTrackToPlaylist}
-        onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
+        onOpenSaveModal={handleOpenSaveModal}
+        onOpenArtist={handleOpenArtist}
         onViewLyrics={handleViewLyrics}
         onMoveTrack={socket.moveTrack}
         onRemoveTrack={socket.removeTrack}
@@ -216,7 +254,7 @@ export function App() {
         onDeletePlaylist={(id) => {
           socket.deletePlaylist(id);
           if (selectedPlaylistId === id && activeView === "playlist") {
-            setActiveView("library");
+            navigateTo("library");
           }
         }}
         onToast={socket.pushToast}
@@ -228,14 +266,10 @@ export function App() {
           nowPlayingOpen={nowPlayingOpen}
           selectedPlaylistId={selectedPlaylistId}
           playlists={socket.playlists}
-          onSelectView={(view) => {
-            setNowPlayingOpen(false);
-            setActiveView(view);
-          }}
+          onSelectView={navigateTo}
           onSelectPlaylist={(id) => {
-            setNowPlayingOpen(false);
             setSelectedPlaylistId(id);
-            setActiveView("playlist");
+            navigateTo("playlist");
           }}
           onCreatePlaylist={socket.createPlaylist}
           onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
@@ -253,11 +287,11 @@ export function App() {
             searching={socket.searching}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onSearch={handleSearch}
+            onPlayTrack={(track, label) => handleEnqueue([track], "now", label)}
+            onOpenArtist={handleOpenArtist}
+            onTrackContextMenu={handleTrackContextMenu}
             onSelectGuild={socket.selectGuild}
-            onOpenSettings={() => {
-              setNowPlayingOpen(false);
-              setActiveView("settings");
-            }}
+            onOpenSettings={() => navigateTo("settings")}
             onLogout={() => void handleLogout()}
           />
 
@@ -274,7 +308,6 @@ export function App() {
                 displayPosition={socket.displayPosition}
                 lyricsState={socket.lyricsState}
                 lyricsSubjectTrack={lyricsSubjectTrack}
-                playlists={socket.playlists}
                 activeTab={nowPlayingTab}
                 playSourceLabel={playSourceLabel}
                 onTabChange={(tab) => {
@@ -282,7 +315,9 @@ export function App() {
                   setNowPlayingTab(tab);
                 }}
                 onPlayTrack={socket.playTrack}
+                onPlayPrevious={socket.playPrevious}
                 onEnqueue={handleEnqueue}
+                onStartMix={handleStartMix}
                 onMoveTrack={socket.moveTrack}
                 onRemoveTrack={socket.removeTrack}
                 onShuffle={socket.shuffle}
@@ -290,9 +325,8 @@ export function App() {
                 onToggleAutoplay={socket.toggleAutoplay}
                 onStop={socket.stop}
                 onFetchLyrics={socket.requestLyrics}
-                onSetFilter={socket.setFilter}
-                onAddTracksToPlaylist={socket.addTracksToPlaylist}
-                onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
+                onOpenSaveModal={handleOpenSaveModal}
+                onOpenArtist={handleOpenArtist}
                 onTrackContextMenu={handleTrackContextMenu}
               />
             ) : (
@@ -306,9 +340,11 @@ export function App() {
                     onEnqueue={handleEnqueue}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
-                      setActiveView("playlist");
+                      navigateTo("playlist");
                     }}
                     onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
+                    onClearHistory={socket.clearHistory}
+                    onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}
                     onPlaylistContextMenu={handlePlaylistContextMenu}
                   />
@@ -329,10 +365,12 @@ export function App() {
                     onCreatePlaylist={socket.createPlaylist}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
-                      setActiveView("playlist");
+                      navigateTo("playlist");
                     }}
                     onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
                     onEnqueue={handleEnqueue}
+                    onClearHistory={socket.clearHistory}
+                    onOpenArtist={handleOpenArtist}
                     onLoadSettings={socket.requestSettings}
                     onSaveSettings={socket.updateSettings}
                     onTrackContextMenu={handleTrackContextMenu}
@@ -343,12 +381,13 @@ export function App() {
                 {activeView === "playlist" && (
                   <PlaylistDetailView
                     playlist={activePlaylist}
-                    onBack={() => setActiveView("library")}
+                    onBack={() => navigateTo("library")}
                     onPlayPlaylist={handlePlayPlaylist}
                     onRenamePlaylist={socket.renamePlaylist}
                     onDeletePlaylist={socket.deletePlaylist}
                     onRemoveTrack={socket.removeTrackFromPlaylist}
                     onEnqueueTrack={handleEnqueue}
+                    onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}
                   />
                 )}
@@ -357,9 +396,21 @@ export function App() {
                   <SearchResultsView
                     searching={socket.searching}
                     searchResults={socket.searchResults}
-                    playlists={socket.playlists}
                     onEnqueue={handleEnqueue}
-                    onAddToPlaylist={socket.addTrackToPlaylist}
+                    onOpenSaveModal={handleOpenSaveModal}
+                    onOpenArtist={handleOpenArtist}
+                    onTrackContextMenu={handleTrackContextMenu}
+                  />
+                )}
+
+                {activeView === "artist" && (
+                  <ArtistView
+                    artistName={selectedArtist}
+                    onBack={() => navigateTo(prevViewRef.current || "home")}
+                    onEnqueue={handleEnqueue}
+                    onStartMix={handleStartMix}
+                    onOpenArtist={handleOpenArtist}
+                    onOpenSaveModal={handleOpenSaveModal}
                     onTrackContextMenu={handleTrackContextMenu}
                   />
                 )}
@@ -383,7 +434,6 @@ export function App() {
       <PlayerBar
         playerState={socket.playerState}
         displayPosition={socket.displayPosition}
-        playlists={socket.playlists}
         drawerOpen={nowPlayingOpen}
         onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
         onTogglePause={socket.togglePause}
@@ -394,7 +444,9 @@ export function App() {
         onRepeat={socket.setRepeat}
         onShuffle={socket.shuffle}
         onToggleAutoplay={socket.toggleAutoplay}
-        onAddToPlaylist={socket.addTrackToPlaylist}
+        onSetFilter={socket.setFilter}
+        onOpenSaveModal={handleOpenSaveModal}
+        onOpenArtist={handleOpenArtist}
         onTrackContextMenu={handleTrackContextMenu}
       />
     </div>

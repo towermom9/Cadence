@@ -158,7 +158,21 @@ export interface SetupCompletePayload {
   defaultSearchSource: SearchSource;
 }
 
-export type EnqueueMode = "end" | "next" | "now";
+export type EnqueueMode = "end" | "next" | "now" | "replace";
+
+export interface ArtistProfileDTO {
+  name: string;
+  artworkUrl: string | null;
+  trackCount: number;
+  topSongs: TrackDTO[];
+  relatedTracks: TrackDTO[];
+}
+
+export interface SearchSuggestResponseDTO {
+  query: string;
+  suggestions: string[];
+  tracks: TrackDTO[];
+}
 
 export type WsClientMessage =
   | { type: "selectGuild"; guildId: string }
@@ -166,6 +180,7 @@ export type WsClientMessage =
   | { type: "enqueue"; guildId: string; tracks: TrackDTO[]; mode: EnqueueMode }
   | { type: "startMix"; guildId: string; track: TrackDTO }
   | { type: "playTrack"; guildId: string; index: number }
+  | { type: "playPrevious"; guildId: string; index: number }
   | { type: "pause"; guildId: string }
   | { type: "resume"; guildId: string }
   | { type: "skip"; guildId: string }
@@ -197,6 +212,7 @@ export type WsClientMessage =
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
   | { type: "playPlaylist"; guildId: string; playlistId: string; shuffle?: boolean }
   | { type: "getHistory" }
+  | { type: "clearHistory" }
   | { type: "ping" };
 
 export type ToastLevel = "info" | "success" | "error";

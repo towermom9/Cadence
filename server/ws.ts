@@ -284,6 +284,12 @@ export class CadenceWsHub {
           return;
         }
 
+        case "playPrevious": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          await this.bot.music.playPrevious(msg.guildId, msg.index);
+          return;
+        }
+
         case "pause": {
           await this.requireSameVoice(msg.guildId, user.id);
           await this.bot.music.setPause(msg.guildId, true);
@@ -532,13 +538,24 @@ export class CadenceWsHub {
               [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
             }
           }
-          const res = await this.bot.music.enqueue(msg.guildId, vcId, tracks, "end", requester);
-          this.sendToast(ws, "success", `Queued ${res.added} tracks from "${playlist.name}"`);
+          const res = await this.bot.music.enqueue(msg.guildId, vcId, tracks, "replace", requester);
+          this.sendToast(
+            ws,
+            "success",
+            `Playing "${playlist.name}" (${res.added} track${res.added === 1 ? "" : "s"})`
+          );
           return;
         }
 
         case "getHistory": {
           this.send(ws, { type: "history", entries: this.db.getPlayHistory(user.id) });
+          return;
+        }
+
+        case "clearHistory": {
+          this.db.clearPlayHistory(user.id);
+          this.send(ws, { type: "history", entries: [] });
+          this.sendToast(ws, "info", "Play history cleared");
           return;
         }
       }

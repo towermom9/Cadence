@@ -437,6 +437,10 @@ export class CadenceDatabase {
     return entries;
   }
 
+  clearPlayHistory(userId: string): void {
+    this.db.query(`DELETE FROM play_history WHERE user_id = ?`).run(userId);
+  }
+
   createSession(user: UserProfileDTO, accessToken: string, ttlMs = 30 * 24 * 60 * 60 * 1000): SessionRecord {
     const id = randomUUID();
     const expiresAt = Date.now() + ttlMs;

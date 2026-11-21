@@ -14,6 +14,7 @@ interface Props {
   onDeletePlaylist: (playlistId: string) => void;
   onRemoveTrack: (playlistId: string, index: number) => void;
   onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
 
@@ -25,6 +26,7 @@ export function PlaylistDetailView({
   onDeletePlaylist,
   onRemoveTrack,
   onEnqueueTrack,
+  onOpenArtist,
   onTrackContextMenu,
 }: Props) {
   const [renaming, setRenaming] = useState(false);
@@ -187,7 +189,17 @@ export function PlaylistDetailView({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-white">{track.title}</p>
                 <p className="truncate text-xs text-zinc-400">
-                  {track.author} • {sourceLabel(track.sourceName)}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenArtist(track.author);
+                    }}
+                    className="hover:text-white hover:underline"
+                  >
+                    {track.author}
+                  </button>
+                  <span> • {sourceLabel(track.sourceName)}</span>
                 </p>
               </div>
               <span className="hidden text-xs tabular-nums text-zinc-400 sm:inline">

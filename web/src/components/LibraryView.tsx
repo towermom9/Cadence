@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type MouseEvent } from "react";
-import { Disc3, MoreVertical, Play, Plus } from "lucide-react";
+import { Disc3, MoreVertical, Play, Plus, Trash2 } from "lucide-react";
 import type {
   EnqueueMode,
   GuildSettingsDTO,
@@ -25,6 +25,8 @@ interface Props {
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onClearHistory: () => void;
+  onOpenArtist: (artistName: string) => void;
   onLoadSettings: (guildId: string) => void;
   onSaveSettings: (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
@@ -43,6 +45,8 @@ export function LibraryView({
   onSelectPlaylist,
   onPlayPlaylist,
   onEnqueue,
+  onClearHistory,
+  onOpenArtist,
   onLoadSettings,
   onSaveSettings,
   onTrackContextMenu,
@@ -117,6 +121,17 @@ export function LibraryView({
               Create
             </button>
           </form>
+        )}
+
+        {tab === "history" && history.length > 0 && (
+          <button
+            type="button"
+            onClick={onClearHistory}
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-4 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-200"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Clear history
+          </button>
         )}
       </div>
 
@@ -194,8 +209,17 @@ export function LibraryView({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-white">{entry.track.title}</p>
                     <p className="truncate text-xs text-zinc-400">
-                      {entry.track.author} • {sourceLabel(entry.track.sourceName)} •{" "}
-                      {formatMs(entry.track.duration)}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenArtist(entry.track.author);
+                        }}
+                        className="hover:text-white hover:underline"
+                      >
+                        {entry.track.author}
+                      </button>
+                      <span> • {sourceLabel(entry.track.sourceName)} • {formatMs(entry.track.duration)}</span>
                     </p>
                   </div>
                   <div

@@ -2,7 +2,14 @@ import { useState, type FormEvent, type MouseEvent } from "react";
 import { Bookmark, Compass, Home, Menu, Play, Plus, X } from "lucide-react";
 import type { PlaylistDTO } from "@shared/types";
 
-export type MainView = "home" | "explore" | "library" | "playlist" | "search" | "settings";
+export type MainView =
+  | "home"
+  | "explore"
+  | "library"
+  | "playlist"
+  | "search"
+  | "artist"
+  | "settings";
 
 interface Props {
   activeView: MainView;
