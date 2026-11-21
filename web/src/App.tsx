@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import type { AppMetaDTO, GuildSummaryDTO, UserProfileDTO } from "@shared/types";
 import { EffectsView } from "./components/EffectsView";
 import { LoginView } from "./components/LoginView";
 import { LyricsView } from "./components/LyricsView";
+import { OnboardingWizard } from "./components/OnboardingWizard";
 import { PlayerBar } from "./components/PlayerBar";
 import { PlaylistsView } from "./components/PlaylistsView";
 import { QueueView } from "./components/QueueView";
@@ -16,48 +17,45 @@ import { useCadenceSocket } from "./hooks/useCadenceSocket";
 interface MeResponse {
   authenticated: boolean;
   user?: UserProfileDTO;
-  meta: AppMetaDTO & { oauthConfigured?: boolean };
+  meta: AppMetaDTO;
   guilds?: GuildSummaryDTO[];
 }
 
 export function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserProfileDTO | null>(null);
-  const [meta, setMeta] = useState<(AppMetaDTO & { oauthConfigured?: boolean }) | null>(null);
+  const [meta, setMeta] = useState<AppMetaDTO | null>(null);
   const [guilds, setGuilds] = useState<GuildSummaryDTO[]>([]);
   const [activeTab, setActiveTab] = useState<NavTab>("discover");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const authError = new URLSearchParams(window.location.search).get("error");
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/me");
-        if (res.ok) {
-          const data = (await res.json()) as MeResponse;
-          if (!active) return;
-          setUser(data.user ?? null);
-          setMeta(data.meta);
-          setGuilds(data.guilds ?? []);
-        } else {
-          const metaRes = await fetch("/api/meta");
-          if (metaRes.ok && active) {
-            setMeta((await metaRes.json()) as AppMetaDTO & { oauthConfigured?: boolean });
-          }
+  const loadSession = useCallback(async () => {
+    try {
+      const res = await fetch("/api/me");
+      if (res.ok) {
+        const data = (await res.json()) as MeResponse;
+        setUser(data.user ?? null);
+        setMeta(data.meta);
+        setGuilds(data.guilds ?? []);
+      } else {
+        setUser(null);
+        const metaRes = await fetch("/api/meta");
+        if (metaRes.ok) {
+          setMeta((await metaRes.json()) as AppMetaDTO);
         }
-      } catch {
-        // Handled cleanly by showing login/status view
-      } finally {
-        if (active) setLoading(false);
       }
-    })();
-
-    return () => {
-      active = false;
-    };
+    } catch {
+      // Handled cleanly by showing onboarding/login status view
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
 
   const socket = useCadenceSocket(Boolean(user));
 
@@ -76,6 +74,9 @@ export function App() {
   }
 
   if (!user) {
+    if (meta?.needsSetup) {
+      return <OnboardingWizard onComplete={loadSession} />;
+    }
     return <LoginView meta={meta} errorCode={authError} />;
   }
 

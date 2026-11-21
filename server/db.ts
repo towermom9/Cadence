@@ -6,10 +6,35 @@ import type {
   GuildSettingsDTO,
   HistoryEntryDTO,
   PlaylistDTO,
+  SearchSource,
   TrackDTO,
   UserProfileDTO,
 } from "@shared/types";
 import { config } from "./config";
+
+export interface StoredAppConfig {
+  discordToken: string;
+  discordClientId: string;
+  discordClientSecret: string;
+  dashboardUrl: string;
+  botPrefix: string;
+  defaultSearchSource: SearchSource;
+  ownerUserId: string | null;
+  setupCompleted: boolean;
+  updatedAt: number;
+}
+
+interface AppConfigRow {
+  discord_token: string;
+  discord_client_id: string;
+  discord_client_secret: string;
+  dashboard_url: string;
+  bot_prefix: string;
+  default_search_source: string;
+  owner_user_id: string | null;
+  setup_completed: number;
+  updated_at: number;
+}
 
 export interface SessionRecord {
   id: string;
@@ -109,6 +134,19 @@ export class CadenceDatabase {
       );
 
       CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+      CREATE TABLE IF NOT EXISTS app_config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        discord_token TEXT NOT NULL DEFAULT '',
+        discord_client_id TEXT NOT NULL DEFAULT '',
+        discord_client_secret TEXT NOT NULL DEFAULT '',
+        dashboard_url TEXT NOT NULL DEFAULT '',
+        bot_prefix TEXT NOT NULL DEFAULT '?',
+        default_search_source TEXT NOT NULL DEFAULT 'ytmsearch',
+        owner_user_id TEXT,
+        setup_completed INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0
+      );
     `);
   }
 
@@ -427,6 +465,65 @@ export class CadenceDatabase {
 
   pruneExpiredSessions(): void {
     this.db.query(`DELETE FROM sessions WHERE expires_at <= ?`).run(Date.now());
+  }
+
+  getAppConfig(): StoredAppConfig | null {
+    const row = this.db
+      .query<AppConfigRow, []>(
+        `SELECT discord_token, discord_client_id, discord_client_secret, dashboard_url,
+                bot_prefix, default_search_source, owner_user_id, setup_completed, updated_at
+         FROM app_config WHERE id = 1`
+      )
+      .get();
+
+    if (!row) return null;
+
+    return {
+      discordToken: row.discord_token,
+      discordClientId: row.discord_client_id,
+      discordClientSecret: row.discord_client_secret,
+      dashboardUrl: row.dashboard_url,
+      botPrefix: row.bot_prefix || "?",
+      defaultSearchSource: (row.default_search_source || "ytmsearch") as SearchSource,
+      ownerUserId: row.owner_user_id,
+      setupCompleted: row.setup_completed === 1,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  saveAppConfig(cfg: Omit<StoredAppConfig, "updatedAt">): StoredAppConfig {
+    const updatedAt = Date.now();
+    this.db
+      .query(
+        `INSERT INTO app_config (
+           id, discord_token, discord_client_id, discord_client_secret,
+           dashboard_url, bot_prefix, default_search_source, owner_user_id,
+           setup_completed, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           discord_token = excluded.discord_token,
+           discord_client_id = excluded.discord_client_id,
+           discord_client_secret = excluded.discord_client_secret,
+           dashboard_url = excluded.dashboard_url,
+           bot_prefix = excluded.bot_prefix,
+           default_search_source = excluded.default_search_source,
+           owner_user_id = excluded.owner_user_id,
+           setup_completed = excluded.setup_completed,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        cfg.discordToken,
+        cfg.discordClientId,
+        cfg.discordClientSecret,
+        cfg.dashboardUrl,
+        cfg.botPrefix,
+        cfg.defaultSearchSource,
+        cfg.ownerUserId,
+        cfg.setupCompleted ? 1 : 0,
+        updatedAt
+      );
+
+    return { ...cfg, updatedAt };
   }
 
   close(): void {

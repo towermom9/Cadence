@@ -20,12 +20,14 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import type {
+  AppMetaDTO,
   FilterPreset,
   GuildSummaryDTO,
   RepeatModeType,
   SearchSource,
   TrackDTO,
 } from "@shared/types";
+import type { SearchPlatform } from "lavalink-client";
 import { config } from "./config";
 import type { CadenceDatabase } from "./db";
 import { fetchLyrics } from "./lyrics";
@@ -75,8 +77,8 @@ export function formatDuration(ms: number): string {
 }
 
 export class CadenceBot {
-  readonly client: Client;
-  readonly music: MusicService;
+  client!: Client;
+  music!: MusicService;
   private ready = false;
   private pendingSearchCache = new Map<string, TrackDTO[]>();
   private onGuildStateChange: (guildId: string) => void;
@@ -86,7 +88,10 @@ export class CadenceBot {
     onGuildStateChange?: (guildId: string) => void
   ) {
     this.onGuildStateChange = onGuildStateChange ?? (() => {});
+    this.initClientAndMusic();
+  }
 
+  private initClientAndMusic(): void {
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -104,6 +109,13 @@ export class CadenceBot {
     this.registerDiscordListeners();
   }
 
+  private async resetClient(): Promise<void> {
+    this.ready = false;
+    await this.music.destroy().catch(() => {});
+    await this.client.destroy().catch(() => {});
+    this.initClientAndMusic();
+  }
+
   setStateChangeHandler(handler: (guildId: string) => void): void {
     this.onGuildStateChange = handler;
     this.music.setStateChangeHandler(handler);
@@ -113,12 +125,53 @@ export class CadenceBot {
     return this.ready && Boolean(this.client.user);
   }
 
-  getBotMeta() {
+  async probeLavalink(): Promise<{ reachable: boolean; version: string | null }> {
+    for (const node of this.music.manager.nodeManager.nodes.values()) {
+      if (node.connected) {
+        return {
+          reachable: true,
+          version: node.info?.version?.semver ?? "4.x",
+        };
+      }
+    }
+
+    const protocol = config.lavalink.secure ? "https" : "http";
+    try {
+      const res = await fetch(
+        `${protocol}://${config.lavalink.host}:${config.lavalink.port}/version`,
+        {
+          headers: { Authorization: config.lavalink.password },
+          signal: AbortSignal.timeout(2000),
+        }
+      );
+      if (res.ok) {
+        const versionText = (await res.text()).trim();
+        return { reachable: true, version: versionText || "4.x" };
+      }
+    } catch {
+      // Lavalink not reachable yet
+    }
+
+    return { reachable: false, version: null };
+  }
+
+  getBotMeta(lavalinkProbe?: { reachable: boolean; version: string | null }): AppMetaDTO {
     const user = this.client.user;
     const clientId = user?.id || config.discordClientId || null;
     const inviteUrl = clientId
       ? `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=36700160&scope=bot%20applications.commands`
       : null;
+
+    const managerConnected = this.music.isLavalinkConnected();
+    let connectedVersion: string | null = null;
+    if (managerConnected) {
+      for (const node of this.music.manager.nodeManager.nodes.values()) {
+        if (node.connected) {
+          connectedVersion = node.info?.version?.semver ?? "4.x";
+          break;
+        }
+      }
+    }
 
     return {
       botReady: this.isReady(),
@@ -126,7 +179,11 @@ export class CadenceBot {
       botName: user?.username || "Cadence",
       botAvatarUrl: user ? user.displayAvatarURL({ size: 256 }) : null,
       inviteUrl,
-      lavalinkConnected: this.music.isLavalinkConnected(),
+      lavalinkConnected: managerConnected || Boolean(lavalinkProbe?.reachable),
+      lavalinkVersion: connectedVersion ?? lavalinkProbe?.version ?? null,
+      needsSetup: config.needsSetup,
+      setupTokenRequired: Boolean(config.setupToken),
+      oauthConfigured: config.hasOAuthConfig,
     };
   }
 
@@ -189,11 +246,74 @@ export class CadenceBot {
   async start(): Promise<void> {
     if (!config.hasBotToken) {
       console.warn(
-        "[Bot] DISCORD_TOKEN is not configured. Running web server only until credentials are set in .env."
+        "[Bot] DISCORD_TOKEN is not configured yet. Complete setup in the web onboarding wizard."
       );
       return;
     }
     await this.client.login(config.discordToken);
+  }
+
+  private syncDefaultSearchPlatform(): void {
+    if (this.music.manager.options.playerOptions) {
+      this.music.manager.options.playerOptions.defaultSearchPlatform =
+        config.defaultSearchSource as SearchPlatform;
+    }
+  }
+
+  async startAndWaitReady(timeoutMs = 15_000): Promise<void> {
+    if (!config.hasBotToken) {
+      throw new Error("Discord Bot Token is required.");
+    }
+
+    if (this.isReady()) {
+      this.syncDefaultSearchPlatform();
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const readyPromise = new Promise<void>((resolve, reject) => {
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.client.off(Events.ClientReady, onReady);
+        this.client.off(Events.Error, onError);
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out waiting for Discord Gateway connection."));
+      }, timeoutMs);
+
+      this.client.once(Events.ClientReady, onReady);
+      this.client.once(Events.Error, onError);
+    });
+
+    try {
+      this.syncDefaultSearchPlatform();
+      await Promise.all([this.client.login(config.discordToken), readyPromise]);
+    } catch (error) {
+      await this.resetClient();
+      const rawMsg = error instanceof Error ? error.message : String(error);
+      const lower = rawMsg.toLowerCase();
+      if (lower.includes("disallowed intents")) {
+        throw new Error(
+          "Discord rejected login because Privileged Gateway Intents are disabled. In Discord Developer Portal -> Bot, enable both Server Members Intent and Message Content Intent, then try again."
+        );
+      }
+      if (lower.includes("invalid token")) {
+        throw new Error(
+          "Invalid Discord Bot Token. Double-check the token copied from Discord Developer Portal -> Bot."
+        );
+      }
+      throw new Error(rawMsg || "Failed to connect Discord bot.");
+    }
   }
 
   async stop(): Promise<void> {

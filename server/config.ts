@@ -2,8 +2,9 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { SearchSource } from "@shared/types";
+import type { StoredAppConfig } from "./db";
 
-const VALID_SEARCH_SOURCES = new Set<SearchSource>([
+export const VALID_SEARCH_SOURCES = new Set<SearchSource>([
   "auto",
   "ytsearch",
   "ytmsearch",
@@ -46,7 +47,7 @@ function resolveSessionSecret(dataDir: string): string {
   return generated;
 }
 
-function isConfiguredValue(value: string | undefined): value is string {
+export function isConfiguredValue(value: string | undefined | null): value is string {
   if (!value) return false;
   const trimmed = value.trim();
   if (!trimmed) return false;
@@ -61,37 +62,113 @@ function isConfiguredValue(value: string | undefined): value is string {
 const dataDir = resolve(process.env.DATA_DIR?.trim() || "./data");
 const port = parsePositiveInt(process.env.PORT, 8000);
 const host = process.env.HOST?.trim() || "0.0.0.0";
-const dashboardUrl = (process.env.DASHBOARD_URL?.trim() || `http://localhost:${port}`).replace(/\/+$/, "");
-const discordRedirectUri =
-  process.env.DISCORD_REDIRECT_URI?.trim() || `${dashboardUrl}/api/auth/callback`;
 
+const envDashboardUrl = (process.env.DASHBOARD_URL?.trim() || `http://localhost:${port}`).replace(
+  /\/+$/,
+  ""
+);
+const envRedirectUri = process.env.DISCORD_REDIRECT_URI?.trim() || "";
 const rawSearchSource = process.env.DEFAULT_SEARCH_SOURCE?.trim() as SearchSource | undefined;
-const defaultSearchSource: SearchSource =
+const envSearchSource: SearchSource =
   rawSearchSource && VALID_SEARCH_SOURCES.has(rawSearchSource) ? rawSearchSource : "ytmsearch";
 
-const discordToken = process.env.DISCORD_TOKEN?.trim() || "";
-const discordClientId = process.env.DISCORD_CLIENT_ID?.trim() || "";
-const discordClientSecret = process.env.DISCORD_CLIENT_SECRET?.trim() || "";
+const envToken = process.env.DISCORD_TOKEN?.trim() || "";
+const envClientId = process.env.DISCORD_CLIENT_ID?.trim() || "";
+const envClientSecret = process.env.DISCORD_CLIENT_SECRET?.trim() || "";
+const envPrefix = process.env.BOT_PREFIX?.trim() || "?";
+const envSetupToken = process.env.SETUP_TOKEN?.trim() || "";
 
-export const config = {
+export interface RuntimeConfig {
+  host: string;
+  port: number;
+  dashboardUrl: string;
+  dataDir: string;
+  sessionSecret: string;
+  setupToken: string;
+  discordToken: string;
+  discordClientId: string;
+  discordClientSecret: string;
+  discordRedirectUri: string;
+  hasBotToken: boolean;
+  hasOAuthConfig: boolean;
+  setupCompleted: boolean;
+  needsSetup: boolean;
+  ownerUserId: string | null;
+  botPrefix: string;
+  defaultSearchSource: SearchSource;
+  lavalink: {
+    host: string;
+    port: number;
+    password: string;
+    secure: boolean;
+  };
+  isSecureCookie: boolean;
+}
+
+function buildConfigState(stored: StoredAppConfig | null): Omit<RuntimeConfig, "host" | "port" | "dataDir" | "sessionSecret" | "setupToken" | "lavalink"> {
+  const useStored = Boolean(stored?.setupCompleted);
+
+  const discordToken =
+    useStored && isConfiguredValue(stored?.discordToken)
+      ? stored!.discordToken.trim()
+      : envToken;
+  const discordClientId =
+    useStored && isConfiguredValue(stored?.discordClientId)
+      ? stored!.discordClientId.trim()
+      : envClientId;
+  const discordClientSecret =
+    useStored && isConfiguredValue(stored?.discordClientSecret)
+      ? stored!.discordClientSecret.trim()
+      : envClientSecret;
+
+  const dashboardUrl = (
+    (useStored && stored?.dashboardUrl.trim()) ||
+    envDashboardUrl
+  ).replace(/\/+$/, "");
+
+  const botPrefix = (useStored && stored?.botPrefix.trim()) || envPrefix;
+  const candidateSource = useStored ? stored?.defaultSearchSource : envSearchSource;
+  const defaultSearchSource: SearchSource =
+    candidateSource && VALID_SEARCH_SOURCES.has(candidateSource) ? candidateSource : envSearchSource;
+
+  const hasBotToken = isConfiguredValue(discordToken);
+  const hasOAuthConfig =
+    isConfiguredValue(discordClientId) && isConfiguredValue(discordClientSecret);
+  const setupCompleted = Boolean(stored?.setupCompleted) || (hasBotToken && hasOAuthConfig);
+  const needsSetup = !(hasBotToken && hasOAuthConfig);
+
+  return {
+    dashboardUrl,
+    discordToken,
+    discordClientId,
+    discordClientSecret,
+    discordRedirectUri: envRedirectUri || `${dashboardUrl}/api/auth/callback`,
+    hasBotToken,
+    hasOAuthConfig,
+    setupCompleted,
+    needsSetup,
+    ownerUserId: useStored ? stored?.ownerUserId ?? null : null,
+    botPrefix,
+    defaultSearchSource,
+    isSecureCookie: dashboardUrl.startsWith("https://"),
+  };
+}
+
+export const config: RuntimeConfig = {
   host,
   port,
-  dashboardUrl,
   dataDir,
   sessionSecret: resolveSessionSecret(dataDir),
-  discordToken,
-  discordClientId,
-  discordClientSecret,
-  discordRedirectUri,
-  hasBotToken: isConfiguredValue(discordToken),
-  hasOAuthConfig: isConfiguredValue(discordClientId) && isConfiguredValue(discordClientSecret),
-  botPrefix: process.env.BOT_PREFIX?.trim() || "?",
-  defaultSearchSource,
+  setupToken: envSetupToken,
   lavalink: {
     host: process.env.LAVALINK_HOST?.trim() || "localhost",
     port: parsePositiveInt(process.env.LAVALINK_PORT, 2333),
     password: process.env.LAVALINK_PASSWORD?.trim() || "youshallnotpass",
     secure: parseBoolean(process.env.LAVALINK_SECURE, false),
   },
-  isSecureCookie: dashboardUrl.startsWith("https://"),
-} as const;
+  ...buildConfigState(null),
+};
+
+export function applyStoredConfig(stored: StoredAppConfig | null): void {
+  Object.assign(config, buildConfigState(stored));
+}

@@ -1,5 +1,5 @@
 import { CadenceBot } from "./bot";
-import { config } from "./config";
+import { applyStoredConfig, config } from "./config";
 import { CadenceDatabase } from "./db";
 import { createWebApp } from "./web";
 import { CadenceWsHub } from "./ws";
@@ -7,6 +7,7 @@ import { CadenceWsHub } from "./ws";
 async function main() {
   const db = new CadenceDatabase(config.dataDir);
   db.pruneExpiredSessions();
+  applyStoredConfig(db.getAppConfig());
 
   const bot = new CadenceBot(db);
   const wsHub = new CadenceWsHub(bot, db);
@@ -26,6 +27,12 @@ async function main() {
 
   console.log(`[Cadence] Server listening on http://${config.host}:${server.port}`);
   console.log(`[Cadence] Dashboard URL: ${config.dashboardUrl}`);
+
+  if (config.needsSetup) {
+    console.log(
+      `[Cadence] First-time setup required — open ${config.dashboardUrl} in your browser to run the setup wizard.`
+    );
+  }
 
   // Start Discord bot concurrently inside the same process
   bot.start().catch((error) => {

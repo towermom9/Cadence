@@ -115,6 +115,46 @@ export interface AppMetaDTO {
   botAvatarUrl: string | null;
   inviteUrl: string | null;
   lavalinkConnected: boolean;
+  lavalinkVersion: string | null;
+  needsSetup: boolean;
+  setupTokenRequired: boolean;
+  oauthConfigured: boolean;
+}
+
+export interface SetupStatusDTO {
+  needsSetup: boolean;
+  setupTokenRequired: boolean;
+  lavalinkReachable: boolean;
+  lavalinkVersion: string | null;
+  lavalinkHost: string;
+  lavalinkPort: number;
+  defaults: {
+    dashboardUrl: string;
+    botPrefix: string;
+    defaultSearchSource: SearchSource;
+  };
+}
+
+export interface TokenTestResultDTO {
+  valid: boolean;
+  botId: string;
+  botUsername: string;
+  botAvatarUrl: string | null;
+  clientId: string;
+  appName: string;
+  ownerUserId: string | null;
+  membersIntentEnabled: boolean;
+  messageContentIntentEnabled: boolean;
+}
+
+export interface SetupCompletePayload {
+  setupToken?: string;
+  discordToken: string;
+  discordClientId: string;
+  discordClientSecret: string;
+  dashboardUrl: string;
+  botPrefix: string;
+  defaultSearchSource: SearchSource;
 }
 
 export type EnqueueMode = "end" | "next" | "now";

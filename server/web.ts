@@ -16,6 +16,7 @@ import {
 import type { CadenceBot } from "./bot";
 import { config } from "./config";
 import type { CadenceDatabase } from "./db";
+import { registerSetupRoutes } from "./setup";
 import type { CadenceWsHub } from "./ws";
 
 const DISCORD_OAUTH_AUTHORIZE = "https://discord.com/oauth2/authorize";
@@ -34,18 +35,19 @@ export function createWebApp(
   app.get("/api/health", (c) => {
     return c.json({
       status: "ok",
+      needsSetup: config.needsSetup,
       botReady: bot.isReady(),
       lavalinkConnected: bot.music.isLavalinkConnected(),
       uptime: Math.floor((Date.now() - startedAt) / 1000),
     });
   });
 
-  app.get("/api/meta", (c) => {
-    return c.json({
-      ...bot.getBotMeta(),
-      oauthConfigured: config.hasOAuthConfig,
-    });
+  app.get("/api/meta", async (c) => {
+    const probe = bot.music.isLavalinkConnected() ? undefined : await bot.probeLavalink();
+    return c.json(bot.getBotMeta(probe));
   });
+
+  registerSetupRoutes(app, bot, db);
 
   app.get("/api/auth/login", (c) => {
     if (!config.hasOAuthConfig) {

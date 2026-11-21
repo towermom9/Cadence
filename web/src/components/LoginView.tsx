@@ -2,13 +2,13 @@ import { Disc3, ExternalLink, LogIn, Radio, ShieldAlert } from "lucide-react";
 import type { AppMetaDTO } from "@shared/types";
 
 interface Props {
-  meta: (AppMetaDTO & { oauthConfigured?: boolean }) | null;
+  meta: AppMetaDTO | null;
   errorCode: string | null;
 }
 
 const ERROR_MESSAGES: Record<string, string> = {
   oauth_state: "Login session verification expired. Please try signing in again.",
-  oauth_unconfigured: "Discord OAuth2 credentials are not set in .env yet.",
+  oauth_unconfigured: "Discord OAuth2 credentials are not set yet.",
   oauth_token: "Could not complete Discord OAuth2 token exchange. Check your redirect URL in Discord Developer Portal.",
   oauth_failed: "Unexpected error during Discord login.",
 };
