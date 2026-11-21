@@ -1,0 +1,213 @@
+import { useState, type FormEvent } from "react";
+import { ArrowLeft, Disc3, Pencil, Play, Shuffle, Trash2, X } from "lucide-react";
+import type { EnqueueMode, PlaylistDTO, TrackDTO } from "@shared/types";
+import { formatMs, sourceLabel } from "../utils/format";
+import { PlaylistArtwork } from "./PlaylistArtwork";
+
+interface Props {
+  playlist: PlaylistDTO | null;
+  onBack: () => void;
+  onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
+  onRenamePlaylist: (playlistId: string, name: string) => void;
+  onDeletePlaylist: (playlistId: string) => void;
+  onRemoveTrack: (playlistId: string, index: number) => void;
+  onEnqueueTrack: (tracks: TrackDTO[], mode: EnqueueMode) => void;
+}
+
+export function PlaylistDetailView({
+  playlist,
+  onBack,
+  onPlayPlaylist,
+  onRenamePlaylist,
+  onDeletePlaylist,
+  onRemoveTrack,
+  onEnqueueTrack,
+}: Props) {
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+
+  if (!playlist) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-[#121212] p-10 text-center text-sm text-zinc-400">
+        Playlist not found.
+        <button
+          type="button"
+          onClick={onBack}
+          className="ml-3 text-white underline hover:text-zinc-200"
+        >
+          Back to Library
+        </button>
+      </div>
+    );
+  }
+
+  const totalMs = playlist.tracks.reduce((sum, t) => sum + (t.duration || 0), 0);
+
+  const handleRenameSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!renameValue.trim()) return;
+    onRenamePlaylist(playlist.id, renameValue.trim());
+    setRenaming(false);
+  };
+
+  return (
+    <div className="space-y-8">
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex items-center gap-2 text-xs font-medium text-zinc-400 transition hover:text-white"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Library
+      </button>
+
+      {/* Hero Header */}
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
+        <div className="h-44 w-44 shrink-0 overflow-hidden rounded-xl bg-[#181818] shadow-2xl ring-1 ring-white/10 sm:h-52 sm:w-52">
+          <PlaylistArtwork playlist={playlist} className="h-full w-full" />
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            Playlist
+          </p>
+
+          {renaming ? (
+            <form onSubmit={handleRenameSubmit} className="flex max-w-md items-center gap-2">
+              <input
+                type="text"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                autoFocus
+                className="min-w-0 flex-1 rounded-lg border border-white/20 bg-[#121212] px-3 py-1.5 text-xl font-bold text-white outline-none"
+              />
+              <button
+                type="submit"
+                className="rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setRenaming(false)}
+                className="rounded-full px-3 py-1.5 text-xs text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-3">
+              <h2 className="truncate text-3xl font-bold tracking-tight text-white">
+                {playlist.name}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameValue(playlist.name);
+                  setRenaming(true);
+                }}
+                title="Rename playlist"
+                className="rounded-full p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          <p className="text-sm text-zinc-400">
+            {playlist.tracks.length} {playlist.tracks.length === 1 ? "song" : "songs"} •{" "}
+            {formatMs(totalMs)}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <button
+              type="button"
+              disabled={playlist.tracks.length === 0}
+              onClick={() => onPlayPlaylist(playlist.id, false)}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2 text-sm font-semibold text-black transition hover:bg-zinc-200 disabled:opacity-40"
+            >
+              <Play className="h-4 w-4 fill-current" />
+              Play
+            </button>
+            <button
+              type="button"
+              disabled={playlist.tracks.length === 0}
+              onClick={() => onPlayPlaylist(playlist.id, true)}
+              className="inline-flex items-center gap-2 rounded-full bg-white/10 px-5 py-2 text-sm font-medium text-white transition hover:bg-white/20 disabled:opacity-40"
+            >
+              <Shuffle className="h-4 w-4" />
+              Shuffle
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onDeletePlaylist(playlist.id);
+                onBack();
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-zinc-300 transition hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-200"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tracks */}
+      {playlist.tracks.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/10 bg-[#121212] p-10 text-center text-sm text-zinc-400">
+          This playlist has no tracks yet. Add songs from Search or the Player bar.
+        </div>
+      ) : (
+        <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-[#121212]">
+          {playlist.tracks.map((track, idx) => (
+            <div
+              key={`${track.identifier}-${idx}`}
+              className="group flex items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
+            >
+              <span className="w-6 text-center text-xs tabular-nums text-zinc-500">
+                {idx + 1}
+              </span>
+              {track.artworkUrl ? (
+                <img
+                  src={track.artworkUrl}
+                  alt={track.title}
+                  className="h-10 w-10 shrink-0 rounded object-cover"
+                />
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-zinc-800 text-zinc-500">
+                  <Disc3 className="h-4 w-4" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                <p className="truncate text-xs text-zinc-400">
+                  {track.author} • {sourceLabel(track.sourceName)}
+                </p>
+              </div>
+              <span className="hidden text-xs tabular-nums text-zinc-400 sm:inline">
+                {track.isStream ? "LIVE" : formatMs(track.duration)}
+              </span>
+              <button
+                type="button"
+                onClick={() => onEnqueueTrack([track], "now")}
+                title="Play now"
+                className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              >
+                <Play className="h-4 w-4 fill-current" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemoveTrack(playlist.id, idx)}
+                title="Remove from playlist"
+                className="rounded-full p-2 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

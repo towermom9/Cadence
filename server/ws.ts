@@ -9,6 +9,8 @@ import type { CadenceBot } from "./bot";
 import type { CadenceDatabase, SessionRecord } from "./db";
 import { fetchLyrics } from "./lyrics";
 
+type RawSocket = ServerWebSocket<unknown>;
+
 interface ClientMeta {
   session: SessionRecord;
   selectedGuildId: string | null;
@@ -17,7 +19,7 @@ interface ClientMeta {
 export class CadenceWsHub {
   readonly upgradeWebSocket;
   readonly websocket;
-  private clients = new Map<WSContext<ServerWebSocket>, ClientMeta>();
+  private clients = new Map<RawSocket, ClientMeta>();
 
   constructor(
     private bot: CadenceBot,
@@ -40,10 +42,14 @@ export class CadenceWsHub {
 
         return {
           onOpen: (_event, ws) => {
-            this.clients.set(ws, { session, selectedGuildId });
-            this.sendInitialSnapshot(ws, session, selectedGuildId);
+            const rawWs = ws.raw;
+            if (!rawWs) return;
+            this.clients.set(rawWs, { session, selectedGuildId });
+            this.sendInitialSnapshot(rawWs, session, selectedGuildId);
           },
           onMessage: async (event, ws) => {
+            const rawWs = ws.raw;
+            if (!rawWs) return;
             const raw = typeof event.data === "string" ? event.data : "";
             if (!raw) return;
 
@@ -54,13 +60,17 @@ export class CadenceWsHub {
               return;
             }
 
-            await this.handleMessage(ws, msg);
+            await this.handleMessage(rawWs, msg);
           },
           onClose: (_event, ws) => {
-            this.clients.delete(ws);
+            if (ws.raw) {
+              this.clients.delete(ws.raw);
+            }
           },
           onError: (_event, ws) => {
-            this.clients.delete(ws);
+            if (ws.raw) {
+              this.clients.delete(ws.raw);
+            }
           },
         };
       });
@@ -97,48 +107,48 @@ export class CadenceWsHub {
     return null;
   }
 
-  private send(ws: WSContext<ServerWebSocket>, payload: WsServerMessage): void {
+  private send(rawWs: RawSocket, payload: WsServerMessage): void {
     try {
-      ws.send(JSON.stringify(payload));
+      rawWs.send(JSON.stringify(payload));
     } catch {
-      this.clients.delete(ws);
+      this.clients.delete(rawWs);
     }
   }
 
   private sendToast(
-    ws: WSContext<ServerWebSocket>,
+    rawWs: RawSocket,
     level: "info" | "success" | "error",
     message: string
   ): void {
-    this.send(ws, { type: "toast", level, message });
+    this.send(rawWs, { type: "toast", level, message });
   }
 
   private sendInitialSnapshot(
-    ws: WSContext<ServerWebSocket>,
+    rawWs: RawSocket,
     session: SessionRecord,
     selectedGuildId: string | null
   ): void {
-    this.send(ws, { type: "ready", selectedGuildId });
+    this.send(rawWs, { type: "ready", selectedGuildId });
     if (selectedGuildId) {
-      this.send(ws, {
+      this.send(rawWs, {
         type: "playerState",
         state: this.bot.music.serializePlayer(selectedGuildId, session.user.id),
       });
     }
-    this.send(ws, {
+    this.send(rawWs, {
       type: "playlists",
       playlists: this.db.getUserPlaylists(session.user.id),
     });
-    this.send(ws, {
+    this.send(rawWs, {
       type: "history",
       entries: this.db.getPlayHistory(session.user.id),
     });
   }
 
   broadcastGuild(guildId: string): void {
-    for (const [ws, meta] of this.clients.entries()) {
+    for (const [rawWs, meta] of this.clients.entries()) {
       if (meta.selectedGuildId === guildId) {
-        this.send(ws, {
+        this.send(rawWs, {
           type: "playerState",
           state: this.bot.music.serializePlayer(guildId, meta.session.user.id),
         });
@@ -181,7 +191,7 @@ export class CadenceWsHub {
   }
 
   private async handleMessage(
-    ws: WSContext<ServerWebSocket>,
+    ws: RawSocket,
     msg: WsClientMessage
   ): Promise<void> {
     const meta = this.clients.get(ws);
@@ -485,6 +495,7 @@ export class CadenceWsHub {
         }
       }
     } catch (error) {
+      console.error("[WS] Failed to handle message:", msg.type, error);
       this.sendToast(
         ws,
         "error",

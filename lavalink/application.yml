@@ -56,7 +56,7 @@ plugins:
             albumLoadLimit: 6
             resolveArtistsInSearch: true
             localFiles: false
-            preferPartnerApi: false
+            preferPartnerApi: true
             preferV1SearchApi: false
             customTokenEndpoint: "${SPOTIFY_TOKEN_ENDPOINT:http://spotify-tokener:49152/api/token}"
         deezer:
