@@ -190,6 +190,7 @@ export function ContextMenu({
     <div
       ref={menuRef}
       role="menu"
+      data-context-menu="true"
       onContextMenu={(e) => e.preventDefault()}
       style={{ left: `${position.left}px`, top: `${position.top}px` }}
       className="fixed z-50 max-h-[calc(100vh-16px)] w-64 overflow-y-auto rounded-lg border border-white/10 bg-[#212121] py-1.5 text-sm text-zinc-100 shadow-2xl select-none"
@@ -431,7 +432,7 @@ export function ContextMenu({
             <button
               type="button"
               disabled={!privileged}
-              title={!privileged ? "Requires DJ role" : "Clear upcoming queue"}
+              title={!privileged ? "Requires DJ role" : "Clear queue and stop playback"}
               onClick={() => {
                 onDismissQueue();
                 onClose();

@@ -47,6 +47,7 @@ export interface UserPreferencesDTO {
   artworkSeekSeconds: number;
   lyricsAutoScroll: boolean;
   autoplayClickBehavior: AutoplayClickBehavior;
+  defaultSearchSource: SearchSource;
 }
 
 export type FilterPreset =
@@ -242,6 +243,34 @@ export interface SearchSuggestResponseDTO {
   tracks: TrackDTO[];
 }
 
+export interface DebugLogEntryDTO {
+  ts: number;
+  level: "log" | "info" | "warn" | "error";
+  message: string;
+}
+
+export interface SystemInfoDTO {
+  appVersion: string;
+  runtime: {
+    name: string;
+    version: string;
+    platform: string;
+    arch: string;
+    uptimeSeconds: number;
+    memoryRssMb: number;
+  };
+  lavalink: {
+    connected: boolean;
+    version: string | null;
+    lavaplayer: string | null;
+    jvm: string | null;
+    plugins: { name: string; version: string }[];
+  };
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  logCount: number;
+}
+
 export type WsClientMessage =
   | { type: "selectGuild"; guildId: string }
   | { type: "search"; query: string; source: SearchSource }
@@ -258,9 +287,13 @@ export type WsClientMessage =
   | { type: "repeat"; guildId: string; mode: RepeatModeType }
   | { type: "shuffle"; guildId: string }
   | { type: "moveTrack"; guildId: string; from: number; to: number }
+  | { type: "movePreviousTrack"; guildId: string; from: number; to: number }
+  | { type: "movePreviousToQueue"; guildId: string; previousIndex: number; queueIndex: number }
+  | { type: "moveQueueToPrevious"; guildId: string; queueIndex: number; previousIndex: number }
   | { type: "removeTrack"; guildId: string; index: number }
   | { type: "removePreviousTrack"; guildId: string; index: number }
   | { type: "clearQueue"; guildId: string }
+  | { type: "dismissQueue"; guildId: string }
   | { type: "stop"; guildId: string }
   | { type: "toggleAutoplay"; guildId: string; enabled: boolean }
   | { type: "setAutoplayMood"; guildId: string; mood: AutoplayMood }
@@ -285,6 +318,7 @@ export type WsClientMessage =
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
   | { type: "toggleLike"; track: TrackDTO }
   | { type: "togglePinTrack"; track: TrackDTO }
+  | { type: "reorderPinnedTracks"; trackIds: string[] }
   | {
       type: "playPlaylist";
       guildId: string;
@@ -303,6 +337,7 @@ export type ToastLevel = "info" | "success" | "error";
 
 export type WsServerMessage =
   | { type: "ready"; selectedGuildId: string | null }
+  | { type: "meta"; meta: AppMetaDTO }
   | { type: "playerState"; state: PlayerStateDTO }
   | {
       type: "searchResults";

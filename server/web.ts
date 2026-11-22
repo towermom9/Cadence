@@ -19,12 +19,14 @@ import type {
   DailyRecommendationsDTO,
   SearchSuggestResponseDTO,
   SearchSource,
+  SystemInfoDTO,
   TrackDTO,
   UserPreferencesDTO,
 } from "@shared/types";
 import { cleanArtistTag } from "@shared/artists";
 import { config, VALID_SEARCH_SOURCES } from "./config";
 import type { CadenceDatabase } from "./db";
+import { formatLogsText, getLogCount, getRecentLogs } from "./logger";
 import { registerSetupRoutes } from "./setup";
 import type { CadenceWsHub } from "./ws";
 
@@ -225,9 +227,10 @@ export function createWebApp(
   });
 
   app.get("/api/me", async (c) => {
+    const probe = bot.music.isLavalinkConnected() ? undefined : await bot.probeLavalink();
     const session = getSessionFromContext(c, db);
     if (!session) {
-      return c.json({ authenticated: false, meta: bot.getBotMeta() }, 401);
+      return c.json({ authenticated: false, meta: bot.getBotMeta(probe) }, 401);
     }
 
     if (!db.hasStoredUserPreferences(session.user.id)) {
@@ -245,7 +248,7 @@ export function createWebApp(
     return c.json({
       authenticated: true,
       user: session.user,
-      meta: bot.getBotMeta(),
+      meta: bot.getBotMeta(probe),
       guilds,
       preferences,
     });
@@ -469,7 +472,11 @@ export function createWebApp(
     }
 
     const rawSource = (c.req.query("source") || "auto") as SearchSource;
-    const source: SearchSource = VALID_SEARCH_SOURCES.has(rawSource) ? rawSource : "auto";
+    const requestedSource: SearchSource = VALID_SEARCH_SOURCES.has(rawSource) ? rawSource : "auto";
+    const source: SearchSource =
+      requestedSource === "auto"
+        ? db.getUserPreferences(session.user.id).defaultSearchSource
+        : requestedSource;
     const requester = {
       id: session.user.id,
       username: session.user.globalName || session.user.username,
@@ -563,6 +570,92 @@ export function createWebApp(
       const status = msg.includes("not connected") ? 503 : 502;
       return c.json({ error: msg, tracks: [] }, status);
     }
+  });
+
+  const buildSystemInfo = (): SystemInfoDTO => {
+    let lavalinkConnected = false;
+    let lavalinkVersion: string | null = null;
+    let lavaplayer: string | null = null;
+    let jvm: string | null = null;
+    let plugins: { name: string; version: string }[] = [];
+
+    for (const node of bot.music.manager.nodeManager.nodes.values()) {
+      if (node.connected) {
+        lavalinkConnected = true;
+        lavalinkVersion = node.info?.version?.semver ?? "4.x";
+        lavaplayer = node.info?.lavaplayer ?? null;
+        jvm = node.info?.jvm ?? null;
+        plugins = Array.isArray(node.info?.plugins)
+          ? node.info.plugins.map((p) => ({ name: p.name, version: p.version }))
+          : [];
+        break;
+      }
+    }
+
+    return {
+      appVersion: pkg.version || "1.0.0",
+      runtime: {
+        name: "Bun",
+        version: typeof Bun !== "undefined" ? Bun.version : process.versions.node,
+        platform: process.platform,
+        arch: process.arch,
+        uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+        memoryRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+      },
+      lavalink: {
+        connected: lavalinkConnected,
+        version: lavalinkVersion,
+        lavaplayer,
+        jvm,
+        plugins,
+      },
+      dependencies: { ...pkg.dependencies },
+      devDependencies: { ...pkg.devDependencies },
+      logCount: getLogCount(),
+    };
+  };
+
+  app.get("/api/system/info", (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    return c.json(buildSystemInfo());
+  });
+
+  app.get("/api/system/logs", (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const info = buildSystemInfo();
+    if (c.req.query("download") === "1") {
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      const header = [
+        `# Cadence Debug Report`,
+        `# Generated: ${new Date().toISOString()}`,
+        ``,
+        `## System Info`,
+        JSON.stringify(info, null, 2),
+        ``,
+        `## Recent Server Logs (${getLogCount()} captured)`,
+        formatLogsText(500) || "(no logs captured yet)",
+        ``,
+      ].join("\n");
+      return new Response(header, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="cadence-debug-${dateStamp}.txt"`,
+        },
+      });
+    }
+
+    return c.json({
+      info,
+      logs: getRecentLogs(300),
+      text: formatLogsText(300),
+    });
   });
 
   app.get("/ws", wsHub.handleUpgrade());

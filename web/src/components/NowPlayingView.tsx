@@ -83,6 +83,9 @@ interface Props {
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onStartMix: (track: TrackDTO) => void;
   onMoveTrack: (from: number, to: number) => void;
+  onMovePreviousTrack: (from: number, to: number) => void;
+  onMovePreviousToQueue: (previousIndex: number, queueIndex: number) => void;
+  onMoveQueueToPrevious: (queueIndex: number, previousIndex: number) => void;
   onRemoveTrack: (index: number) => void;
   onRemovePreviousTrack: (index: number) => void;
   onShuffle: () => void;
@@ -225,6 +228,9 @@ export function NowPlayingView({
   onEnqueue,
   onStartMix,
   onMoveTrack,
+  onMovePreviousTrack,
+  onMovePreviousToQueue,
+  onMoveQueueToPrevious,
   onRemoveTrack,
   onRemovePreviousTrack,
   onShuffle,
@@ -239,13 +245,17 @@ export function NowPlayingView({
   onTrackContextMenu,
   appVersion = __CADENCE_VERSION__,
 }: Props) {
+  type DragTimelineItem =
+    | { section: "previous"; prevIndex: number; displayIdx: number }
+    | { section: "queue"; queueIndex: number };
+
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
   const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
   const [mobileScrub, setMobileScrub] = useState<number | null>(null);
-  const [dragQueueIndex, setDragQueueIndex] = useState<number | null>(null);
-  const [dragOverQueueIndex, setDragOverQueueIndex] = useState<number | null>(null);
+  const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
+  const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const isDraggingMobileVolRef = useRef(false);
   const justDraggedRef = useRef(false);
@@ -264,44 +274,6 @@ export function NowPlayingView({
   const resolvedQueueName =
     playerState?.queueName || current?.title || playerState?.guildName || "Queue";
 
-  const resetDragState = useCallback(() => {
-    setDragQueueIndex(null);
-    setDragOverQueueIndex(null);
-    setDragOverPosition(null);
-  }, []);
-
-  useEffect(() => {
-    resetDragState();
-  }, [queue.length, resetDragState]);
-
-  const handleQueueDrop = useCallback(
-    (targetQueueIndex: number) => {
-      if (!privileged || dragQueueIndex === null) {
-        resetDragState();
-        return;
-      }
-      const from = dragQueueIndex;
-      const rawSlot = dragOverPosition === "below" ? targetQueueIndex + 1 : targetQueueIndex;
-      const to = rawSlot > from ? rawSlot - 1 : rawSlot;
-      resetDragState();
-      if (to !== from && to >= 0 && to < queue.length) {
-        justDraggedRef.current = true;
-        if (dragClearTimerRef.current) clearTimeout(dragClearTimerRef.current);
-        dragClearTimerRef.current = setTimeout(() => {
-          justDraggedRef.current = false;
-        }, 150);
-        onMoveTrack(from, to);
-      }
-    },
-    [dragOverPosition, dragQueueIndex, onMoveTrack, privileged, queue.length, resetDragState]
-  );
-
-  useEffect(() => {
-    if (!isDraggingMobileVolRef.current && typeof playerState?.volume === "number") {
-      setMobileVolume(playerState.volume);
-    }
-  }, [playerState?.volume]);
-
   const previousEntries = useMemo(
     () =>
       (playerState?.previous ?? [])
@@ -309,6 +281,99 @@ export function NowPlayingView({
         .reverse(),
     [playerState?.previous]
   );
+
+  const resetDragState = useCallback(() => {
+    setDragSource(null);
+    setDragTarget(null);
+    setDragOverPosition(null);
+  }, []);
+
+  useEffect(() => {
+    resetDragState();
+  }, [queue.length, previousEntries.length, resetDragState]);
+
+  const markJustDragged = useCallback(() => {
+    justDraggedRef.current = true;
+    if (dragClearTimerRef.current) clearTimeout(dragClearTimerRef.current);
+    dragClearTimerRef.current = setTimeout(() => {
+      justDraggedRef.current = false;
+    }, 150);
+  }, []);
+
+  const handleTimelineDrop = useCallback(
+    (target: DragTimelineItem) => {
+      if (!privileged || !dragSource) {
+        resetDragState();
+        return;
+      }
+      const source = dragSource;
+      const pos = dragOverPosition ?? "above";
+      resetDragState();
+
+      if (source.section === "queue" && target.section === "queue") {
+        const rawSlot = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
+        const to = rawSlot > source.queueIndex ? rawSlot - 1 : rawSlot;
+        if (to !== source.queueIndex && to >= 0 && to < queue.length) {
+          markJustDragged();
+          onMoveTrack(source.queueIndex, to);
+        }
+        return;
+      }
+
+      if (source.section === "previous" && target.section === "previous") {
+        const rawDisplaySlot = pos === "below" ? target.displayIdx + 1 : target.displayIdx;
+        const finalDisplayIdx =
+          rawDisplaySlot > source.displayIdx ? rawDisplaySlot - 1 : rawDisplaySlot;
+        if (finalDisplayIdx !== source.displayIdx && previousEntries.length > 0) {
+          const toPrev = Math.max(
+            0,
+            Math.min(previousEntries.length - 1, previousEntries.length - 1 - finalDisplayIdx)
+          );
+          if (toPrev !== source.prevIndex) {
+            markJustDragged();
+            onMovePreviousTrack(source.prevIndex, toPrev);
+          }
+        }
+        return;
+      }
+
+      if (source.section === "previous" && target.section === "queue") {
+        const rawQueueIdx = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
+        markJustDragged();
+        onMovePreviousToQueue(source.prevIndex, Math.max(0, rawQueueIdx));
+        return;
+      }
+
+      if (source.section === "queue" && target.section === "previous") {
+        const rawDisplaySlot = pos === "below" ? target.displayIdx + 1 : target.displayIdx;
+        const insertPrevIdx = Math.max(
+          0,
+          Math.min(previousEntries.length, previousEntries.length - rawDisplaySlot)
+        );
+        markJustDragged();
+        onMoveQueueToPrevious(source.queueIndex, insertPrevIdx);
+      }
+    },
+    [
+      dragOverPosition,
+      dragSource,
+      markJustDragged,
+      onMovePreviousToQueue,
+      onMovePreviousTrack,
+      onMoveQueueToPrevious,
+      onMoveTrack,
+      previousEntries.length,
+      privileged,
+      queue.length,
+      resetDragState,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isDraggingMobileVolRef.current && typeof playerState?.volume === "number") {
+      setMobileVolume(playerState.volume);
+    }
+  }, [playerState?.volume]);
 
   const { manualEntries, autoplayEntries } = useMemo(() => {
     const manual: { track: TrackDTO; queueIndex: number }[] = [];
@@ -885,17 +950,70 @@ export function NowPlayingView({
               )}
 
               {/* Previous tracks in queue timeline */}
-              {previousEntries.map(({ track, prevIndex }) => {
+              {previousEntries.map(({ track, prevIndex }, displayIdx) => {
                 const liked = likedTrackIds.has(track.identifier);
+                const isDragging =
+                  dragSource?.section === "previous" && dragSource.prevIndex === prevIndex;
+                const isOver =
+                  dragTarget?.section === "previous" &&
+                  dragTarget.prevIndex === prevIndex &&
+                  !isDragging;
                 return (
                   <div
                     key={`prev-${track.identifier}-${prevIndex}`}
-                    onClick={() => onPlayPrevious(prevIndex)}
+                    draggable={privileged}
+                    onDragStart={(e) => {
+                      if (!privileged) return;
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", `prev:${prevIndex}`);
+                      setDragSource({ section: "previous", prevIndex, displayIdx });
+                    }}
+                    onDragOver={(e) => {
+                      if (!privileged || !dragSource) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                      if (
+                        dragTarget?.section !== "previous" ||
+                        dragTarget.prevIndex !== prevIndex ||
+                        dragOverPosition !== pos
+                      ) {
+                        setDragTarget({ section: "previous", prevIndex, displayIdx });
+                        setDragOverPosition(pos);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleTimelineDrop({ section: "previous", prevIndex, displayIdx });
+                    }}
+                    onDragEnd={resetDragState}
+                    onClick={() => {
+                      if (justDraggedRef.current) return;
+                      onPlayPrevious(prevIndex);
+                    }}
                     onContextMenu={(e) =>
                       onTrackContextMenu(e, track, { previousIndex: prevIndex })
                     }
-                    className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
+                    className={`group relative flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100 ${
+                      isDragging ? "opacity-35" : ""
+                    }`}
                   >
+                    {isOver && dragOverPosition === "above" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                      />
+                    )}
+                    {isOver && dragOverPosition === "below" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                      />
+                    )}
+                    {privileged && (
+                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                    )}
                     <TrackArtwork
                       track={track}
                       className="h-10 w-10 shrink-0 rounded"
@@ -955,11 +1073,51 @@ export function NowPlayingView({
                 );
               })}
 
-              {/* Currently playing highlighted row */}
+              {/* Currently playing highlighted row (also acts as drop boundary between past & upcoming) */}
               {current && (() => {
                 const liked = likedTrackIds.has(current.identifier);
                 return (
                   <div
+                    onDragOver={(e) => {
+                      if (!privileged || !dragSource) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                      if (dragSource.section === "queue" && pos === "above") {
+                        setDragTarget({
+                          section: "previous",
+                          prevIndex: 0,
+                          displayIdx: Math.max(0, previousEntries.length - 1),
+                        });
+                        setDragOverPosition("below");
+                      } else if (dragSource.section === "previous" && pos === "below") {
+                        setDragTarget({ section: "queue", queueIndex: 0 });
+                        setDragOverPosition("above");
+                      } else {
+                        setDragTarget(null);
+                        setDragOverPosition(null);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (!privileged || !dragSource) return;
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                      if (dragSource.section === "queue" && pos === "above") {
+                        markJustDragged();
+                        const from = dragSource.queueIndex;
+                        resetDragState();
+                        onMoveQueueToPrevious(from, 0);
+                      } else if (dragSource.section === "previous" && pos === "below") {
+                        markJustDragged();
+                        const fromPrev = dragSource.prevIndex;
+                        resetDragState();
+                        onMovePreviousToQueue(fromPrev, 0);
+                      } else {
+                        resetDragState();
+                      }
+                    }}
                     onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
                     className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
                   >
@@ -1029,8 +1187,12 @@ export function NowPlayingView({
               {/* User-queued upcoming tracks */}
               {manualEntries.map(({ track, queueIndex }, manualPos) => {
                 const liked = likedTrackIds.has(track.identifier);
-                const isDragging = dragQueueIndex === queueIndex;
-                const isOver = dragOverQueueIndex === queueIndex && dragQueueIndex !== queueIndex;
+                const isDragging =
+                  dragSource?.section === "queue" && dragSource.queueIndex === queueIndex;
+                const isOver =
+                  dragTarget?.section === "queue" &&
+                  dragTarget.queueIndex === queueIndex &&
+                  !isDragging;
                 return (
                   <div
                     key={`q-${track.identifier}-${queueIndex}`}
@@ -1038,23 +1200,27 @@ export function NowPlayingView({
                     onDragStart={(e) => {
                       if (!privileged) return;
                       e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", String(queueIndex));
-                      setDragQueueIndex(queueIndex);
+                      e.dataTransfer.setData("text/plain", `queue:${queueIndex}`);
+                      setDragSource({ section: "queue", queueIndex });
                     }}
                     onDragOver={(e) => {
-                      if (!privileged || dragQueueIndex === null) return;
+                      if (!privileged || !dragSource) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                      if (dragOverQueueIndex !== queueIndex || dragOverPosition !== pos) {
-                        setDragOverQueueIndex(queueIndex);
+                      if (
+                        dragTarget?.section !== "queue" ||
+                        dragTarget.queueIndex !== queueIndex ||
+                        dragOverPosition !== pos
+                      ) {
+                        setDragTarget({ section: "queue", queueIndex });
                         setDragOverPosition(pos);
                       }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      handleQueueDrop(queueIndex);
+                      handleTimelineDrop({ section: "queue", queueIndex });
                     }}
                     onDragEnd={resetDragState}
                     onClick={() => {
@@ -1234,8 +1400,12 @@ export function NowPlayingView({
                 autoplayEntries.length > 0 ? (
                   autoplayEntries.map(({ track, queueIndex }) => {
                     const liked = likedTrackIds.has(track.identifier);
-                    const isDragging = dragQueueIndex === queueIndex;
-                    const isOver = dragOverQueueIndex === queueIndex && dragQueueIndex !== queueIndex;
+                    const isDragging =
+                      dragSource?.section === "queue" && dragSource.queueIndex === queueIndex;
+                    const isOver =
+                      dragTarget?.section === "queue" &&
+                      dragTarget.queueIndex === queueIndex &&
+                      !isDragging;
                     return (
                       <div
                         key={`auto-${track.identifier}-${queueIndex}`}
@@ -1243,23 +1413,27 @@ export function NowPlayingView({
                         onDragStart={(e) => {
                           if (!privileged) return;
                           e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData("text/plain", String(queueIndex));
-                          setDragQueueIndex(queueIndex);
+                          e.dataTransfer.setData("text/plain", `queue:${queueIndex}`);
+                          setDragSource({ section: "queue", queueIndex });
                         }}
                         onDragOver={(e) => {
-                          if (!privileged || dragQueueIndex === null) return;
+                          if (!privileged || !dragSource) return;
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
                           const rect = e.currentTarget.getBoundingClientRect();
                           const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                          if (dragOverQueueIndex !== queueIndex || dragOverPosition !== pos) {
-                            setDragOverQueueIndex(queueIndex);
+                          if (
+                            dragTarget?.section !== "queue" ||
+                            dragTarget.queueIndex !== queueIndex ||
+                            dragOverPosition !== pos
+                          ) {
+                            setDragTarget({ section: "queue", queueIndex });
                             setDragOverPosition(pos);
                           }
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          handleQueueDrop(queueIndex);
+                          handleTimelineDrop({ section: "queue", queueIndex });
                         }}
                         onDragEnd={resetDragState}
                         onClick={() => {

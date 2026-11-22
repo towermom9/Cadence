@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
-import { Pin, Play, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { GripVertical, Pin, Play, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import type {
   DailyRecommendationsDTO,
   EnqueueMode,
@@ -21,9 +21,11 @@ interface Props {
   history: HistoryEntryDTO[];
   pinnedTracks: PinnedTrackDTO[];
   playlists: PlaylistDTO[];
+  defaultSearchSource: SearchSource;
   onMoodSearch: (query: string, source?: SearchSource) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
   onTogglePinTrack: (track: TrackDTO) => void;
+  onReorderPinnedTracks: (trackIds: string[]) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onClearHistory: () => void;
@@ -83,9 +85,11 @@ export function HomeView({
   history,
   pinnedTracks,
   playlists,
+  defaultSearchSource,
   onMoodSearch,
   onEnqueue,
   onTogglePinTrack,
+  onReorderPinnedTracks,
   onSelectPlaylist,
   onPlayPlaylist,
   onClearHistory,
@@ -95,6 +99,44 @@ export function HomeView({
 }: Props) {
   const [recs, setRecs] = useState<DailyRecommendationsDTO | null>(null);
   const [recsLoading, setRecsLoading] = useState(false);
+  const [dragPinnedId, setDragPinnedId] = useState<string | null>(null);
+  const [dragOverPinnedId, setDragOverPinnedId] = useState<string | null>(null);
+  const justDraggedRef = useRef(false);
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+    };
+  }, []);
+
+  const handlePinnedDrop = useCallback(
+    (targetTrackId: string) => {
+      if (!dragPinnedId || dragPinnedId === targetTrackId) {
+        setDragPinnedId(null);
+        setDragOverPinnedId(null);
+        return;
+      }
+      const ids = pinnedTracks.map((p) => p.track.identifier);
+      const fromIdx = ids.indexOf(dragPinnedId);
+      const toIdx = ids.indexOf(targetTrackId);
+      setDragPinnedId(null);
+      setDragOverPinnedId(null);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+      const reordered = [...ids];
+      const [moved] = reordered.splice(fromIdx, 1);
+      reordered.splice(toIdx, 0, moved);
+
+      justDraggedRef.current = true;
+      if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = setTimeout(() => {
+        justDraggedRef.current = false;
+      }, 150);
+      onReorderPinnedTracks(reordered);
+    },
+    [dragPinnedId, onReorderPinnedTracks, pinnedTracks]
+  );
 
   const hasSeedSource = history.length > 0 || pinnedTracks.length > 0;
 
@@ -152,7 +194,7 @@ export function HomeView({
           <button
             key={chip}
             type="button"
-            onClick={() => onMoodSearch(`${chip} music`, "ytmsearch")}
+            onClick={() => onMoodSearch(`${chip} music`, defaultSearchSource)}
             className="shrink-0 rounded-lg border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-sm font-medium text-zinc-100 transition hover:bg-white/[0.16]"
           >
             {chip}
@@ -197,60 +239,116 @@ export function HomeView({
 
         {listenAgainItems.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-            {listenAgainItems.slice(0, 10).map(({ track, isPinned }) => (
-              <div
-                key={track.identifier}
-                onClick={() => onEnqueue([track], "now")}
-                onContextMenu={(e) => onTrackContextMenu(e, track)}
-                className="group cursor-pointer space-y-2.5"
-              >
-                <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]">
-                  <TrackArtwork
-                    track={track}
-                    className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
-                    iconClassName="h-12 w-12"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onTogglePinTrack(track);
-                    }}
-                    title={isPinned ? "Unpin from Listen again" : "Pin to Listen again"}
-                    className={`absolute left-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-white shadow transition ${
-                      isPinned ? "opacity-100" : "opacity-0 hover:bg-black group-hover:opacity-100"
-                    }`}
+            {listenAgainItems.slice(0, 10).map(({ track, isPinned }) => {
+              const isDragging = isPinned && dragPinnedId === track.identifier;
+              const isDragTarget =
+                isPinned &&
+                dragPinnedId !== null &&
+                dragOverPinnedId === track.identifier &&
+                dragPinnedId !== track.identifier;
+              return (
+                <div
+                  key={track.identifier}
+                  draggable={isPinned}
+                  onDragStart={(e) => {
+                    if (!isPinned) return;
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", track.identifier);
+                    setDragPinnedId(track.identifier);
+                  }}
+                  onDragOver={(e) => {
+                    if (!isPinned || !dragPinnedId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverPinnedId !== track.identifier) {
+                      setDragOverPinnedId(track.identifier);
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverPinnedId === track.identifier) {
+                      setDragOverPinnedId(null);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!isPinned) return;
+                    e.preventDefault();
+                    handlePinnedDrop(track.identifier);
+                  }}
+                  onDragEnd={() => {
+                    setDragPinnedId(null);
+                    setDragOverPinnedId(null);
+                  }}
+                  onClick={() => {
+                    if (justDraggedRef.current) return;
+                    onEnqueue([track], "now");
+                  }}
+                  onContextMenu={(e) => onTrackContextMenu(e, track)}
+                  className={`group space-y-2.5 transition ${
+                    isPinned ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+                  } ${isDragging ? "opacity-40" : ""}`}
+                >
+                  <div
+                    style={
+                      isDragTarget ? { boxShadow: "0 0 0 2px var(--cadence-accent)" } : undefined
+                    }
+                    className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]"
                   >
-                    <Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-current" : ""}`} />
-                  </button>
+                    <TrackArtwork
+                      track={track}
+                      className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
+                      iconClassName="h-12 w-12"
+                    />
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onEnqueue([track], "end");
-                    }}
-                    title="Add to queue"
-                    className="absolute right-2.5 top-2.5 rounded-full bg-black/75 p-1.5 text-white opacity-0 transition hover:bg-black group-hover:opacity-100"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePinTrack(track);
+                      }}
+                      title={isPinned ? "Unpin from Listen again" : "Pin to Listen again"}
+                      className={`absolute left-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-white shadow transition ${
+                        isPinned ? "opacity-100" : "opacity-0 hover:bg-black group-hover:opacity-100"
+                      }`}
+                    >
+                      <Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-current" : ""}`} />
+                    </button>
 
-                  <span className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-                    <Play className="ml-0.5 h-5 w-5 fill-current" />
-                  </span>
+                    {isPinned && (
+                      <span
+                        title="Drag to reorder pin"
+                        className="pointer-events-none absolute bottom-2.5 left-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-zinc-200 opacity-0 shadow transition group-hover:opacity-100"
+                      >
+                        <GripVertical className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEnqueue([track], "end");
+                      }}
+                      title="Add to queue"
+                      className="absolute right-2.5 top-2.5 rounded-full bg-black/75 p-1.5 text-white opacity-0 transition hover:bg-black group-hover:opacity-100"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+
+                    <span className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                      <Play className="ml-0.5 h-5 w-5 fill-current" />
+                    </span>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-white">{track.title}</p>
+                    <p className="truncate text-xs text-zinc-400">
+                      <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                      <span> • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}</span>
+                    </p>
+                  </div>
                 </div>
-
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{track.title}</p>
-                  <p className="truncate text-xs text-zinc-400">
-                    <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
-                    <span> • {sourceLabel(track.sourceName)} • {formatMs(track.duration)}</span>
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
@@ -258,7 +356,7 @@ export function HomeView({
               <button
                 key={pick.title}
                 type="button"
-                onClick={() => onMoodSearch(pick.query, "ytmsearch")}
+                onClick={() => onMoodSearch(pick.query, defaultSearchSource)}
                 className="group text-left"
               >
                 <div

@@ -1,3 +1,7 @@
+import { installDebugLogger } from "./logger";
+
+installDebugLogger();
+
 import { CadenceBot } from "./bot";
 import { applyStoredConfig, config } from "./config";
 import { CadenceDatabase } from "./db";
@@ -22,6 +26,10 @@ async function main() {
 
   bot.setUserPlaylistsChangeHandler((userId) => {
     wsHub.notifyPlaylistsChanged(userId);
+  });
+
+  bot.music.setLavalinkStatusChangeHandler(() => {
+    wsHub.broadcastMeta();
   });
 
   const app = createWebApp(bot, db, wsHub);

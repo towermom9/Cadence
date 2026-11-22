@@ -38,6 +38,7 @@ interface Props {
   meta: AppMetaDTO | null;
   guilds: GuildSummaryDTO[];
   selectedGuildId: string | null;
+  defaultSearchSource: SearchSource;
   searching: boolean;
   onOpenMobileMenu: () => void;
   onSearch: (query: string, source: SearchSource) => void;
@@ -56,6 +57,7 @@ const SEARCH_SOURCES: { id: SearchSource; label: string }[] = [
   { id: "ytsearch", label: "YouTube" },
   { id: "spsearch", label: "Spotify" },
   { id: "scsearch", label: "SoundCloud" },
+  { id: "dzsearch", label: "Deezer" },
 ];
 
 export function TopBar({
@@ -63,6 +65,7 @@ export function TopBar({
   meta,
   guilds,
   selectedGuildId,
+  defaultSearchSource,
   searching,
   onOpenMobileMenu,
   onSearch,
@@ -75,7 +78,10 @@ export function TopBar({
   onLogout,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<SearchSource>(() => loadUiPrefs().searchSource);
+  const [source, setSource] = useState<SearchSource>(() => {
+    const saved = loadUiPrefs().searchSource;
+    return saved === "auto" ? defaultSearchSource : saved;
+  });
   const [openMenu, setOpenMenu] = useState<"cast" | "user" | null>(null);
 
   const [suggestOpen, setSuggestOpen] = useState(false);
@@ -86,6 +92,15 @@ export function TopBar({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const prevDefaultSourceRef = useRef<SearchSource>(defaultSearchSource);
+
+  useEffect(() => {
+    if (prevDefaultSourceRef.current !== defaultSearchSource) {
+      prevDefaultSourceRef.current = defaultSearchSource;
+      setSource(defaultSearchSource);
+      saveUiPrefs({ searchSource: defaultSearchSource });
+    }
+  }, [defaultSearchSource]);
 
   const botGuilds = guilds.filter((g) => g.botPresent);
   const invitableGuilds = guilds.filter((g) => !g.botPresent && g.canManage);
@@ -102,6 +117,10 @@ export function TopBar({
 
   useEffect(() => {
     const onDocClick = (e: globalThis.MouseEvent) => {
+      const targetEl = e.target as HTMLElement | null;
+      if (targetEl?.closest("[data-context-menu='true']")) {
+        return;
+      }
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpenMenu(null);
         setSuggestOpen(false);
@@ -344,7 +363,6 @@ export function TopBar({
                           onPlayTrack(track);
                         }}
                         onContextMenu={(e) => {
-                          setSuggestOpen(false);
                           onTrackContextMenu(e, track);
                         }}
                         className={`flex cursor-pointer items-center gap-3 px-3.5 py-2 transition ${

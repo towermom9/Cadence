@@ -1,16 +1,24 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Check,
+  Copy,
+  Download,
+  Loader2,
   Palette,
   Play,
+  RefreshCw,
   Save,
   Server,
   ShieldAlert,
   Sparkles,
+  Terminal,
 } from "lucide-react";
 import type {
   AutoplayClickBehavior,
+  DebugLogEntryDTO,
   GuildSettingsDTO,
+  SearchSource,
+  SystemInfoDTO,
   UserPreferencesDTO,
 } from "@shared/types";
 import { BACKGROUND_MODES, THEME_ACCENTS } from "../utils/theme";
@@ -27,7 +35,44 @@ interface Props {
   onSaveSettings: (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>) => void;
 }
 
-type SettingsTab = "appearance" | "playback" | "server";
+type SettingsTab = "appearance" | "playback" | "server" | "system";
+
+const SEARCH_PROVIDER_OPTIONS: {
+  id: SearchSource;
+  title: string;
+  description: string;
+}[] = [
+  {
+    id: "ytmsearch",
+    title: "YouTube Music",
+    description: "Official tracks, albums, and clean audio matches.",
+  },
+  {
+    id: "ytsearch",
+    title: "YouTube",
+    description: "Broadest video catalog including covers and live clips.",
+  },
+  {
+    id: "spsearch",
+    title: "Spotify",
+    description: "Spotify metadata resolved through Lavalink audio sources.",
+  },
+  {
+    id: "scsearch",
+    title: "SoundCloud",
+    description: "Indie uploads, remixes, and DJ sets.",
+  },
+  {
+    id: "dzsearch",
+    title: "Deezer",
+    description: "Deezer catalog lookup (when enabled on Lavalink).",
+  },
+  {
+    id: "auto",
+    title: "Server Default (Auto)",
+    description: "Use the server's configured default search provider.",
+  },
+];
 
 const AUTOPLAY_CLICK_OPTIONS: {
   id: AutoplayClickBehavior;
@@ -107,6 +152,41 @@ export function SettingsView({
   const [stay247, setStay247] = useState(false);
   const [autoplay, setAutoplay] = useState(false);
   const [allowDuplicates, setAllowDuplicates] = useState(true);
+  const [sysInfo, setSysInfo] = useState<SystemInfoDTO | null>(null);
+  const [sysLogs, setSysLogs] = useState<DebugLogEntryDTO[]>([]);
+  const [sysText, setSysText] = useState("");
+  const [sysLoading, setSysLoading] = useState(false);
+  const [sysError, setSysError] = useState<string | null>(null);
+  const [copiedLogs, setCopiedLogs] = useState(false);
+
+  const loadSystemLogs = useCallback(async () => {
+    setSysLoading(true);
+    setSysError(null);
+    try {
+      const res = await fetch("/api/system/logs");
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as {
+        info?: SystemInfoDTO;
+        logs?: DebugLogEntryDTO[];
+        text?: string;
+      };
+      if (data.info) setSysInfo(data.info);
+      setSysLogs(data.logs ?? []);
+      setSysText(data.text ?? "");
+    } catch (error) {
+      setSysError(error instanceof Error ? error.message : "Failed to load system diagnostics.");
+    } finally {
+      setSysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "system") {
+      void loadSystemLogs();
+    }
+  }, [loadSystemLogs, tab]);
 
   useEffect(() => {
     if (guildId && canManage) {
@@ -147,12 +227,13 @@ export function SettingsView({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {(
             [
               { id: "appearance", label: "Appearance", icon: Palette },
               { id: "playback", label: "Playback", icon: Play },
               { id: "server", label: "Server", icon: Server },
+              { id: "system", label: "System", icon: Terminal },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
@@ -404,6 +485,58 @@ export function SettingsView({
             </div>
           </section>
 
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div>
+              <h2 className="text-base font-semibold text-white">Default Search Provider (Personal)</h2>
+              <p className="mt-0.5 text-xs text-zinc-400">
+                Applies per user across both the web dashboard search bar and Discord /play queries when Auto is active.
+              </p>
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {SEARCH_PROVIDER_OPTIONS.map((opt) => {
+                const selected = preferences.defaultSearchSource === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onUpdatePreferences({ defaultSearchSource: opt.id })}
+                    className={`flex items-start gap-3 rounded-xl border p-3.5 text-left transition ${
+                      selected
+                        ? "border-white bg-white/10"
+                        : "border-white/10 bg-[#0b0b0b] hover:border-white/25 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    <span
+                      style={
+                        selected
+                          ? {
+                              borderColor: "var(--cadence-accent)",
+                              backgroundColor: "var(--cadence-accent)",
+                            }
+                          : undefined
+                      }
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                        selected ? "" : "border-zinc-500"
+                      }`}
+                    >
+                      {selected && (
+                        <span
+                          style={{ backgroundColor: "var(--cadence-accent-fg)" }}
+                          className="h-1.5 w-1.5 rounded-full"
+                        />
+                      )}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{opt.title}</p>
+                      <p className="mt-0.5 text-xs text-zinc-400">{opt.description}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
           <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -565,6 +698,247 @@ export function SettingsView({
             </form>
           )}
         </>
+      )}
+
+      {/* SYSTEM & DEBUG TAB */}
+      {tab === "system" && (
+        <div className="space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div>
+              <h2 className="text-base font-semibold text-white">System &amp; Dependencies</h2>
+              <p className="mt-0.5 text-xs text-zinc-400">
+                Inspect runtime versions, Lavalink plugins, package dependencies, and server debug logs.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={sysLoading}
+                onClick={() => void loadSystemLogs()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/10 disabled:opacity-45"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${sysLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+              <button
+                type="button"
+                disabled={!sysInfo && !sysText}
+                onClick={async () => {
+                  const bundle = [
+                    `# Cadence Debug Report`,
+                    sysInfo ? JSON.stringify(sysInfo, null, 2) : "",
+                    "",
+                    sysText || "(no logs captured yet)",
+                  ]
+                    .filter(Boolean)
+                    .join("\n");
+                  try {
+                    await navigator.clipboard.writeText(bundle);
+                    setCopiedLogs(true);
+                    setTimeout(() => setCopiedLogs(false), 2000);
+                  } catch {
+                    // Ignore clipboard permission denials
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-white/10 disabled:opacity-45"
+              >
+                {copiedLogs ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy Debug Report
+                  </>
+                )}
+              </button>
+              <a
+                href="/api/system/logs?download=1"
+                download
+                style={{
+                  backgroundColor: "var(--cadence-accent)",
+                  color: "var(--cadence-accent-fg)",
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold shadow-sm transition hover:brightness-110"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download .txt
+              </a>
+            </div>
+          </div>
+
+          {sysError && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+              {sysError}
+            </div>
+          )}
+
+          {sysLoading && !sysInfo ? (
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#121212] p-10 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+              Loading system diagnostics...
+            </div>
+          ) : (
+            sysInfo && (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <section className="space-y-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                    <h3 className="text-sm font-semibold text-white">Runtime</h3>
+                    <dl className="grid grid-cols-2 gap-y-2 text-xs">
+                      <dt className="text-zinc-400">Cadence</dt>
+                      <dd className="text-right font-mono text-white">v{sysInfo.appVersion}</dd>
+                      <dt className="text-zinc-400">Runtime</dt>
+                      <dd className="text-right font-mono text-white">
+                        {sysInfo.runtime.name} v{sysInfo.runtime.version}
+                      </dd>
+                      <dt className="text-zinc-400">Platform</dt>
+                      <dd className="text-right font-mono text-zinc-200">
+                        {sysInfo.runtime.platform}/{sysInfo.runtime.arch}
+                      </dd>
+                      <dt className="text-zinc-400">Uptime</dt>
+                      <dd className="text-right font-mono text-zinc-200">
+                        {Math.floor(sysInfo.runtime.uptimeSeconds / 3600)}h{" "}
+                        {Math.floor((sysInfo.runtime.uptimeSeconds % 3600) / 60)}m{" "}
+                        {sysInfo.runtime.uptimeSeconds % 60}s
+                      </dd>
+                      <dt className="text-zinc-400">Memory RSS</dt>
+                      <dd className="text-right font-mono text-zinc-200">
+                        {sysInfo.runtime.memoryRssMb} MB
+                      </dd>
+                    </dl>
+                  </section>
+
+                  <section className="space-y-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-white">Audio Engine (Lavalink)</h3>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          sysInfo.lavalink.connected
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : "bg-rose-500/15 text-rose-300"
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            sysInfo.lavalink.connected ? "bg-emerald-400" : "bg-rose-400"
+                          }`}
+                        />
+                        {sysInfo.lavalink.connected ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-y-2 text-xs">
+                      <dt className="text-zinc-400">Lavalink</dt>
+                      <dd className="text-right font-mono text-white">
+                        {sysInfo.lavalink.version || "—"}
+                      </dd>
+                      <dt className="text-zinc-400">Lavaplayer</dt>
+                      <dd className="text-right font-mono text-zinc-200">
+                        {sysInfo.lavalink.lavaplayer || "—"}
+                      </dd>
+                      <dt className="text-zinc-400">JVM</dt>
+                      <dd className="text-right font-mono text-zinc-200">
+                        {sysInfo.lavalink.jvm || "—"}
+                      </dd>
+                    </dl>
+                    {sysInfo.lavalink.plugins.length > 0 && (
+                      <div className="border-t border-white/8 pt-2.5">
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                          Lavalink Plugins
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {sysInfo.lavalink.plugins.map((p) => (
+                            <span
+                              key={p.name}
+                              className="rounded-md border border-white/10 bg-[#0b0b0b] px-2 py-0.5 font-mono text-[11px] text-zinc-200"
+                            >
+                              {p.name} {p.version}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                  <h3 className="text-sm font-semibold text-white">Package Dependencies</h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                        Dependencies
+                      </p>
+                      <div className="divide-y divide-white/[0.06] rounded-xl border border-white/8 bg-[#0b0b0b] px-3">
+                        {Object.entries(sysInfo.dependencies).map(([name, ver]) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between py-2 text-xs"
+                          >
+                            <span className="font-mono text-zinc-200">{name}</span>
+                            <span className="font-mono text-zinc-400">{ver}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                        Dev &amp; Build Toolchain
+                      </p>
+                      <div className="divide-y divide-white/[0.06] rounded-xl border border-white/8 bg-[#0b0b0b] px-3">
+                        {Object.entries(sysInfo.devDependencies).map(([name, ver]) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between py-2 text-xs"
+                          >
+                            <span className="font-mono text-zinc-200">{name}</span>
+                            <span className="font-mono text-zinc-400">{ver}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-white">
+                      Recent Server Logs ({sysLogs.length} / {sysInfo.logCount} buffered)
+                    </h3>
+                    <span className="text-[11px] text-zinc-500">Secrets redacted automatically</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-[#080808] p-3 font-mono text-[11px] leading-relaxed">
+                    {sysLogs.length === 0 ? (
+                      <p className="text-zinc-500">No log lines captured yet.</p>
+                    ) : (
+                      sysLogs.map((entry, idx) => (
+                        <div key={`${entry.ts}-${idx}`} className="flex gap-2 border-b border-white/[0.03] py-0.5 last:border-b-0">
+                          <span className="shrink-0 text-zinc-600">
+                            {new Date(entry.ts).toISOString().slice(11, 19)}
+                          </span>
+                          <span
+                            className={`w-12 shrink-0 uppercase ${
+                              entry.level === "error"
+                                ? "text-rose-400"
+                                : entry.level === "warn"
+                                  ? "text-amber-300"
+                                  : "text-zinc-400"
+                            }`}
+                          >
+                            [{entry.level}]
+                          </span>
+                          <span className="min-w-0 whitespace-pre-wrap break-words text-zinc-200">
+                            {entry.message}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </section>
+              </>
+            )
+          )}
+        </div>
       )}
     </div>
   );

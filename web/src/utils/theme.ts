@@ -60,6 +60,7 @@ export const DEFAULT_PREFERENCES: UserPreferencesDTO = {
   artworkSeekSeconds: 10,
   lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
+  defaultSearchSource: "ytmsearch",
 };
 
 const STORAGE_KEY = "cadence:prefs";
@@ -137,6 +138,10 @@ function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined
         : DEFAULT_PREFERENCES.lyricsAutoScroll,
     autoplayClickBehavior:
       raw.autoplayClickBehavior ?? DEFAULT_PREFERENCES.autoplayClickBehavior,
+    defaultSearchSource:
+      raw.defaultSearchSource && VALID_SEARCH_SOURCES.has(raw.defaultSearchSource)
+        ? raw.defaultSearchSource
+        : DEFAULT_PREFERENCES.defaultSearchSource,
   };
 }
 

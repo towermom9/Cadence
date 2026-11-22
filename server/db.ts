@@ -16,7 +16,7 @@ import type {
   UserPreferencesDTO,
   UserProfileDTO,
 } from "@shared/types";
-import { config } from "./config";
+import { config, VALID_SEARCH_SOURCES } from "./config";
 
 const VALID_PLAYLIST_SORTS = new Set<PlaylistSortMode>([
   "recent_activity",
@@ -57,6 +57,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
   artworkSeekSeconds: 10,
   lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
+  defaultSearchSource: "ytmsearch",
 };
 
 function normalizeSeekSeconds(value: unknown, fallback = 10): number {
@@ -258,6 +259,14 @@ export class CadenceDatabase {
       .map((col) => col.name);
     if (!prefCols.includes("preferences_json")) {
       this.db.exec(`ALTER TABLE user_preferences ADD COLUMN preferences_json TEXT`);
+    }
+
+    const pinnedCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(pinned_tracks)`)
+      .all()
+      .map((col) => col.name);
+    if (!pinnedCols.includes("sort_order")) {
+      this.db.exec(`ALTER TABLE pinned_tracks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
     }
   }
 
@@ -648,7 +657,7 @@ export class CadenceDatabase {
         `SELECT user_id, track_id, track_json, pinned_at
          FROM pinned_tracks
          WHERE user_id = ?
-         ORDER BY pinned_at DESC
+         ORDER BY sort_order ASC, pinned_at DESC
          LIMIT ?`
       )
       .all(userId, limit);
@@ -695,14 +704,49 @@ export class CadenceDatabase {
       throw new Error("Maximum of 20 pinned tracks reached.");
     }
 
-    this.db
-      .query(
-        `INSERT INTO pinned_tracks (user_id, track_id, track_json, pinned_at)
-         VALUES (?, ?, ?, ?)`
-      )
-      .run(userId, track.identifier, JSON.stringify(track), Date.now());
+    const tx = this.db.transaction(() => {
+      this.db.query(`UPDATE pinned_tracks SET sort_order = sort_order + 1 WHERE user_id = ?`).run(userId);
+      this.db
+        .query(
+          `INSERT INTO pinned_tracks (user_id, track_id, track_json, pinned_at, sort_order)
+           VALUES (?, ?, ?, ?, 0)`
+        )
+        .run(userId, track.identifier, JSON.stringify(track), Date.now());
+    });
+    tx();
 
     return { pinnedTracks: this.getPinnedTracks(userId), pinned: true };
+  }
+
+  reorderPinnedTracks(userId: string, orderedTrackIds: string[]): PinnedTrackDTO[] {
+    const current = this.getPinnedTracks(userId, 50);
+    const validIds = new Set(current.map((p) => p.track.identifier));
+    const nextOrder: string[] = [];
+    const seen = new Set<string>();
+
+    for (const id of orderedTrackIds) {
+      if (!seen.has(id) && validIds.has(id)) {
+        seen.add(id);
+        nextOrder.push(id);
+      }
+    }
+    for (const item of current) {
+      if (!seen.has(item.track.identifier)) {
+        seen.add(item.track.identifier);
+        nextOrder.push(item.track.identifier);
+      }
+    }
+
+    const updateStmt = this.db.query(
+      `UPDATE pinned_tracks SET sort_order = ? WHERE user_id = ? AND track_id = ?`
+    );
+    const tx = this.db.transaction((ids: string[]) => {
+      ids.forEach((id, idx) => {
+        updateStmt.run(idx, userId, id);
+      });
+    });
+    tx(nextOrder);
+    return this.getPinnedTracks(userId);
   }
 
   toggleLikedTrack(
@@ -833,6 +877,10 @@ export class CadenceDatabase {
         parsed.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(parsed.autoplayClickBehavior)
           ? parsed.autoplayClickBehavior
           : DEFAULT_USER_PREFERENCES.autoplayClickBehavior,
+      defaultSearchSource:
+        parsed.defaultSearchSource && VALID_SEARCH_SOURCES.has(parsed.defaultSearchSource)
+          ? parsed.defaultSearchSource
+          : DEFAULT_USER_PREFERENCES.defaultSearchSource,
     };
   }
 
@@ -874,6 +922,10 @@ export class CadenceDatabase {
         patch.autoplayClickBehavior && VALID_AUTOPLAY_CLICKS.has(patch.autoplayClickBehavior)
           ? patch.autoplayClickBehavior
           : current.autoplayClickBehavior,
+      defaultSearchSource:
+        patch.defaultSearchSource && VALID_SEARCH_SOURCES.has(patch.defaultSearchSource)
+          ? patch.defaultSearchSource
+          : current.defaultSearchSource,
     };
 
     const now = Date.now();

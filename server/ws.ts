@@ -159,6 +159,7 @@ export class CadenceWsHub {
     selectedGuildId: string | null
   ): void {
     this.send(rawWs, { type: "ready", selectedGuildId });
+    this.send(rawWs, { type: "meta", meta: this.bot.getBotMeta() });
     this.send(rawWs, {
       type: "preferences",
       preferences: this.db.getUserPreferences(session.user.id),
@@ -216,6 +217,13 @@ export class CadenceWsHub {
       if (meta.selectedGuildId === guildId) {
         this.sendToast(rawWs, level, message);
       }
+    }
+  }
+
+  broadcastMeta(): void {
+    const meta = this.bot.getBotMeta();
+    for (const [rawWs] of this.clients.entries()) {
+      this.send(rawWs, { type: "meta", meta });
     }
   }
 
@@ -285,15 +293,19 @@ export class CadenceWsHub {
         }
 
         case "search": {
+          const resolvedSource =
+            msg.source === "auto"
+              ? this.db.getUserPreferences(user.id).defaultSearchSource
+              : msg.source;
           const { tracks, playlistName } = await this.bot.music.search(
             msg.query,
-            msg.source,
+            resolvedSource,
             requester
           );
           this.send(ws, {
             type: "searchResults",
             query: msg.query,
-            source: msg.source,
+            source: resolvedSource,
             tracks,
             playlistName,
           });
@@ -416,6 +428,27 @@ export class CadenceWsHub {
           return;
         }
 
+        case "movePreviousTrack": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.movePreviousTrack(msg.guildId, msg.from, msg.to);
+          return;
+        }
+
+        case "movePreviousToQueue": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.movePreviousToQueue(msg.guildId, msg.previousIndex, msg.queueIndex);
+          return;
+        }
+
+        case "moveQueueToPrevious": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.moveQueueToPrevious(msg.guildId, msg.queueIndex, msg.previousIndex);
+          return;
+        }
+
         case "removeTrack": {
           await this.requireSameVoice(msg.guildId, user.id);
           if (!this.bot.music.canRemoveTrack(msg.guildId, user.id, msg.index)) {
@@ -441,6 +474,14 @@ export class CadenceWsHub {
           this.requirePrivileged(msg.guildId, user.id);
           await this.bot.music.clearQueue(msg.guildId);
           this.sendToast(ws, "info", "Cleared upcoming queue");
+          return;
+        }
+
+        case "dismissQueue": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.dismissQueue(msg.guildId);
+          this.sendToast(ws, "info", "Dismissed queue");
           return;
         }
 
@@ -690,6 +731,12 @@ export class CadenceWsHub {
               ? `Pinned "${msg.track.title}" to Listen again`
               : `Unpinned "${msg.track.title}" from Listen again`
           );
+          return;
+        }
+
+        case "reorderPinnedTracks": {
+          const tracks = this.db.reorderPinnedTracks(user.id, msg.trackIds);
+          this.send(ws, { type: "pinnedTracks", tracks });
           return;
         }
 

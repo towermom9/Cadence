@@ -116,7 +116,7 @@ export function App() {
   }, []);
 
   const handleSearch = useCallback(
-    (query: string, source: SearchSource = "auto") => {
+    (query: string, source: SearchSource = socket.preferences.defaultSearchSource) => {
       navigateTo("search");
       socket.search(query, source);
     },
@@ -245,11 +245,12 @@ export function App() {
     [socket.pinnedTracks]
   );
 
+  const effectiveMeta = socket.meta ?? meta;
   const stepSeconds = Math.max(
     5,
     Math.min(30, Math.round(socket.preferences.artworkSeekSeconds || 10))
   );
-  const appVersion = meta?.appVersion || __CADENCE_VERSION__;
+  const appVersion = effectiveMeta?.appVersion || __CADENCE_VERSION__;
 
   useEffect(() => {
     if (!user) return;
@@ -555,7 +556,7 @@ export function App() {
         onMoveTrack={socket.moveTrack}
         onRemoveTrack={socket.removeTrack}
         onRemovePreviousTrack={socket.removePreviousTrack}
-        onDismissQueue={socket.clearQueue}
+        onDismissQueue={socket.dismissQueue}
         onRemoveFromPlaylist={socket.removeTrackFromPlaylist}
         onPlayPlaylist={handlePlayPlaylist}
         onTogglePinPlaylist={socket.togglePinPlaylist}
@@ -593,9 +594,10 @@ export function App() {
         <div className="ytm-ambient flex min-w-0 flex-1 flex-col">
           <TopBar
             user={user}
-            meta={meta}
+            meta={effectiveMeta}
             guilds={guilds}
             selectedGuildId={socket.selectedGuildId}
+            defaultSearchSource={socket.preferences.defaultSearchSource}
             searching={socket.searching}
             onOpenMobileMenu={() => setMobileMenuOpen(true)}
             onSearch={handleSearch}
@@ -647,6 +649,9 @@ export function App() {
                 onEnqueue={handleEnqueue}
                 onStartMix={handleStartMix}
                 onMoveTrack={socket.moveTrack}
+                onMovePreviousTrack={socket.movePreviousTrack}
+                onMovePreviousToQueue={socket.movePreviousToQueue}
+                onMoveQueueToPrevious={socket.moveQueueToPrevious}
                 onRemoveTrack={socket.removeTrack}
                 onRemovePreviousTrack={socket.removePreviousTrack}
                 onShuffle={socket.shuffle}
@@ -669,9 +674,13 @@ export function App() {
                     history={socket.history}
                     pinnedTracks={socket.pinnedTracks}
                     playlists={sortedPlaylists}
-                    onMoodSearch={(q, src) => handleSearch(q, src ?? "ytmsearch")}
+                    defaultSearchSource={socket.preferences.defaultSearchSource}
+                    onMoodSearch={(q, src) =>
+                      handleSearch(q, src ?? socket.preferences.defaultSearchSource)
+                    }
                     onEnqueue={handleEnqueue}
                     onTogglePinTrack={socket.togglePinTrack}
+                    onReorderPinnedTracks={socket.reorderPinnedTracks}
                     onSelectPlaylist={(id) => {
                       setSelectedPlaylistId(id);
                       navigateTo("playlist");
@@ -764,7 +773,7 @@ export function App() {
                 )}
 
                 <AppFooter
-                  meta={meta}
+                  meta={effectiveMeta}
                   onNavigate={navigateTo}
                   onOpenShortcuts={() => setShortcutsOpen(true)}
                   onOpenPlayer={() => setNowPlayingOpen(true)}

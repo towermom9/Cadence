@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AppMetaDTO,
   AutoplayMood,
   EnqueueMode,
   FilterPreset,
@@ -63,6 +64,7 @@ export function useCadenceSocket(
   } | null>(null);
 
   const [connected, setConnected] = useState(false);
+  const [liveMeta, setLiveMeta] = useState<AppMetaDTO | null>(null);
   const [selectedGuildId, setSelectedGuildId] = useState<string | null>(null);
   const [playerState, setPlayerState] = useState<PlayerStateDTO | null>(null);
   const [playbackAnchor, setPlaybackAnchor] = useState<PlaybackAnchor | null>(null);
@@ -152,6 +154,9 @@ export function useCadenceSocket(
         switch (msg.type) {
           case "ready":
             setSelectedGuildId(msg.selectedGuildId);
+            break;
+          case "meta":
+            setLiveMeta(msg.meta);
             break;
           case "playerState": {
             const now = performance.now();
@@ -446,6 +451,7 @@ export function useCadenceSocket(
 
   return {
     connected,
+    meta: liveMeta,
     selectedGuildId,
     playerState,
     playbackAnchor,
@@ -490,11 +496,20 @@ export function useCadenceSocket(
     shuffle: () => selectedGuildId && send({ type: "shuffle", guildId: selectedGuildId }),
     moveTrack: (from: number, to: number) =>
       selectedGuildId && send({ type: "moveTrack", guildId: selectedGuildId, from, to }),
+    movePreviousTrack: (from: number, to: number) =>
+      selectedGuildId && send({ type: "movePreviousTrack", guildId: selectedGuildId, from, to }),
+    movePreviousToQueue: (previousIndex: number, queueIndex: number) =>
+      selectedGuildId &&
+      send({ type: "movePreviousToQueue", guildId: selectedGuildId, previousIndex, queueIndex }),
+    moveQueueToPrevious: (queueIndex: number, previousIndex: number) =>
+      selectedGuildId &&
+      send({ type: "moveQueueToPrevious", guildId: selectedGuildId, queueIndex, previousIndex }),
     removeTrack: (index: number) =>
       selectedGuildId && send({ type: "removeTrack", guildId: selectedGuildId, index }),
     removePreviousTrack: (index: number) =>
       selectedGuildId && send({ type: "removePreviousTrack", guildId: selectedGuildId, index }),
     clearQueue: () => selectedGuildId && send({ type: "clearQueue", guildId: selectedGuildId }),
+    dismissQueue: () => selectedGuildId && send({ type: "dismissQueue", guildId: selectedGuildId }),
     stop: () => selectedGuildId && send({ type: "stop", guildId: selectedGuildId }),
     toggleAutoplay: (enabledValue: boolean) =>
       selectedGuildId &&
@@ -526,6 +541,7 @@ export function useCadenceSocket(
       send({ type: "removeTrackFromPlaylist", playlistId, index }),
     toggleLike: (track: TrackDTO) => send({ type: "toggleLike", track }),
     togglePinTrack: (track: TrackDTO) => send({ type: "togglePinTrack", track }),
+    reorderPinnedTracks: (trackIds: string[]) => send({ type: "reorderPinnedTracks", trackIds }),
     setPlaylistSort: (sort: PlaylistSortMode) => {
       setPreferences((prev) => {
         const next = { ...prev, playlistSort: sort };

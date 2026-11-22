@@ -8,6 +8,7 @@ import {
   type UnresolvedTrack,
 } from "lavalink-client";
 import { cleanArtistTag, splitArtists } from "@shared/artists";
+import { uiVolumeToLavalink } from "@shared/volume";
 import type {
   ArtistProfileDTO,
   AutoplayClickBehavior,
@@ -147,11 +148,14 @@ export class MusicService {
   private autoplayInFlight = new Set<string>();
   private queueNames = new Map<string, string>();
   private recentSeeks = new Map<string, { target: number; at: number }>();
+  private uiVolumes = new Map<string, number>();
+  private pendingVolumeUpdates = new Map<string, { target: number; inFlight: boolean }>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
   private onControllerEvent: (event: ControllerEventType, guildId: string) => void = () => {};
   private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
+  private onLavalinkStatusChange: () => void = () => {};
 
   constructor(
     private client: Client,
@@ -216,6 +220,14 @@ export class MusicService {
     this.onGuildToast = handler;
   }
 
+  setLavalinkStatusChangeHandler(handler: () => void): void {
+    this.onLavalinkStatusChange = handler;
+  }
+
+  getUiVolume(guildId: string): number {
+    return this.uiVolumes.get(guildId) ?? this.db.getGuildSettings(guildId).defaultVolume;
+  }
+
   private emitStateChange(guildId: string, withController = true): void {
     this.onStateChange(guildId);
     if (withController) {
@@ -226,10 +238,12 @@ export class MusicService {
   private registerEvents(): void {
     this.manager.nodeManager.on("connect", (node) => {
       console.log(`[Lavalink] Node "${node.id}" connected.`);
+      this.onLavalinkStatusChange();
     });
 
     this.manager.nodeManager.on("disconnect", (node, reason) => {
       console.warn(`[Lavalink] Node "${node.id}" disconnected:`, reason.reason || reason.code);
+      this.onLavalinkStatusChange();
     });
 
     this.manager.nodeManager.on("error", (node, error) => {
@@ -253,6 +267,8 @@ export class MusicService {
       this.autoplayInFlight.delete(player.guildId);
       this.queueNames.delete(player.guildId);
       this.recentSeeks.delete(player.guildId);
+      this.uiVolumes.delete(player.guildId);
+      this.pendingVolumeUpdates.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
       this.onControllerEvent("playerDestroy", player.guildId);
@@ -410,13 +426,14 @@ export class MusicService {
     }
 
     const settings = this.db.getGuildSettings(guildId);
+    this.uiVolumes.set(guildId, settings.defaultVolume);
     const player = this.manager.createPlayer({
       guildId,
       voiceChannelId,
       textChannelId,
       selfDeaf: true,
       selfMute: false,
-      volume: settings.defaultVolume,
+      volume: uiVolumeToLavalink(settings.defaultVolume),
       instaUpdateFiltersFix: true,
     });
 
@@ -711,6 +728,7 @@ export class MusicService {
         existingIds.add(player.queue.current.info.identifier);
       }
       for (const item of player.queue.tracks) {
+        if (this.isAutoplayTrack(item)) continue;
         if (item.info.identifier) {
           existingIds.add(item.info.identifier);
         }
@@ -732,6 +750,20 @@ export class MusicService {
     }
 
     const tracks = filtered.map((dto) => this.dtoToLavalinkTrack(dto, requester));
+
+    if (mode !== "replace") {
+      const addedIds = new Set(filtered.map((t) => t.identifier).filter(Boolean));
+      for (let i = player.queue.tracks.length - 1; i >= 0; i--) {
+        const existing = player.queue.tracks[i];
+        if (
+          this.isAutoplayTrack(existing) &&
+          existing.info.identifier &&
+          addedIds.has(existing.info.identifier)
+        ) {
+          await player.queue.splice(i, 1);
+        }
+      }
+    }
 
     if (mode === "replace") {
       if (player.queue.tracks.length > 0) {
@@ -775,12 +807,15 @@ export class MusicService {
       }
     }
 
-    if (
-      !options?.skipAutoplayPopulate &&
-      (mode === "now" || mode === "replace") &&
-      this.isAutoplayEnabled(guildId)
-    ) {
-      void this.populateAutoplayQueue(guildId, mode === "replace", requester.id);
+    if (!options?.skipAutoplayPopulate && this.isAutoplayEnabled(guildId)) {
+      if (mode === "now" || mode === "replace") {
+        void this.populateAutoplayQueue(guildId, mode === "replace", requester.id);
+      } else {
+        const remainingAuto = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
+        if (remainingAuto < 4) {
+          void this.populateAutoplayQueue(guildId, false, requester.id);
+        }
+      }
     }
 
     this.emitStateChange(guildId);
@@ -976,18 +1011,45 @@ export class MusicService {
     this.emitStateChange(guildId);
   }
 
-  async previous(guildId: string): Promise<void> {
+  private getEffectivePosition(guildId: string, player: Player): number {
+    let position = typeof player.position === "number" ? player.position : 0;
+    const recent = this.recentSeeks.get(guildId);
+    if (recent) {
+      const elapsed = Date.now() - recent.at;
+      if (elapsed < 2500) {
+        const expected = player.paused ? recent.target : recent.target + elapsed;
+        if (Math.abs(position - expected) > 2000) {
+          const duration = player.queue.current?.info.duration || expected;
+          position = Math.min(duration, Math.max(0, Math.round(expected)));
+        }
+      }
+    }
+    return position;
+  }
+
+  async previous(guildId: string): Promise<"restarted" | "previous"> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
 
-    if (player.queue.previous.length > 0) {
-      await this.playPrevious(guildId, 0);
-      return;
+    const current = player.queue.current;
+    if (
+      current &&
+      current.info.isSeekable &&
+      !current.info.isStream &&
+      this.getEffectivePosition(guildId, player) > 5000
+    ) {
+      await this.seek(guildId, 0);
+      return "restarted";
     }
 
-    if (player.queue.current?.info.isSeekable) {
+    if (player.queue.previous.length > 0) {
+      await this.playPrevious(guildId, 0);
+      return "previous";
+    }
+
+    if (current?.info.isSeekable && !current.info.isStream) {
       await this.seek(guildId, 0);
-      return;
+      return "restarted";
     }
 
     throw new Error("No previous track in history.");
@@ -1013,8 +1075,36 @@ export class MusicService {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
     const clamped = Math.max(0, Math.min(100, Math.round(volume)));
-    await player.setVolume(clamped);
+    this.uiVolumes.set(guildId, clamped);
     this.emitStateChange(guildId);
+
+    let entry = this.pendingVolumeUpdates.get(guildId);
+    if (entry) {
+      entry.target = clamped;
+      if (entry.inFlight) {
+        return clamped;
+      }
+    } else {
+      entry = { target: clamped, inFlight: false };
+      this.pendingVolumeUpdates.set(guildId, entry);
+    }
+
+    entry.inFlight = true;
+    try {
+      while (true) {
+        const targetUi = entry.target;
+        await player.setVolume(uiVolumeToLavalink(targetUi));
+        if (entry.target === targetUi) {
+          break;
+        }
+      }
+    } finally {
+      entry.inFlight = false;
+      if (this.pendingVolumeUpdates.get(guildId) === entry) {
+        this.pendingVolumeUpdates.delete(guildId);
+      }
+    }
+
     return clamped;
   }
 
@@ -1110,12 +1200,108 @@ export class MusicService {
     return removed;
   }
 
+  async movePreviousTrack(guildId: string, from: number, to: number): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    const len = player.queue.previous.length;
+    if (from < 0 || from >= len || to < 0 || to >= len) {
+      throw new Error("Previous track position is out of range.");
+    }
+    if (from === to) return;
+    const [target] = player.queue.previous.splice(from, 1);
+    player.queue.previous.splice(to, 0, target);
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+  }
+
+  async movePreviousToQueue(
+    guildId: string,
+    previousIndex: number,
+    queueIndex: number
+  ): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    if (previousIndex < 0 || previousIndex >= player.queue.previous.length) {
+      throw new Error("Previous track position is out of range.");
+    }
+    const [target] = player.queue.previous.splice(previousIndex, 1);
+    if (!target) return;
+    this.clearAutoplayFlag(target);
+
+    if (target.info.identifier) {
+      for (let i = player.queue.tracks.length - 1; i >= 0; i--) {
+        const existing = player.queue.tracks[i];
+        if (
+          this.isAutoplayTrack(existing) &&
+          existing.info.identifier === target.info.identifier
+        ) {
+          await player.queue.splice(i, 1);
+        }
+      }
+    }
+
+    const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+    const maxInsert = firstAutoIdx === -1 ? player.queue.tracks.length : firstAutoIdx;
+    const clampedIdx = Math.max(0, Math.min(queueIndex, maxInsert));
+    await player.queue.add(target, clampedIdx);
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+  }
+
+  async moveQueueToPrevious(
+    guildId: string,
+    queueIndex: number,
+    previousIndex: number
+  ): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    if (queueIndex < 0 || queueIndex >= player.queue.tracks.length) {
+      throw new Error("Track position is out of range.");
+    }
+    const target = player.queue.tracks[queueIndex];
+    this.clearAutoplayFlag(target);
+    await player.queue.splice(queueIndex, 1);
+
+    const insertIdx = Math.max(0, Math.min(previousIndex, player.queue.previous.length));
+    player.queue.previous.splice(insertIdx, 0, target as Track);
+    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
+    if (player.queue.previous.length > maxPrev) {
+      player.queue.previous.splice(maxPrev);
+    }
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+  }
+
   async clearQueue(guildId: string): Promise<void> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
     if (player.queue.tracks.length > 0) {
       await player.queue.splice(0, player.queue.tracks.length);
     }
+    this.emitStateChange(guildId);
+  }
+
+  async dismissQueue(guildId: string): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
+    this.queueNames.delete(guildId);
+    this.recentSeeks.delete(guildId);
+
+    if (player.queue.tracks.length > 0) {
+      await player.queue.splice(0, player.queue.tracks.length);
+    }
+    if (player.queue.previous.length > 0) {
+      player.queue.previous.splice(0, player.queue.previous.length);
+    }
+
+    await player.stopPlaying(true, false);
+    player.queue.current = null;
+    player.playing = false;
+    player.paused = false;
+
+    await player.queue.utils.save();
+    this.scheduleInactivityCheck(guildId);
     this.emitStateChange(guildId);
   }
 
@@ -1724,18 +1910,7 @@ export class MusicService {
       };
     }
 
-    let position = typeof player.position === "number" ? player.position : 0;
-    const recent = this.recentSeeks.get(guildId);
-    if (recent) {
-      const elapsed = Date.now() - recent.at;
-      if (elapsed < 2500) {
-        const expected = player.paused ? recent.target : recent.target + elapsed;
-        if (Math.abs(position - expected) > 2000) {
-          const duration = player.queue.current?.info.duration || expected;
-          position = Math.min(duration, Math.max(0, Math.round(expected)));
-        }
-      }
-    }
+    const position = this.getEffectivePosition(guildId, player);
 
     return {
       guildId,
@@ -1749,7 +1924,7 @@ export class MusicService {
       playing: Boolean(player.playing),
       paused: Boolean(player.paused),
       position,
-      volume: typeof player.volume === "number" ? player.volume : settings.defaultVolume,
+      volume: this.getUiVolume(guildId),
       repeatMode: player.repeatMode || "off",
       autoplay: this.isAutoplayEnabled(guildId),
       autoplayMood: this.getAutoplayMood(guildId),
