@@ -426,6 +426,16 @@ export class CadenceWsHub {
           return;
         }
 
+        case "removePreviousTrack": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          if (!this.bot.music.canRemovePreviousTrack(msg.guildId, user.id, msg.index)) {
+            throw new Error("Requires DJ role, admin permissions, or being the track requester.");
+          }
+          await this.bot.music.removePreviousTrack(msg.guildId, msg.index);
+          this.sendToast(ws, "info", "Removed track from queue");
+          return;
+        }
+
         case "clearQueue": {
           await this.requireSameVoice(msg.guildId, user.id);
           this.requirePrivileged(msg.guildId, user.id);

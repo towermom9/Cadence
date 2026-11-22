@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  GripVertical,
   ListPlus,
   Loader2,
   MoreVertical,
@@ -83,6 +84,7 @@ interface Props {
   onStartMix: (track: TrackDTO) => void;
   onMoveTrack: (from: number, to: number) => void;
   onRemoveTrack: (index: number) => void;
+  onRemovePreviousTrack: (index: number) => void;
   onShuffle: () => void;
   onClear: () => void;
   onToggleLike: (track: TrackDTO) => void;
@@ -93,6 +95,7 @@ interface Props {
   onOpenSaveModal: (tracks: TrackDTO[]) => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
+  appVersion?: string;
 }
 
 interface SyncedWord {
@@ -223,6 +226,7 @@ export function NowPlayingView({
   onStartMix,
   onMoveTrack,
   onRemoveTrack,
+  onRemovePreviousTrack,
   onShuffle,
   onClear,
   onToggleLike,
@@ -233,13 +237,19 @@ export function NowPlayingView({
   onOpenSaveModal,
   onOpenArtist,
   onTrackContextMenu,
+  appVersion = __CADENCE_VERSION__,
 }: Props) {
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
   const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
   const [mobileScrub, setMobileScrub] = useState<number | null>(null);
+  const [dragQueueIndex, setDragQueueIndex] = useState<number | null>(null);
+  const [dragOverQueueIndex, setDragOverQueueIndex] = useState<number | null>(null);
+  const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const isDraggingMobileVolRef = useRef(false);
+  const justDraggedRef = useRef(false);
+  const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const lyricLineRefs = useRef<(HTMLElement | null)[]>([]);
@@ -253,6 +263,38 @@ export function NowPlayingView({
   const stepSeconds = Math.max(5, Math.min(30, Math.round(artworkSeekSeconds || 10)));
   const resolvedQueueName =
     playerState?.queueName || current?.title || playerState?.guildName || "Queue";
+
+  const resetDragState = useCallback(() => {
+    setDragQueueIndex(null);
+    setDragOverQueueIndex(null);
+    setDragOverPosition(null);
+  }, []);
+
+  useEffect(() => {
+    resetDragState();
+  }, [queue.length, resetDragState]);
+
+  const handleQueueDrop = useCallback(
+    (targetQueueIndex: number) => {
+      if (!privileged || dragQueueIndex === null) {
+        resetDragState();
+        return;
+      }
+      const from = dragQueueIndex;
+      const rawSlot = dragOverPosition === "below" ? targetQueueIndex + 1 : targetQueueIndex;
+      const to = rawSlot > from ? rawSlot - 1 : rawSlot;
+      resetDragState();
+      if (to !== from && to >= 0 && to < queue.length) {
+        justDraggedRef.current = true;
+        if (dragClearTimerRef.current) clearTimeout(dragClearTimerRef.current);
+        dragClearTimerRef.current = setTimeout(() => {
+          justDraggedRef.current = false;
+        }, 150);
+        onMoveTrack(from, to);
+      }
+    },
+    [dragOverPosition, dragQueueIndex, onMoveTrack, privileged, queue.length, resetDragState]
+  );
 
   useEffect(() => {
     if (!isDraggingMobileVolRef.current && typeof playerState?.volume === "number") {
@@ -332,6 +374,7 @@ export function NowPlayingView({
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+      if (dragClearTimerRef.current) clearTimeout(dragClearTimerRef.current);
     };
   }, []);
 
@@ -848,7 +891,9 @@ export function NowPlayingView({
                   <div
                     key={`prev-${track.identifier}-${prevIndex}`}
                     onClick={() => onPlayPrevious(prevIndex)}
-                    onContextMenu={(e) => onTrackContextMenu(e, track)}
+                    onContextMenu={(e) =>
+                      onTrackContextMenu(e, track, { previousIndex: prevIndex })
+                    }
                     className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 opacity-65 transition hover:bg-white/[0.06] hover:opacity-100"
                   >
                     <TrackArtwork
@@ -881,11 +926,24 @@ export function NowPlayingView({
                           <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
                         </button>
                       )}
+                      {privileged && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemovePreviousTrack(prevIndex);
+                          }}
+                          title="Remove from queue"
+                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onTrackContextMenu(e, track);
+                          onTrackContextMenu(e, track, { previousIndex: prevIndex });
                         }}
                         title="More options"
                         className="rounded-full p-1 text-zinc-300 hover:bg-white/10 hover:text-white"
@@ -969,15 +1027,60 @@ export function NowPlayingView({
               })()}
 
               {/* User-queued upcoming tracks */}
-              {manualEntries.map(({ track, queueIndex }) => {
+              {manualEntries.map(({ track, queueIndex }, manualPos) => {
                 const liked = likedTrackIds.has(track.identifier);
+                const isDragging = dragQueueIndex === queueIndex;
+                const isOver = dragOverQueueIndex === queueIndex && dragQueueIndex !== queueIndex;
                 return (
                   <div
                     key={`q-${track.identifier}-${queueIndex}`}
-                    onClick={() => onPlayTrack(queueIndex)}
+                    draggable={privileged}
+                    onDragStart={(e) => {
+                      if (!privileged) return;
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", String(queueIndex));
+                      setDragQueueIndex(queueIndex);
+                    }}
+                    onDragOver={(e) => {
+                      if (!privileged || dragQueueIndex === null) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                      if (dragOverQueueIndex !== queueIndex || dragOverPosition !== pos) {
+                        setDragOverQueueIndex(queueIndex);
+                        setDragOverPosition(pos);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      handleQueueDrop(queueIndex);
+                    }}
+                    onDragEnd={resetDragState}
+                    onClick={() => {
+                      if (justDraggedRef.current) return;
+                      onPlayTrack(queueIndex);
+                    }}
                     onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
-                    className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                    className={`group relative flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06] ${
+                      isDragging ? "opacity-40" : ""
+                    }`}
                   >
+                    {isOver && dragOverPosition === "above" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                      />
+                    )}
+                    {isOver && dragOverPosition === "below" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                      />
+                    )}
+                    {privileged && (
+                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                    )}
                     <TrackArtwork
                       track={track}
                       className="h-10 w-10 shrink-0 rounded"
@@ -1014,10 +1117,11 @@ export function NowPlayingView({
                         <>
                           <button
                             type="button"
-                            disabled={queueIndex === 0}
+                            disabled={manualPos === 0}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onMoveTrack(queueIndex, queueIndex - 1);
+                              const prevTarget = manualEntries[manualPos - 1];
+                              if (prevTarget) onMoveTrack(queueIndex, prevTarget.queueIndex);
                             }}
                             title="Move up"
                             className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
@@ -1026,10 +1130,11 @@ export function NowPlayingView({
                           </button>
                           <button
                             type="button"
-                            disabled={queueIndex === queue.length - 1}
+                            disabled={manualPos === manualEntries.length - 1}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onMoveTrack(queueIndex, queueIndex + 1);
+                              const nextTarget = manualEntries[manualPos + 1];
+                              if (nextTarget) onMoveTrack(queueIndex, nextTarget.queueIndex);
                             }}
                             title="Move down"
                             className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
@@ -1129,13 +1234,58 @@ export function NowPlayingView({
                 autoplayEntries.length > 0 ? (
                   autoplayEntries.map(({ track, queueIndex }) => {
                     const liked = likedTrackIds.has(track.identifier);
+                    const isDragging = dragQueueIndex === queueIndex;
+                    const isOver = dragOverQueueIndex === queueIndex && dragQueueIndex !== queueIndex;
                     return (
                       <div
                         key={`auto-${track.identifier}-${queueIndex}`}
-                        onClick={() => onPlayTrack(queueIndex)}
+                        draggable={privileged}
+                        onDragStart={(e) => {
+                          if (!privileged) return;
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", String(queueIndex));
+                          setDragQueueIndex(queueIndex);
+                        }}
+                        onDragOver={(e) => {
+                          if (!privileged || dragQueueIndex === null) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                          if (dragOverQueueIndex !== queueIndex || dragOverPosition !== pos) {
+                            setDragOverQueueIndex(queueIndex);
+                            setDragOverPosition(pos);
+                          }
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleQueueDrop(queueIndex);
+                        }}
+                        onDragEnd={resetDragState}
+                        onClick={() => {
+                          if (justDraggedRef.current) return;
+                          onPlayTrack(queueIndex);
+                        }}
                         onContextMenu={(e) => onTrackContextMenu(e, track, { queueIndex })}
-                        className="group flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06]"
+                        className={`group relative flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 transition hover:bg-white/[0.06] ${
+                          isDragging ? "opacity-40" : ""
+                        }`}
                       >
+                        {isOver && dragOverPosition === "above" && (
+                          <div
+                            style={{ backgroundColor: "var(--cadence-accent)" }}
+                            className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                          />
+                        )}
+                        {isOver && dragOverPosition === "below" && (
+                          <div
+                            style={{ backgroundColor: "var(--cadence-accent)" }}
+                            className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                          />
+                        )}
+                        {privileged && (
+                          <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                        )}
                         <TrackArtwork
                           track={track}
                           className="h-10 w-10 shrink-0 rounded"
@@ -1201,18 +1351,18 @@ export function NowPlayingView({
                   </div>
                 ) : null
               )}
+
+              <div className="mt-4 flex items-center justify-between border-t border-white/[0.06] px-2.5 py-3 text-[11px] text-zinc-500">
+                <span>Cadence v{appVersion}</span>
+                <span>Up Next Queue</span>
+              </div>
             </div>
           </div>
         )}
 
         {/* LYRICS */}
         {activeTab === "lyrics" && (
-          <div
-            ref={lyricsContainerRef}
-            onWheel={handleManualLyricsScroll}
-            onTouchMove={handleManualLyricsScroll}
-            className="max-h-[65vh] min-h-0 flex-1 overflow-y-auto pt-4 pr-1 lg:max-h-none"
-          >
+          <div className="flex min-h-0 flex-1 flex-col pt-3">
             {!activeLyricsTrack ? (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                 Play a track to load lyrics.
@@ -1222,46 +1372,38 @@ export function NowPlayingView({
                 <Loader2 className="h-4 w-4 animate-spin text-white" />
                 Searching lyrics for &ldquo;{activeLyricsTrack.title}&rdquo;...
               </div>
-            ) : parsedSynced.length > 0 ? (
-              <div className="space-y-4 pb-8">
-                <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 bg-black/50 py-1.5 text-xs text-zinc-400 backdrop-blur-md">
-                  <span className="truncate">
+            ) : parsedSynced.length > 0 || lyricsState.lyrics?.plainLyrics ? (
+              <>
+                <div className="mb-2.5 flex shrink-0 items-center justify-between gap-2 border-b border-white/10 pb-2.5 text-xs text-zinc-400">
+                  <span className="min-w-0 truncate">
                     {activeLyricsTrack.title} • {lyricsState.lyrics?.source}
-                    {canSeekLyrics ? " • Click any line to jump" : ""}
+                    {canSeekLyrics && parsedSynced.length > 0 ? " • Click line to seek" : ""}
                   </span>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    {userScrolledAway && lyricsAutoScroll && (
+                    {parsedSynced.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setUserScrolledAway(false);
-                          if (activeSyncedIndex >= 0) {
-                            scrollActiveLyricIntoView(activeSyncedIndex, "smooth");
-                          }
-                        }}
-                        style={{
-                          backgroundColor: "var(--cadence-accent)",
-                          color: "var(--cadence-accent-fg)",
-                        }}
-                        className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow transition hover:brightness-110"
+                        onClick={() =>
+                          onUpdatePreferences({ lyricsAutoScroll: !lyricsAutoScroll })
+                        }
+                        aria-pressed={lyricsAutoScroll}
+                        title={
+                          lyricsAutoScroll
+                            ? "Auto-scroll is on (click to pause)"
+                            : "Auto-scroll is off (click to enable)"
+                        }
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+                          lyricsAutoScroll
+                            ? "bg-white/15 text-white"
+                            : "bg-white/[0.06] text-zinc-400 hover:bg-white/12 hover:text-zinc-200"
+                        }`}
                       >
-                        Resume scroll
+                        <span>Auto</span>
+                        <span className={lyricsAutoScroll ? "text-emerald-400" : "text-zinc-500"}>
+                          {lyricsAutoScroll ? "On" : "Off"}
+                        </span>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onUpdatePreferences({ lyricsAutoScroll: !lyricsAutoScroll })
-                      }
-                      title="Toggle lyrics auto-scroll"
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
-                        lyricsAutoScroll
-                          ? "bg-white/15 text-white"
-                          : "bg-white/[0.06] text-zinc-400 hover:text-white"
-                      }`}
-                    >
-                      Auto-scroll: {lyricsAutoScroll ? "On" : "Off"}
-                    </button>
                     <button
                       type="button"
                       onClick={() =>
@@ -1271,111 +1413,137 @@ export function NowPlayingView({
                           activeLyricsTrack.duration
                         )
                       }
-                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-3 py-1 text-zinc-200 hover:bg-white/12"
+                      title="Refresh lyrics"
+                      aria-label="Refresh lyrics"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-zinc-300 transition hover:bg-white/12 hover:text-white"
                     >
-                      <RefreshCw className="h-3 w-3" />
-                      Refresh
+                      <RefreshCw className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
-                <div className="space-y-1">
-                  {parsedSynced.map((line, i) => {
-                    const activeLine = i === activeSyncedIndex;
-                    const renderLineContent = () => {
-                      if (activeLine && line.words && line.words.length > 0) {
-                        return (
-                          <span className="flex flex-wrap gap-x-1.5 gap-y-0.5">
-                            {line.words.map((w, wi) => {
-                              const spoken = w.timeMs <= displayPosition + 250;
+
+                <div className="relative flex min-h-0 max-h-[60vh] flex-1 flex-col lg:max-h-none">
+                  <div
+                    ref={lyricsContainerRef}
+                    onWheel={handleManualLyricsScroll}
+                    onTouchMove={handleManualLyricsScroll}
+                    className={`min-h-0 flex-1 overflow-y-auto pr-1 ${
+                      parsedSynced.length > 0 && userScrolledAway && lyricsAutoScroll
+                        ? "pb-14"
+                        : "pb-8"
+                    }`}
+                  >
+                    {parsedSynced.length > 0 ? (
+                      <div className="space-y-1">
+                        {parsedSynced.map((line, i) => {
+                          const activeLine = i === activeSyncedIndex;
+                          const renderLineContent = () => {
+                            if (activeLine && line.words && line.words.length > 0) {
                               return (
-                                <span
-                                  key={`${w.timeMs}-${wi}`}
-                                  className={spoken ? "text-white" : "text-zinc-400"}
-                                >
-                                  {w.text}
+                                <span className="flex flex-wrap gap-x-1.5 gap-y-0.5">
+                                  {line.words.map((w, wi) => {
+                                    const spoken = w.timeMs <= displayPosition + 250;
+                                    return (
+                                      <span
+                                        key={`${w.timeMs}-${wi}`}
+                                        className={spoken ? "text-white" : "text-zinc-400"}
+                                      >
+                                        {w.text}
+                                      </span>
+                                    );
+                                  })}
                                 </span>
                               );
-                            })}
-                          </span>
-                        );
-                      }
-                      return <span>{line.text}</span>;
-                    };
+                            }
+                            return <span>{line.text}</span>;
+                          };
 
-                    if (!canSeekLyrics) {
-                      return (
-                        <div
-                          key={`${line.timeMs}-${i}`}
-                          ref={(el) => {
-                            lyricLineRefs.current[i] = el;
-                          }}
-                          className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-base leading-relaxed text-zinc-400"
-                        >
-                          {renderLineContent()}
-                          <span className="shrink-0 text-[11px] tabular-nums text-zinc-600">
-                            {formatMs(line.timeMs)}
-                          </span>
-                        </div>
-                      );
-                    }
-                    return (
+                          if (!canSeekLyrics) {
+                            return (
+                              <div
+                                key={`${line.timeMs}-${i}`}
+                                ref={(el) => {
+                                  lyricLineRefs.current[i] = el;
+                                }}
+                                className="flex items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-base leading-relaxed text-zinc-400"
+                              >
+                                {renderLineContent()}
+                                <span className="shrink-0 text-[11px] tabular-nums text-zinc-600">
+                                  {formatMs(line.timeMs)}
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <button
+                              key={`${line.timeMs}-${i}`}
+                              ref={(el) => {
+                                lyricLineRefs.current[i] = el;
+                              }}
+                              type="button"
+                              onClick={() => {
+                                if (resumeTimerRef.current) {
+                                  clearTimeout(resumeTimerRef.current);
+                                  resumeTimerRef.current = null;
+                                }
+                                setUserScrolledAway(false);
+                                onSeek(line.timeMs);
+                              }}
+                              title={`Jump to ${formatMs(line.timeMs)}`}
+                              className={`group/line flex w-full items-baseline justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-base leading-relaxed transition ${
+                                activeLine
+                                  ? "bg-white/[0.08] font-semibold text-white"
+                                  : "text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
+                              }`}
+                            >
+                              {renderLineContent()}
+                              <span
+                                className={`shrink-0 text-[11px] tabular-nums transition-opacity ${
+                                  activeLine
+                                    ? "text-zinc-300 opacity-100"
+                                    : "text-zinc-400 opacity-0 group-hover/line:opacity-100"
+                                }`}
+                              >
+                                {formatMs(line.timeMs)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <pre className="whitespace-pre-wrap font-sans text-base leading-8 text-zinc-200">
+                        {stripInlineTags(lyricsState.lyrics!.plainLyrics!)}
+                      </pre>
+                    )}
+
+                    <div className="mt-6 border-t border-white/[0.06] pt-3 text-[11px] text-zinc-500">
+                      Cadence v{appVersion}
+                    </div>
+                  </div>
+
+                  {parsedSynced.length > 0 && userScrolledAway && lyricsAutoScroll && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
                       <button
-                        key={`${line.timeMs}-${i}`}
-                        ref={(el) => {
-                          lyricLineRefs.current[i] = el;
-                        }}
                         type="button"
                         onClick={() => {
+                          if (resumeTimerRef.current) {
+                            clearTimeout(resumeTimerRef.current);
+                            resumeTimerRef.current = null;
+                          }
                           setUserScrolledAway(false);
-                          onSeek(line.timeMs);
+                          if (activeSyncedIndex >= 0) {
+                            scrollActiveLyricIntoView(activeSyncedIndex, "smooth");
+                          }
                         }}
-                        title={`Jump to ${formatMs(line.timeMs)}`}
-                        className={`group/line flex w-full items-baseline justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-base leading-relaxed transition ${
-                          activeLine
-                            ? "bg-white/[0.08] font-semibold text-white"
-                            : "text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-200"
-                        }`}
+                        className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-zinc-900/90 px-3.5 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur-md transition hover:bg-zinc-800"
                       >
-                        {renderLineContent()}
-                        <span
-                          className={`shrink-0 text-[11px] tabular-nums transition-opacity ${
-                            activeLine
-                              ? "text-zinc-300 opacity-100"
-                              : "text-zinc-400 opacity-0 group-hover/line:opacity-100"
-                          }`}
-                        >
-                          {formatMs(line.timeMs)}
-                        </span>
+                        Sync to current line
                       </button>
-                    );
-                  })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : lyricsState.lyrics?.plainLyrics ? (
-              <div className="space-y-4 pb-6">
-                <div className="flex items-center justify-between text-xs text-zinc-400">
-                  <span className="truncate">
-                    {activeLyricsTrack.title} • {lyricsState.lyrics.source}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onFetchLyrics(
-                        activeLyricsTrack.title,
-                        activeLyricsTrack.author,
-                        activeLyricsTrack.duration
-                      )
-                    }
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.06] px-3 py-1 text-zinc-200 hover:bg-white/12"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    Refresh
-                  </button>
-                </div>
-                <pre className="whitespace-pre-wrap font-sans text-base leading-8 text-zinc-200">
-                  {stripInlineTags(lyricsState.lyrics.plainLyrics)}
-                </pre>
-              </div>
+              </>
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                 No lyrics found for &ldquo;{activeLyricsTrack.title}&rdquo;.
@@ -1498,6 +1666,9 @@ export function NowPlayingView({
                       );
                     })
                   )}
+                  <div className="mt-4 border-t border-white/[0.06] px-2.5 py-3 text-[11px] text-zinc-500">
+                    Cadence v{appVersion}
+                  </div>
                 </div>
               </>
             )}

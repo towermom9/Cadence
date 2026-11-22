@@ -187,6 +187,7 @@ export interface AppMetaDTO {
   setupTokenRequired: boolean;
   oauthConfigured: boolean;
   redirectUri: string;
+  appVersion?: string;
 }
 
 export interface SetupStatusDTO {
@@ -258,6 +259,7 @@ export type WsClientMessage =
   | { type: "shuffle"; guildId: string }
   | { type: "moveTrack"; guildId: string; from: number; to: number }
   | { type: "removeTrack"; guildId: string; index: number }
+  | { type: "removePreviousTrack"; guildId: string; index: number }
   | { type: "clearQueue"; guildId: string }
   | { type: "stop"; guildId: string }
   | { type: "toggleAutoplay"; guildId: string; enabled: boolean }

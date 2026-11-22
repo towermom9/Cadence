@@ -492,6 +492,8 @@ export function useCadenceSocket(
       selectedGuildId && send({ type: "moveTrack", guildId: selectedGuildId, from, to }),
     removeTrack: (index: number) =>
       selectedGuildId && send({ type: "removeTrack", guildId: selectedGuildId, index }),
+    removePreviousTrack: (index: number) =>
+      selectedGuildId && send({ type: "removePreviousTrack", guildId: selectedGuildId, index }),
     clearQueue: () => selectedGuildId && send({ type: "clearQueue", guildId: selectedGuildId }),
     stop: () => selectedGuildId && send({ type: "stop", guildId: selectedGuildId }),
     toggleAutoplay: (enabledValue: boolean) =>

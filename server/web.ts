@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Hono } from "hono";
+import pkg from "../package.json";
 import { serveStatic } from "hono/bun";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
@@ -120,6 +121,7 @@ export function createWebApp(
   app.get("/api/health", (c) => {
     return c.json({
       status: "ok",
+      version: pkg.version || "1.0.0",
       needsSetup: config.needsSetup,
       botReady: bot.isReady(),
       lavalinkConnected: bot.music.isLavalinkConnected(),

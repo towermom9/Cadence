@@ -1,3 +1,4 @@
+import pkg from "../package.json";
 import {
   ActionRowBuilder,
   ActivityType,
@@ -253,6 +254,7 @@ export class CadenceBot {
       setupTokenRequired: Boolean(config.setupToken),
       oauthConfigured: config.hasOAuthConfig,
       redirectUri: config.discordRedirectUri,
+      appVersion: pkg.version || "1.0.0",
     };
   }
 

@@ -10,6 +10,7 @@ import {
   Check,
   Disc3,
   ExternalLink,
+  Keyboard,
   Loader2,
   LogOut,
   PlusCircle,
@@ -45,6 +46,7 @@ interface Props {
   onTrackContextMenu: (e: ReactMouseEvent, track: TrackDTO) => void;
   onSelectGuild: (guildId: string) => void;
   onOpenSettings: () => void;
+  onOpenShortcuts: () => void;
   onLogout: () => void;
 }
 
@@ -69,6 +71,7 @@ export function TopBar({
   onTrackContextMenu,
   onSelectGuild,
   onOpenSettings,
+  onOpenShortcuts,
   onLogout,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -82,10 +85,20 @@ export function TopBar({
   const [activeIndex, setActiveIndex] = useState(-1);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const botGuilds = guilds.filter((g) => g.botPresent);
   const invitableGuilds = guilds.filter((g) => !g.botPresent && g.canManage);
   const currentGuild = guilds.find((g) => g.id === selectedGuildId) ?? null;
+
+  useEffect(() => {
+    const onFocusSearch = () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    };
+    window.addEventListener("cadence:focus-search", onFocusSearch);
+    return () => window.removeEventListener("cadence:focus-search", onFocusSearch);
+  }, []);
 
   useEffect(() => {
     const onDocClick = (e: globalThis.MouseEvent) => {
@@ -233,6 +246,7 @@ export function TopBar({
               )}
             </button>
             <input
+              ref={searchInputRef}
               type="text"
               value={query}
               onFocus={() => {
@@ -558,6 +572,18 @@ export function TopBar({
             >
               <Settings className="h-4 w-4 text-zinc-400" />
               Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpenMenu(null);
+                onOpenShortcuts();
+              }}
+              className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-zinc-200 transition hover:bg-white/10"
+            >
+              <Keyboard className="h-4 w-4 text-zinc-400" />
+              <span>Keyboard shortcuts</span>
+              <span className="ml-auto font-mono text-[10px] text-zinc-500">?</span>
             </button>
             <button
               type="button"

@@ -159,6 +159,10 @@ export function LoginView({ meta, errorCode }: Props) {
             </div>
           </div>
         )}
+
+        <p className="mt-5 border-t border-white/[0.06] pt-3 text-center text-[11px] font-mono text-zinc-500">
+          Cadence v{meta?.appVersion || __CADENCE_VERSION__}
+        </p>
       </div>
     </div>
   );

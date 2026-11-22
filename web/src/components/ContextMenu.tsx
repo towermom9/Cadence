@@ -25,6 +25,7 @@ import type { EnqueueMode, PlaylistDTO, ToastLevel, TrackDTO } from "@shared/typ
 
 export interface TrackMenuContext {
   queueIndex?: number;
+  previousIndex?: number;
   isCurrent?: boolean;
   playlistId?: string;
   playlistTrackIndex?: number;
@@ -62,6 +63,7 @@ interface Props {
   onViewLyrics: (track: TrackDTO) => void;
   onMoveTrack: (from: number, to: number) => void;
   onRemoveTrack: (index: number) => void;
+  onRemovePreviousTrack: (index: number) => void;
   onDismissQueue: () => void;
   onRemoveFromPlaylist: (playlistId: string, index: number) => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
@@ -116,6 +118,7 @@ export function ContextMenu({
   onViewLyrics,
   onMoveTrack,
   onRemoveTrack,
+  onRemovePreviousTrack,
   onDismissQueue,
   onRemoveFromPlaylist,
   onPlayPlaylist,
@@ -283,7 +286,7 @@ export function ContextMenu({
             <span>Save to playlist</span>
           </button>
 
-          {typeof menu.queueIndex === "number" && (
+          {(typeof menu.queueIndex === "number" || typeof menu.previousIndex === "number") && (
             <>
               {(() => {
                 const canRemove =
@@ -300,7 +303,11 @@ export function ContextMenu({
                         : "Requires DJ role or being the track requester"
                     }
                     onClick={() => {
-                      onRemoveTrack(menu.queueIndex!);
+                      if (typeof menu.queueIndex === "number") {
+                        onRemoveTrack(menu.queueIndex);
+                      } else if (typeof menu.previousIndex === "number") {
+                        onRemovePreviousTrack(menu.previousIndex);
+                      }
                       onClose();
                     }}
                     className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-40"
@@ -311,7 +318,7 @@ export function ContextMenu({
                 );
               })()}
 
-              {privileged && menu.queueIndex > 0 && (
+              {privileged && typeof menu.queueIndex === "number" && menu.queueIndex > 0 && (
                 <button
                   type="button"
                   onClick={() => {
@@ -418,7 +425,9 @@ export function ContextMenu({
             )}
           </button>
 
-          {(menu.isCurrent || typeof menu.queueIndex === "number") && (
+          {(menu.isCurrent ||
+            typeof menu.queueIndex === "number" ||
+            typeof menu.previousIndex === "number") && (
             <button
               type="button"
               disabled={!privileged}

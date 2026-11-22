@@ -1047,8 +1047,21 @@ export class MusicService {
     if (from === to) return;
 
     const target = player.queue.tracks[from];
+    const wasAutoplay = this.isAutoplayTrack(target);
+    const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+
+    let clampedTo = to;
+    if (!wasAutoplay && firstAutoIdx !== -1 && clampedTo >= firstAutoIdx) {
+      clampedTo = firstAutoIdx - 1;
+    }
+    if (wasAutoplay && firstAutoIdx !== -1 && clampedTo < firstAutoIdx) {
+      this.clearAutoplayFlag(target);
+    }
+    if (clampedTo < 0 || from === clampedTo) return;
+
     await player.queue.splice(from, 1);
-    await player.queue.add(target, to);
+    await player.queue.add(target, clampedTo);
+    await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
 
@@ -1070,6 +1083,29 @@ export class MusicService {
     }
     const removed = trackToDTO(player.queue.tracks[index]);
     await player.queue.splice(index, 1);
+    this.emitStateChange(guildId);
+    return removed;
+  }
+
+  canRemovePreviousTrack(guildId: string, userId: string, index: number): boolean {
+    if (this.isPrivileged(guildId, userId)) return true;
+    const player = this.getPlayer(guildId);
+    if (!player || index < 0 || index >= player.queue.previous.length) return true;
+    const track = player.queue.previous[index];
+    if (this.isAutoplayTrack(track)) return true;
+    const req = extractRequester(track.requester) ?? extractRequester(track.userData?.requester);
+    return req?.id === userId;
+  }
+
+  async removePreviousTrack(guildId: string, index: number): Promise<TrackDTO | null> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    if (index < 0 || index >= player.queue.previous.length) {
+      throw new Error("Previous track position is out of range.");
+    }
+    const [target] = player.queue.previous.splice(index, 1);
+    const removed = target ? trackToDTO(target) : null;
+    await player.queue.utils.save();
     this.emitStateChange(guildId);
     return removed;
   }

@@ -11,10 +11,12 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { loadUiPrefs } from "./utils/theme";
+import { AppFooter } from "./components/AppFooter";
 import { ArtistView } from "./components/ArtistView";
 import { ContextMenu, type ContextMenuState, type TrackMenuContext } from "./components/ContextMenu";
 import { ExploreView } from "./components/ExploreView";
 import { HomeView } from "./components/HomeView";
+import { KeyboardShortcutsModal } from "./components/KeyboardShortcutsModal";
 import { LibraryView } from "./components/LibraryView";
 import { LoginView } from "./components/LoginView";
 import { NowPlayingView, type NowPlayingTab } from "./components/NowPlayingView";
@@ -56,6 +58,9 @@ export function App() {
   const [saveModalTracks, setSaveModalTracks] = useState<TrackDTO[] | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const gPrefixUntilRef = useRef<number>(0);
+  const preMuteVolumeRef = useRef<number>(50);
 
   const authError = new URLSearchParams(window.location.search).get("error");
 
@@ -240,6 +245,260 @@ export function App() {
     [socket.pinnedTracks]
   );
 
+  const stepSeconds = Math.max(
+    5,
+    Math.min(30, Math.round(socket.preferences.artworkSeekSeconds || 10))
+  );
+  const appVersion = meta?.appVersion || __CADENCE_VERSION__;
+
+  useEffect(() => {
+    if (!user) return;
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isInput =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean(target?.isContentEditable);
+
+      if (e.key === "Escape") {
+        gPrefixUntilRef.current = 0;
+        if (shortcutsOpen) {
+          e.preventDefault();
+          setShortcutsOpen(false);
+          return;
+        }
+        if (contextMenu) {
+          setContextMenu(null);
+          return;
+        }
+        if (saveModalTracks) {
+          setSaveModalTracks(null);
+          return;
+        }
+        if (isInput) {
+          target?.blur();
+          return;
+        }
+        if (nowPlayingOpen) {
+          e.preventDefault();
+          setNowPlayingOpen(false);
+        }
+        return;
+      }
+
+      if (isInput || e.metaKey || e.altKey) return;
+      if (
+        e.key === "Shift" ||
+        e.key === "Control" ||
+        e.key === "Alt" ||
+        e.key === "Meta"
+      ) {
+        return;
+      }
+
+      const isCtrlShiftArrow =
+        e.ctrlKey &&
+        e.shiftKey &&
+        (e.key === "ArrowRight" || e.key === "ArrowLeft");
+      if (e.ctrlKey && !isCtrlShiftArrow) return;
+
+      if (e.key === "?" || (e.code === "Slash" && e.shiftKey)) {
+        gPrefixUntilRef.current = 0;
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+
+      if (shortcutsOpen) return;
+
+      if (Date.now() < gPrefixUntilRef.current) {
+        gPrefixUntilRef.current = 0;
+        const chordKey = e.key.toLowerCase();
+        if (chordKey === "h") {
+          e.preventDefault();
+          navigateTo("home");
+          return;
+        }
+        if (chordKey === "e") {
+          e.preventDefault();
+          navigateTo("explore");
+          return;
+        }
+        if (chordKey === "l") {
+          e.preventDefault();
+          navigateTo("library");
+          return;
+        }
+        if (chordKey === ",") {
+          e.preventDefault();
+          navigateTo("settings");
+          return;
+        }
+      }
+
+      if (!e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        gPrefixUntilRef.current = Date.now() + 1200;
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key === "/") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("cadence:focus-search"));
+        return;
+      }
+
+      if ((e.code === "Space" || e.key === " ") && !e.ctrlKey && !e.shiftKey) {
+        if (
+          target?.closest(
+            "button, a, [role='button'], [role='switch'], [role='slider']"
+          )
+        ) {
+          return;
+        }
+        e.preventDefault();
+        socket.togglePause();
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key === ";") {
+        e.preventDefault();
+        socket.togglePause();
+        return;
+      }
+
+      if (
+        (e.ctrlKey && e.shiftKey && e.key === "ArrowRight") ||
+        (!e.ctrlKey && e.shiftKey && e.code === "KeyL")
+      ) {
+        e.preventDefault();
+        socket.seekBy(1000);
+        return;
+      }
+      if (
+        (e.ctrlKey && e.shiftKey && e.key === "ArrowLeft") ||
+        (!e.ctrlKey && e.shiftKey && e.code === "KeyH")
+      ) {
+        e.preventDefault();
+        socket.seekBy(-1000);
+        return;
+      }
+
+      if (
+        (!e.ctrlKey && e.shiftKey && e.key === "ArrowRight") ||
+        (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "l")
+      ) {
+        e.preventDefault();
+        socket.seekBy(stepSeconds * 1000);
+        return;
+      }
+      if (
+        (!e.ctrlKey && e.shiftKey && e.key === "ArrowLeft") ||
+        (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "h")
+      ) {
+        e.preventDefault();
+        socket.seekBy(-stepSeconds * 1000);
+        return;
+      }
+
+      if (
+        (!e.ctrlKey && e.shiftKey && e.code === "KeyN") ||
+        (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "j")
+      ) {
+        e.preventDefault();
+        socket.skip();
+        return;
+      }
+      if (
+        (!e.ctrlKey && e.shiftKey && e.code === "KeyP") ||
+        (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "k")
+      ) {
+        e.preventDefault();
+        socket.previous();
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        socket.shuffle();
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        const mode = socket.playerState?.repeatMode ?? "off";
+        const nextMode =
+          mode === "off" ? "queue" : mode === "queue" ? "track" : "off";
+        socket.setRepeat(nextMode);
+        return;
+      }
+
+      if (!e.ctrlKey && e.key === "+") {
+        e.preventDefault();
+        const curr = socket.playerState?.current;
+        if (curr && !curr.isStream) {
+          socket.toggleLike(curr);
+        }
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key === "=") {
+        e.preventDefault();
+        const vol = socket.playerState?.volume ?? 100;
+        socket.setVolume(Math.min(100, vol + 5));
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key === "-") {
+        e.preventDefault();
+        const vol = socket.playerState?.volume ?? 100;
+        socket.setVolume(Math.max(0, vol - 5));
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        const vol = socket.playerState?.volume ?? 100;
+        if (vol > 0) {
+          preMuteVolumeRef.current = vol;
+          socket.setVolume(0);
+        } else {
+          socket.setVolume(preMuteVolumeRef.current || 50);
+        }
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "q") {
+        e.preventDefault();
+        setNowPlayingOpen((v) => !v);
+        return;
+      }
+
+      if (!e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          void document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          void document.exitFullscreen?.().catch(() => {});
+        }
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    contextMenu,
+    navigateTo,
+    nowPlayingOpen,
+    saveModalTracks,
+    shortcutsOpen,
+    socket,
+    stepSeconds,
+    user,
+  ]);
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030303] text-zinc-400">
@@ -271,6 +530,12 @@ export function App() {
         onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
       />
 
+      <KeyboardShortcutsModal
+        open={shortcutsOpen}
+        stepSeconds={stepSeconds}
+        onClose={() => setShortcutsOpen(false)}
+      />
+
       <ContextMenu
         menu={contextMenu}
         privileged={Boolean(socket.playerState?.isPrivileged)}
@@ -289,6 +554,7 @@ export function App() {
         onViewLyrics={handleViewLyrics}
         onMoveTrack={socket.moveTrack}
         onRemoveTrack={socket.removeTrack}
+        onRemovePreviousTrack={socket.removePreviousTrack}
         onDismissQueue={socket.clearQueue}
         onRemoveFromPlaylist={socket.removeTrackFromPlaylist}
         onPlayPlaylist={handlePlayPlaylist}
@@ -338,6 +604,7 @@ export function App() {
             onTrackContextMenu={handleTrackContextMenu}
             onSelectGuild={socket.selectGuild}
             onOpenSettings={() => navigateTo("settings")}
+            onOpenShortcuts={() => setShortcutsOpen(true)}
             onLogout={() => void handleLogout()}
           />
 
@@ -381,6 +648,7 @@ export function App() {
                 onStartMix={handleStartMix}
                 onMoveTrack={socket.moveTrack}
                 onRemoveTrack={socket.removeTrack}
+                onRemovePreviousTrack={socket.removePreviousTrack}
                 onShuffle={socket.shuffle}
                 onClear={socket.clearQueue}
                 onToggleLike={socket.toggleLike}
@@ -391,9 +659,10 @@ export function App() {
                 onOpenSaveModal={handleOpenSaveModal}
                 onOpenArtist={handleOpenArtist}
                 onTrackContextMenu={handleTrackContextMenu}
+                appVersion={appVersion}
               />
             ) : (
-              <div className="mx-auto max-w-7xl">
+              <div className="mx-auto flex min-h-full max-w-7xl flex-col">
                 {activeView === "home" && (
                   <HomeView
                     user={user}
@@ -493,6 +762,13 @@ export function App() {
                     onSaveSettings={socket.updateSettings}
                   />
                 )}
+
+                <AppFooter
+                  meta={meta}
+                  onNavigate={navigateTo}
+                  onOpenShortcuts={() => setShortcutsOpen(true)}
+                  onOpenPlayer={() => setNowPlayingOpen(true)}
+                />
               </div>
             )}
           </main>

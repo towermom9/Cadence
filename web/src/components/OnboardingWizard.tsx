@@ -967,6 +967,10 @@ export function OnboardingWizard({ onComplete }: Props) {
             </div>
           </div>
         )}
+
+        <div className="mt-6 border-t border-white/[0.06] pt-3 text-center font-mono text-[11px] text-zinc-500">
+          Cadence v{__CADENCE_VERSION__}
+        </div>
       </div>
     </div>
   );
