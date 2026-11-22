@@ -1,6 +1,6 @@
 {
   "name": "cadence",
-  "version": "1.0.0",
+  "version": "0.0.15",
   "description": "All-in-one Discord music bot and real-time web dashboard built with TypeScript & Bun.",
   "type": "module",
   "private": true,

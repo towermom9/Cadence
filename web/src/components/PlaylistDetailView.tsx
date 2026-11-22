@@ -1,7 +1,8 @@
-import { useState, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import {
   ArrowLeft,
   ExternalLink,
+  GripVertical,
   Link2,
   MoreVertical,
   Pencil,
@@ -28,6 +29,7 @@ interface Props {
   onSyncPlaylist: (playlistId: string, url?: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onRemoveTrack: (playlistId: string, index: number) => void;
+  onReorderTracks: (playlistId: string, fromIndex: number, toIndex: number) => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
 }
@@ -41,6 +43,7 @@ export function PlaylistDetailView({
   onSyncPlaylist,
   onDeletePlaylist,
   onRemoveTrack,
+  onReorderTracks,
   onOpenArtist,
   onTrackContextMenu,
 }: Props) {
@@ -48,6 +51,23 @@ export function PlaylistDetailView({
   const [renameValue, setRenameValue] = useState("");
   const [linkingUrl, setLinkingUrl] = useState(false);
   const [urlInput, setUrlInput] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [dragOverPos, setDragOverPos] = useState<"above" | "below" | null>(null);
+  const justDraggedRef = useRef(false);
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+    };
+  }, []);
+
+  const resetDrag = () => {
+    setDragIndex(null);
+    setDragOverIndex(null);
+    setDragOverPos(null);
+  };
 
   if (!playlist) {
     return (
@@ -292,21 +312,79 @@ export function PlaylistDetailView({
         </div>
       ) : (
         <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-[#121212]">
-          {playlist.tracks.map((track, idx) => (
-            <div
-              key={`${track.identifier}-${idx}`}
-              onClick={() => onPlayPlaylist(playlist.id, false, idx)}
-              onContextMenu={(e) =>
-                onTrackContextMenu(e, track, {
-                  playlistId: playlist.id,
-                  playlistTrackIndex: idx,
-                })
-              }
-              className="group flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
-            >
-              <span className="w-6 text-center text-xs tabular-nums text-zinc-500">
-                {idx + 1}
-              </span>
+          {playlist.tracks.map((track, idx) => {
+            const isDragging = dragIndex === idx;
+            const isOver = dragOverIndex === idx && dragIndex !== idx;
+            return (
+              <div
+                key={`${track.identifier}-${idx}`}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(idx));
+                  setDragIndex(idx);
+                }}
+                onDragOver={(e) => {
+                  if (dragIndex === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+                  if (dragOverIndex !== idx || dragOverPos !== pos) {
+                    setDragOverIndex(idx);
+                    setDragOverPos(pos);
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex === null) {
+                    resetDrag();
+                    return;
+                  }
+                  const from = dragIndex;
+                  const rawSlot = dragOverPos === "below" ? idx + 1 : idx;
+                  const to = rawSlot > from ? rawSlot - 1 : rawSlot;
+                  resetDrag();
+                  if (to !== from && to >= 0 && to < playlist.tracks.length) {
+                    justDraggedRef.current = true;
+                    if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+                    dragTimerRef.current = setTimeout(() => {
+                      justDraggedRef.current = false;
+                    }, 150);
+                    onReorderTracks(playlist.id, from, to);
+                  }
+                }}
+                onDragEnd={resetDrag}
+                onClick={() => {
+                  if (justDraggedRef.current) return;
+                  onPlayPlaylist(playlist.id, false, idx);
+                }}
+                onContextMenu={(e) =>
+                  onTrackContextMenu(e, track, {
+                    playlistId: playlist.id,
+                    playlistTrackIndex: idx,
+                  })
+                }
+                className={`group relative flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04] ${
+                  isDragging ? "opacity-40" : ""
+                }`}
+              >
+                {isOver && dragOverPos === "above" && (
+                  <div
+                    style={{ backgroundColor: "var(--cadence-accent)" }}
+                    className="pointer-events-none absolute inset-x-3 top-0 h-0.5 rounded-full"
+                  />
+                )}
+                {isOver && dragOverPos === "below" && (
+                  <div
+                    style={{ backgroundColor: "var(--cadence-accent)" }}
+                    className="pointer-events-none absolute inset-x-3 bottom-0 h-0.5 rounded-full"
+                  />
+                )}
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                <span className="w-6 text-center text-xs tabular-nums text-zinc-500">
+                  {idx + 1}
+                </span>
               <TrackArtwork
                 track={track}
                 className="h-10 w-10 shrink-0 rounded"
@@ -357,7 +435,8 @@ export function PlaylistDetailView({
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

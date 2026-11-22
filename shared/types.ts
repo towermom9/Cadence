@@ -114,6 +114,8 @@ export interface GuildSummaryDTO {
   iconUrl: string | null;
   botPresent: boolean;
   canManage: boolean;
+  isOwner?: boolean;
+  hasAccess?: boolean;
   inVoice: boolean;
   hasActivePlayer: boolean;
   memberCount?: number;
@@ -124,6 +126,7 @@ export interface GuildSettingsDTO {
   prefix: string;
   defaultVolume: number;
   djRoleId: string | null;
+  accessRoleIds?: string[];
   stay247: boolean;
   autoplay: boolean;
   allowDuplicates: boolean;
@@ -290,6 +293,8 @@ export type WsClientMessage =
   | { type: "movePreviousTrack"; guildId: string; from: number; to: number }
   | { type: "movePreviousToQueue"; guildId: string; previousIndex: number; queueIndex: number }
   | { type: "moveQueueToPrevious"; guildId: string; queueIndex: number; previousIndex: number }
+  | { type: "moveCurrentToQueue"; guildId: string; queueIndex: number }
+  | { type: "moveCurrentToPrevious"; guildId: string; previousIndex: number }
   | { type: "removeTrack"; guildId: string; index: number }
   | { type: "removePreviousTrack"; guildId: string; index: number }
   | { type: "clearQueue"; guildId: string }
@@ -316,6 +321,7 @@ export type WsClientMessage =
   | { type: "addTrackToPlaylist"; playlistId: string; track: TrackDTO }
   | { type: "addTracksToPlaylist"; playlistId: string; tracks: TrackDTO[] }
   | { type: "removeTrackFromPlaylist"; playlistId: string; index: number }
+  | { type: "reorderPlaylistTracks"; playlistId: string; fromIndex: number; toIndex: number }
   | { type: "toggleLike"; track: TrackDTO }
   | { type: "togglePinTrack"; track: TrackDTO }
   | { type: "reorderPinnedTracks"; trackIds: string[] }

@@ -13,12 +13,18 @@ export function redactSecrets(input: string): string {
     .replace(/(Authorization\s*[:=]\s*Bearer\s+)[^\s"',;]+/gi, "$1[REDACTED]")
     .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{12,}/gi, "$1[REDACTED]")
     .replace(/(Authorization\s*[:=]\s*)[^\s"',;\n]+/gi, "$1[REDACTED]")
-    // Key/value secrets and session cookies
+    // Key/value secrets, OTP codes, and session cookies
     .replace(
-      /\b(DISCORD_CLIENT_SECRET|DISCORD_TOKEN|SESSION_SECRET|LAVALINK_PASSWORD|client_secret|access_token|refresh_token|refreshToken|password|cadence_session)(\s*[:=]\s*)(["']?)[^\s"',;&\n]+\3/gi,
+      /\b(DISCORD_CLIENT_SECRET|DISCORD_TOKEN|SESSION_SECRET|LAVALINK_PASSWORD|client_secret|access_token|refresh_token|refreshToken|password|cadence_session|otp|code)(\s*[:=]\s*)(["']?)[^\s"',;&\n]+\3/gi,
       "$1$2[REDACTED]"
     )
-    .replace(/(\bCookie\s*[:=]\s*)[^\n]+/gi, "$1[REDACTED]");
+    .replace(/(\bCookie\s*[:=]\s*)[^\n]+/gi, "$1[REDACTED]")
+    // Discord webhook URLs
+    .replace(/https?:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/gi, "[REDACTED_WEBHOOK]")
+    // Email addresses
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]")
+    // External IPv4 addresses (preserve 0.0.0.0 and 127.0.0.1)
+    .replace(/\b(?!127\.0\.0\.1\b|0\.0\.0\.0\b)(?:\d{1,3}\.){3}\d{1,3}\b/g, "[REDACTED_IP]");
 }
 
 function formatArgs(args: unknown[]): string {

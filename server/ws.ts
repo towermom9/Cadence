@@ -9,6 +9,7 @@ import { getSessionFromContext } from "./auth";
 import type { CadenceBot } from "./bot";
 import type { CadenceDatabase, SessionRecord } from "./db";
 import { fetchLyrics } from "./lyrics";
+import { isScopeUnlocked } from "./otp";
 
 type RawSocket = ServerWebSocket<unknown>;
 
@@ -239,6 +240,9 @@ export class CadenceWsHub {
     if (!member) {
       throw new Error("You are not a member of that server.");
     }
+    if (!this.bot.hasGuildAccess(guildId, userId)) {
+      throw new Error("You don't have a Discord role with access to Cadence in this server.");
+    }
     return { guild, member };
   }
 
@@ -449,6 +453,20 @@ export class CadenceWsHub {
           return;
         }
 
+        case "moveCurrentToQueue": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.moveCurrentToQueue(msg.guildId, msg.queueIndex);
+          return;
+        }
+
+        case "moveCurrentToPrevious": {
+          await this.requireSameVoice(msg.guildId, user.id);
+          this.requirePrivileged(msg.guildId, user.id);
+          await this.bot.music.moveCurrentToPrevious(msg.guildId, msg.previousIndex);
+          return;
+        }
+
         case "removeTrack": {
           await this.requireSameVoice(msg.guildId, user.id);
           if (!this.bot.music.canRemoveTrack(msg.guildId, user.id, msg.index)) {
@@ -546,12 +564,12 @@ export class CadenceWsHub {
         }
 
         case "getSettings": {
-          const { member } = await this.ensureMemberInGuild(msg.guildId, user.id);
-          if (
-            !member.permissions.has(PermissionsBitField.Flags.ManageGuild) &&
-            !member.permissions.has(PermissionsBitField.Flags.Administrator)
-          ) {
-            throw new Error("Manage Server permission is required to view server settings.");
+          await this.ensureMemberInGuild(msg.guildId, user.id);
+          if (!this.bot.isBotOwner(user.id) && !this.bot.isGuildOwner(msg.guildId, user.id)) {
+            throw new Error("Server settings are restricted to the server owner or bot owner.");
+          }
+          if (!isScopeUnlocked(meta.session.id, user.id, `server:${msg.guildId}`)) {
+            throw new Error("Server settings require OTP verification.");
           }
           const settings = this.db.getGuildSettings(msg.guildId);
           this.send(ws, {
@@ -562,12 +580,12 @@ export class CadenceWsHub {
         }
 
         case "updateSettings": {
-          const { member } = await this.ensureMemberInGuild(msg.guildId, user.id);
-          if (
-            !member.permissions.has(PermissionsBitField.Flags.ManageGuild) &&
-            !member.permissions.has(PermissionsBitField.Flags.Administrator)
-          ) {
-            throw new Error("Manage Server permission is required to update settings.");
+          await this.ensureMemberInGuild(msg.guildId, user.id);
+          if (!this.bot.isBotOwner(user.id) && !this.bot.isGuildOwner(msg.guildId, user.id)) {
+            throw new Error("Server settings are restricted to the server owner or bot owner.");
+          }
+          if (!isScopeUnlocked(meta.session.id, user.id, `server:${msg.guildId}`)) {
+            throw new Error("Server settings require OTP verification.");
           }
           const updated = this.db.updateGuildSettings(msg.guildId, msg.settings);
           if (updated.stay247) {
@@ -705,6 +723,12 @@ export class CadenceWsHub {
           this.db.removeTrackFromPlaylist(user.id, msg.playlistId, msg.index);
           this.sendPlaylists(ws, user.id);
           this.sendToast(ws, "info", "Removed track from playlist");
+          return;
+        }
+
+        case "reorderPlaylistTracks": {
+          this.db.reorderPlaylistTracks(user.id, msg.playlistId, msg.fromIndex, msg.toIndex);
+          this.sendPlaylists(ws, user.id);
           return;
         }
 

@@ -3,15 +3,19 @@ import {
   Check,
   Copy,
   Download,
+  KeyRound,
   Loader2,
+  Lock,
   Palette,
   Play,
   RefreshCw,
   Save,
+  Send,
   Server,
-  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Terminal,
+  Users,
 } from "lucide-react";
 import type {
   AutoplayClickBehavior,
@@ -28,6 +32,8 @@ interface Props {
   guildId: string | null;
   guildName: string;
   canManage: boolean;
+  isBotOwner: boolean;
+  isGuildOwner: boolean;
   settings: GuildSettingsDTO | null;
   preferences: UserPreferencesDTO;
   onUpdatePreferences: (patch: Partial<UserPreferencesDTO>) => void;
@@ -135,23 +141,178 @@ function ThemeSwitch({
   );
 }
 
+function OtpUnlockCard({
+  scope,
+  title,
+  description,
+  onUnlocked,
+}: {
+  scope: string;
+  title: string;
+  description: string;
+  onUnlocked: (expiresAt: number) => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const requestCode = async () => {
+    setSending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        expiresAt?: number;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `Failed to send OTP (HTTP ${res.status})`);
+      }
+      setSent(true);
+      setNotice("A 6-digit verification code was sent to your Discord DMs. It expires in 5 minutes.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send verification code.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const verifyCode = async (e: FormEvent) => {
+    e.preventDefault();
+    const cleaned = code.replace(/\D/g, "").slice(0, 6);
+    if (cleaned.length !== 6) {
+      setError("Enter the 6-digit code from your Discord DM.");
+      return;
+    }
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, code: cleaned }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        expiresAt?: number;
+      };
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Invalid verification code.");
+      }
+      setCode("");
+      onUnlocked(data.expiresAt ?? Date.now() + 30 * 60_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-6">
+      <div className="flex items-start gap-3">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-[#0b0b0b]"
+          style={{ color: "var(--cadence-accent)" }}
+        >
+          <Lock className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-white">{title}</h2>
+          <p className="mt-1 text-xs text-zinc-400">{description}</p>
+        </div>
+      </div>
+
+      {notice && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-400" />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={sending}
+          onClick={() => void requestCode()}
+          style={{
+            backgroundColor: "var(--cadence-accent)",
+            color: "var(--cadence-accent-fg)",
+          }}
+          className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-sm transition hover:brightness-110 disabled:opacity-50"
+        >
+          {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+          {sent ? "Resend Discord DM Code" : "Send Verification Code via Discord DM"}
+        </button>
+      </div>
+
+      <form onSubmit={(e) => void verifyCode(e)} className="flex flex-wrap items-center gap-2.5 pt-1">
+        <div className="relative">
+          <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="6-digit OTP"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            className="w-44 rounded-xl border border-white/12 bg-[#0b0b0b] py-2 pl-9 pr-3 text-sm font-mono tracking-widest text-white outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-zinc-500 focus:border-white/40"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={verifying || code.length < 6}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-xs font-semibold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {verifying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Verify &amp; Unlock
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export function SettingsView({
   guildId,
   guildName,
-  canManage,
+  isBotOwner,
+  isGuildOwner,
   settings,
   preferences,
   onUpdatePreferences,
   onLoadSettings,
   onSaveSettings,
 }: Props) {
+  const canAccessServerSettings = isBotOwner || isGuildOwner;
+  const canAccessSystemSettings = isBotOwner;
   const [tab, setTab] = useState<SettingsTab>("appearance");
   const [prefix, setPrefix] = useState("?");
   const [defaultVolume, setDefaultVolume] = useState(100);
   const [djRoleId, setDjRoleId] = useState<string>("");
+  const [accessRoleIds, setAccessRoleIds] = useState<string[]>([]);
   const [stay247, setStay247] = useState(false);
   const [autoplay, setAutoplay] = useState(false);
   const [allowDuplicates, setAllowDuplicates] = useState(true);
+  const [serverUnlocked, setServerUnlocked] = useState(false);
+  const [serverOtpChecking, setServerOtpChecking] = useState(false);
+  const [systemUnlocked, setSystemUnlocked] = useState(false);
+  const [systemOtpChecking, setSystemOtpChecking] = useState(false);
   const [sysInfo, setSysInfo] = useState<SystemInfoDTO | null>(null);
   const [sysLogs, setSysLogs] = useState<DebugLogEntryDTO[]>([]);
   const [sysText, setSysText] = useState("");
@@ -159,11 +320,70 @@ export function SettingsView({
   const [sysError, setSysError] = useState<string | null>(null);
   const [copiedLogs, setCopiedLogs] = useState(false);
 
+  // Reset tab if permissions change (e.g. switched to a server where user is not owner)
+  useEffect(() => {
+    if (tab === "server" && !canAccessServerSettings) {
+      setTab("appearance");
+    } else if (tab === "system" && !canAccessSystemSettings) {
+      setTab("appearance");
+    }
+  }, [canAccessServerSettings, canAccessSystemSettings, tab]);
+
+  const checkOtpStatus = useCallback(async (scope: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/otp/status?scope=${encodeURIComponent(scope)}`);
+      if (!res.ok) return false;
+      const data = (await res.json()) as { unlocked?: boolean };
+      return Boolean(data.unlocked);
+    } catch {
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "server" || !guildId || !canAccessServerSettings) {
+      setServerUnlocked(false);
+      return;
+    }
+    let cancelled = false;
+    setServerOtpChecking(true);
+    void checkOtpStatus(`server:${guildId}`).then((unlocked) => {
+      if (!cancelled) {
+        setServerUnlocked(unlocked);
+        setServerOtpChecking(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canAccessServerSettings, checkOtpStatus, guildId, tab]);
+
+  useEffect(() => {
+    if (tab !== "system" || !canAccessSystemSettings) {
+      return;
+    }
+    let cancelled = false;
+    setSystemOtpChecking(true);
+    void checkOtpStatus("system").then((unlocked) => {
+      if (!cancelled) {
+        setSystemUnlocked(unlocked);
+        setSystemOtpChecking(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canAccessSystemSettings, checkOtpStatus, tab]);
+
   const loadSystemLogs = useCallback(async () => {
     setSysLoading(true);
     setSysError(null);
     try {
       const res = await fetch("/api/system/logs");
+      if (res.status === 403) {
+        setSystemUnlocked(false);
+        return;
+      }
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -183,27 +403,34 @@ export function SettingsView({
   }, []);
 
   useEffect(() => {
-    if (tab === "system") {
+    if (tab === "system" && canAccessSystemSettings && systemUnlocked) {
       void loadSystemLogs();
     }
-  }, [loadSystemLogs, tab]);
+  }, [canAccessSystemSettings, loadSystemLogs, systemUnlocked, tab]);
 
   useEffect(() => {
-    if (guildId && canManage) {
+    if (tab === "server" && guildId && canAccessServerSettings && serverUnlocked) {
       onLoadSettings(guildId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guildId, canManage]);
+  }, [tab, guildId, canAccessServerSettings, serverUnlocked]);
 
   useEffect(() => {
     if (!settings) return;
     setPrefix(settings.prefix);
     setDefaultVolume(Math.min(100, Math.max(0, settings.defaultVolume)));
     setDjRoleId(settings.djRoleId ?? "");
+    setAccessRoleIds(settings.accessRoleIds ?? []);
     setStay247(settings.stay247);
     setAutoplay(settings.autoplay);
     setAllowDuplicates(settings.allowDuplicates);
   }, [settings]);
+
+  const toggleAccessRole = (roleId: string) => {
+    setAccessRoleIds((prev) =>
+      prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
+    );
+  };
 
   const handleServerSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -211,11 +438,23 @@ export function SettingsView({
       prefix: prefix.trim() || "?",
       defaultVolume: Math.min(100, Math.max(0, defaultVolume)),
       djRoleId: djRoleId || null,
+      accessRoleIds,
       stay247,
       autoplay,
       allowDuplicates,
     });
   };
+
+  const visibleTabs = [
+    { id: "appearance" as const, label: "Appearance", icon: Palette },
+    { id: "playback" as const, label: "Playback", icon: Play },
+    ...(canAccessServerSettings
+      ? [{ id: "server" as const, label: "Server", icon: Server }]
+      : []),
+    ...(canAccessSystemSettings
+      ? [{ id: "system" as const, label: "System", icon: Terminal }]
+      : []),
+  ];
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 pb-8">
@@ -228,14 +467,7 @@ export function SettingsView({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {(
-            [
-              { id: "appearance", label: "Appearance", icon: Palette },
-              { id: "playback", label: "Playback", icon: Play },
-              { id: "server", label: "Server", icon: Server },
-              { id: "system", label: "System", icon: Terminal },
-            ] as const
-          ).map((item) => {
+          {visibleTabs.map((item) => {
             const Icon = item.icon;
             const active = tab === item.id;
             return (
@@ -556,20 +788,24 @@ export function SettingsView({
       )}
 
       {/* SERVER TAB */}
-      {tab === "server" && (
+      {tab === "server" && canAccessServerSettings && (
         <>
           {!guildId ? (
             <div className="rounded-2xl border border-white/10 bg-[#121212] p-8 text-center text-sm text-zinc-400">
               Select a Discord server from the top right first.
             </div>
-          ) : !canManage ? (
-            <div className="flex items-center gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-5 text-sm text-amber-200">
-              <ShieldAlert className="h-5 w-5 shrink-0 text-amber-400" />
-              <span>
-                You need the <strong>Manage Server</strong> permission on{" "}
-                <strong>{guildName}</strong> to change server-wide bot settings.
-              </span>
+          ) : serverOtpChecking ? (
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#121212] p-10 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+              Checking verification status…
             </div>
+          ) : !serverUnlocked ? (
+            <OtpUnlockCard
+              scope={`server:${guildId}`}
+              title={`Unlock Server Settings — ${guildName}`}
+              description="Server settings are restricted to the server owner and bot owner. Verify with a one-time Discord DM code to view or modify settings for 30 minutes."
+              onUnlocked={() => setServerUnlocked(true)}
+            />
           ) : (
             <form
               onSubmit={handleServerSubmit}
@@ -695,14 +931,90 @@ export function SettingsView({
                   />
                 </div>
               </div>
+
+              {/* Discord Role-Based Access */}
+              <div className="space-y-3 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-zinc-400" />
+                    <div>
+                      <p className="text-sm font-medium text-white">Discord Role-Based Access</p>
+                      <p className="text-xs text-zinc-400">
+                        {accessRoleIds.length === 0
+                          ? "Everyone in this server can use Cadence (no role restriction)."
+                          : `Restricted to ${accessRoleIds.length} selected role${accessRoleIds.length === 1 ? "" : "s"} (plus server/bot owners & admins).`}
+                      </p>
+                    </div>
+                  </div>
+                  {accessRoleIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAccessRoleIds([])}
+                      className="rounded-full border border-white/12 px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Allow Everyone
+                    </button>
+                  )}
+                </div>
+
+                {settings?.roles && settings.roles.length > 0 ? (
+                  <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto pt-1">
+                    {settings.roles.map((role) => {
+                      const selected = accessRoleIds.includes(role.id);
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => toggleAccessRole(role.id)}
+                          style={
+                            selected
+                              ? {
+                                  backgroundColor: "var(--cadence-accent)",
+                                  color: "var(--cadence-accent-fg)",
+                                  borderColor: "transparent",
+                                }
+                              : undefined
+                          }
+                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                            selected
+                              ? ""
+                              : "border-white/12 bg-white/[0.04] text-zinc-300 hover:border-white/25 hover:text-white"
+                          }`}
+                        >
+                          {selected && <Check className="h-3 w-3" />}
+                          @{role.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-500">
+                    No assignable Discord roles found for this server.
+                  </p>
+                )}
+              </div>
             </form>
           )}
         </>
       )}
 
       {/* SYSTEM & DEBUG TAB */}
-      {tab === "system" && (
+      {tab === "system" && canAccessSystemSettings && (
         <div className="space-y-6">
+          {systemOtpChecking ? (
+            <div className="flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-[#121212] p-10 text-sm text-zinc-400">
+              <Loader2 className="h-4 w-4 animate-spin text-white" />
+              Checking verification status…
+            </div>
+          ) : !systemUnlocked ? (
+            <OtpUnlockCard
+              scope="system"
+              title="Unlock System Settings & Diagnostics"
+              description="System diagnostics, dependency versions, and redacted debug logs are restricted to the bot owner. Verify with a one-time Discord DM code to unlock for 30 minutes."
+              onUnlocked={() => setSystemUnlocked(true)}
+            />
+          ) : (
+            <>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div>
               <h2 className="text-base font-semibold text-white">System &amp; Dependencies</h2>
@@ -937,6 +1249,8 @@ export function SettingsView({
                 </section>
               </>
             )
+          )}
+            </>
           )}
         </div>
       )}

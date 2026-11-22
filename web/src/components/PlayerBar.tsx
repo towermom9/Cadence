@@ -168,7 +168,7 @@ export function PlayerBar({
       if (clamped > 0) lastNonZeroVolumeRef.current = clamped;
       const now = performance.now();
       const elapsed = now - lastVolumeSentAtRef.current;
-      if (elapsed >= 35) {
+      if (elapsed >= 25) {
         sendVolumeImmediate(clamped);
         return;
       }
@@ -182,7 +182,7 @@ export function PlayerBar({
             lastVolumeSentAtRef.current = performance.now();
             onVolume(next);
           }
-        }, Math.max(8, 35 - elapsed));
+        }, Math.max(8, 25 - elapsed));
       }
     },
     [onVolume, sendVolumeImmediate]

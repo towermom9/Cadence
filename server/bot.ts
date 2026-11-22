@@ -103,6 +103,7 @@ export class CadenceBot {
   client!: Client;
   music!: MusicService;
   private ready = false;
+  private botOwnerIds = new Set<string>();
   private pendingSearchCache = new Map<string, TrackDTO[]>();
   private controllerMessages = new Map<string, { channelId: string; messageId: string }>();
   private controllerTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -193,6 +194,56 @@ export class CadenceBot {
 
   isReady(): boolean {
     return this.ready && Boolean(this.client.user);
+  }
+
+  isBotOwner(userId: string): boolean {
+    if (!userId) return false;
+    if (config.ownerUserId && config.ownerUserId === userId) return true;
+    return this.botOwnerIds.has(userId);
+  }
+
+  isGuildOwner(guildId: string, userId: string): boolean {
+    if (!guildId || !userId) return false;
+    const guild = this.client.guilds.cache.get(guildId);
+    return Boolean(guild && guild.ownerId === userId);
+  }
+
+  hasGuildAccess(guildId: string, userId: string): boolean {
+    if (this.isBotOwner(userId) || this.isGuildOwner(guildId, userId)) {
+      return true;
+    }
+    const settings = this.db.getGuildSettings(guildId);
+    const allowedRoles = settings.accessRoleIds ?? [];
+    if (allowedRoles.length === 0) {
+      return true;
+    }
+    const guild = this.client.guilds.cache.get(guildId);
+    const member = guild?.members.cache.get(userId);
+    if (!member) return false;
+    if (member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      return true;
+    }
+    return allowedRoles.some((roleId) => member.roles.cache.has(roleId));
+  }
+
+  async sendOtpDm(userId: string, code: string, scopeLabel: string): Promise<void> {
+    if (!this.isReady()) {
+      throw new Error("Discord bot is not ready to send DMs yet.");
+    }
+    try {
+      const user = await this.client.users.fetch(userId);
+      const embed = new EmbedBuilder()
+        .setColor(BRAND_COLOR)
+        .setTitle("Cadence Security Verification")
+        .setDescription(
+          `Use this one-time passcode to unlock **${scopeLabel}**:\n\n# \`${code}\`\n\nThis code expires in **5 minutes**. If you did not request this, ignore this message.`
+        );
+      await user.send({ embeds: [embed] });
+    } catch {
+      throw new Error(
+        "Could not send OTP to your Discord DMs. Enable Direct Messages from server members in Discord privacy settings and try again."
+      );
+    }
   }
 
   async probeLavalink(): Promise<{ reachable: boolean; version: string | null }> {
@@ -289,6 +340,8 @@ export class CadenceBot {
       const inVoice = Boolean(member?.voice.channelId);
       const player = botGuild ? this.music.getPlayer(og.id) : undefined;
       const hasActivePlayer = Boolean(player && (player.playing || player.paused || player.queue.current));
+      const isOwner = Boolean(og.owner) || botGuild?.ownerId === userId;
+      const hasAccess = botGuild ? this.hasGuildAccess(og.id, userId) : true;
 
       summaries.push({
         id: og.id,
@@ -298,6 +351,8 @@ export class CadenceBot {
           : botGuild?.iconURL({ size: 128 }) ?? null,
         botPresent: Boolean(botGuild),
         canManage,
+        isOwner,
+        hasAccess,
         inVoice,
         hasActivePlayer,
         memberCount: botGuild?.memberCount,
@@ -407,6 +462,22 @@ export class CadenceBot {
       this.ready = true;
       console.log(`[Bot] Logged in as ${readyClient.user.tag} (${readyClient.user.id})`);
 
+      try {
+        const app = await readyClient.application?.fetch();
+        const owner = app?.owner;
+        if (owner) {
+          if ("members" in owner && owner.members) {
+            for (const memberId of owner.members.keys()) {
+              this.botOwnerIds.add(memberId);
+            }
+          } else if ("id" in owner && owner.id) {
+            this.botOwnerIds.add(owner.id);
+          }
+        }
+      } catch {
+        // Non-fatal: falls back to config.ownerUserId
+      }
+
       readyClient.user.setPresence({
         activities: [{ name: "/play | Cadence Dashboard", type: ActivityType.Listening }],
         status: "online",
@@ -477,6 +548,22 @@ export class CadenceBot {
       new SlashCommandBuilder()
         .setName("play")
         .setDescription("Play a song or playlist from YouTube, Spotify, Deezer, SoundCloud, or URL")
+        .addStringOption((opt) =>
+          opt
+            .setName("query")
+            .setDescription("Song name or URL")
+            .setRequired(true)
+            .setAutocomplete(true)
+        )
+        .addStringOption((opt) =>
+          opt
+            .setName("source")
+            .setDescription("Search platform")
+            .addChoices(...SEARCH_SOURCES)
+        ),
+      new SlashCommandBuilder()
+        .setName("playnow")
+        .setDescription("Insert a song at the front of the queue and play it immediately")
         .addStringOption((opt) =>
           opt
             .setName("query")
@@ -643,6 +730,7 @@ export class CadenceBot {
             )
         ),
       new SlashCommandBuilder().setName("dashboard").setDescription("Get the link to the Cadence web dashboard"),
+      new SlashCommandBuilder().setName("help").setDescription("Show all Cadence music commands and controls"),
       new SlashCommandBuilder().setName("ping").setDescription("Check bot and Lavalink latency"),
     ];
 
@@ -706,7 +794,8 @@ export class CadenceBot {
     await this.enqueueControllerTask(guildId, async () => {
       const player = this.music.getPlayer(guildId);
       const existing = this.controllerMessages.get(guildId);
-      const targetChannelId = opts.forceChannelId || player?.textChannelId || existing?.channelId;
+      const targetChannelId =
+        opts.forceChannelId || player?.textChannelId || player?.voiceChannelId || existing?.channelId;
       if (!targetChannelId) return;
 
       const ch =
@@ -859,12 +948,7 @@ export class CadenceBot {
         .setCustomId("cadence:skip")
         .setEmoji("⏭️")
         .setLabel("Skip")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId("cadence:loop")
-        .setEmoji(state.repeatMode === "track" ? "🔂" : "🔁")
-        .setLabel(loopLabel === "Off" ? "Loop" : `Loop: ${loopLabel}`)
-        .setStyle(state.repeatMode !== "off" ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setStyle(ButtonStyle.Secondary)
     );
 
     const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
@@ -878,12 +962,6 @@ export class CadenceBot {
         .setEmoji("❤️")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(track.isStream),
-      new ButtonBuilder()
-        .setCustomId("cadence:shuffle")
-        .setEmoji("🔀")
-        .setLabel("Shuffle")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(state.queue.length < 2),
       new ButtonBuilder()
         .setCustomId("cadence:queue")
         .setEmoji("📋")
@@ -908,6 +986,9 @@ export class CadenceBot {
   }
 
   private requireSameVoice(guildId: string, member: GuildMember): string {
+    if (!this.hasGuildAccess(guildId, member.id)) {
+      throw new Error("You don't have a Discord role with access to Cadence in this server.");
+    }
     const memberVc = member.voice.channel;
     if (!memberVc) {
       throw new Error("Join a voice channel first.");
@@ -932,7 +1013,13 @@ export class CadenceBot {
   }
 
   private async handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
-    if (interaction.commandName !== "play" && interaction.commandName !== "search") return;
+    if (
+      interaction.commandName !== "play" &&
+      interaction.commandName !== "playnow" &&
+      interaction.commandName !== "search"
+    ) {
+      return;
+    }
     const focused = interaction.options.getFocused(true);
     if (focused.name !== "query") return;
 
@@ -1084,7 +1171,7 @@ export class CadenceBot {
     const member = interaction.member as GuildMember;
 
     try {
-      const ephemeralCommands = new Set(["search", "nowplaying", "dashboard", "ping"]);
+      const ephemeralCommands = new Set(["search", "nowplaying", "dashboard", "help", "ping"]);
       let isEphemeral = ephemeralCommands.has(interaction.commandName);
       if (interaction.commandName === "playlist") {
         isEphemeral = interaction.options.getSubcommand() !== "play";
@@ -1093,8 +1180,18 @@ export class CadenceBot {
       }
       await interaction.deferReply(isEphemeral ? { flags: MessageFlags.Ephemeral } : undefined);
 
+      const publicAccessCommands = new Set(["help", "ping", "dashboard", "settings"]);
+      if (
+        !publicAccessCommands.has(interaction.commandName) &&
+        !this.hasGuildAccess(guildId, member.id)
+      ) {
+        throw new Error("You don't have a Discord role with access to Cadence in this server.");
+      }
+
       switch (interaction.commandName) {
-        case "play": {
+        case "play":
+        case "playnow": {
+          const playNow = interaction.commandName === "playnow";
           const vcId = this.requireSameVoice(guildId, member);
           const query = interaction.options.getString("query", true);
           const rawSource = (interaction.options.getString("source") || "auto") as SearchSource;
@@ -1113,7 +1210,7 @@ export class CadenceBot {
             guildId,
             vcId,
             toQueue,
-            "end",
+            playNow ? "now" : "end",
             requester,
             interaction.channelId,
             playlistName ? { queueName: playlistName } : undefined
@@ -1121,12 +1218,16 @@ export class CadenceBot {
 
           if (playlistName) {
             await interaction.editReply(
-              `Queued **${result.added}** tracks from **${playlistName}**.`
+              playNow
+                ? `Playing **${playlistName}** now (**${result.added}** tracks).`
+                : `Queued **${result.added}** tracks from **${playlistName}**.`
             );
           } else {
             const first = toQueue[0];
             await interaction.editReply(
-              `Queued **${first.title}** by *${first.author}* (\`${formatDuration(first.duration)}\`).`
+              playNow
+                ? `Playing **${first.title}** by *${first.author}* (\`${formatDuration(first.duration)}\`) now.`
+                : `Queued **${first.title}** by *${first.author}* (\`${formatDuration(first.duration)}\`).`
             );
           }
           void this.invokeController(guildId, {
@@ -1366,6 +1467,52 @@ export class CadenceBot {
           return;
         }
 
+        case "help": {
+          const prefix = this.db.getGuildSettings(guildId).prefix || config.botPrefix;
+          const embed = new EmbedBuilder()
+            .setColor(BRAND_COLOR)
+            .setTitle(`Cadence Help • v${pkg.version || "0.0.15"}`)
+            .setDescription(
+              `Control music with slash commands, prefix \`${prefix}\`, or the live [Web Dashboard](${config.dashboardUrl}).`
+            )
+            .addFields(
+              {
+                name: "Playback",
+                value: [
+                  "`/play <query>` — Queue a track or playlist (with autocomplete)",
+                  "`/playnow <query>` — Insert at front of queue and play immediately",
+                  "`/search <query>` — Pick from search results",
+                  "`/pause`, `/resume`, `/skip`, `/back`, `/seek`, `/stop`",
+                  "`/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay`, `/filter`",
+                ].join("\n"),
+              },
+              {
+                name: "Queue & Lyrics",
+                value: [
+                  "`/queue` — View current queue",
+                  "`/nowplaying` — Repost the interactive music controller",
+                  "`/shuffle`, `/remove <pos>`, `/clear`, `/lyrics`",
+                ].join("\n"),
+              },
+              {
+                name: "Playlists & Utility",
+                value: [
+                  "`/playlist list|create|add|play|delete` — Manage personal playlists",
+                  "`/settings` — Configure server settings (Server / Bot Owner only)",
+                  "`/dashboard`, `/ping`, `/help`",
+                ].join("\n"),
+              }
+            );
+          const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setLabel("Open Web Dashboard")
+              .setStyle(ButtonStyle.Link)
+              .setURL(config.dashboardUrl)
+          );
+          await interaction.editReply({ embeds: [embed], components: [row] });
+          return;
+        }
+
         case "ping": {
           const player = this.music.getPlayer(guildId);
           const lavalinkStatus = this.music.isLavalinkConnected() ? "Connected" : "Disconnected";
@@ -1459,8 +1606,16 @@ export class CadenceBot {
     const guildId = interaction.guildId!;
     const sub = interaction.options.getSubcommand();
 
+    if (!this.isBotOwner(member.id) && !this.isGuildOwner(guildId, member.id)) {
+      throw new Error("Server settings are restricted to the server owner or bot owner.");
+    }
+
     if (sub === "view") {
       const s = this.db.getGuildSettings(guildId);
+      const accessLabel =
+        s.accessRoleIds && s.accessRoleIds.length > 0
+          ? s.accessRoleIds.map((id) => `<@&${id}>`).join(", ")
+          : "Everyone";
       const embed = new EmbedBuilder()
         .setColor(BRAND_COLOR)
         .setTitle(`Settings • ${interaction.guild!.name}`)
@@ -1470,17 +1625,11 @@ export class CadenceBot {
           { name: "24/7 Mode", value: s.stay247 ? "Enabled" : "Disabled", inline: true },
           { name: "Default Autoplay", value: s.autoplay ? "Enabled" : "Disabled", inline: true },
           { name: "Allow Duplicates", value: s.allowDuplicates ? "Yes" : "No", inline: true },
-          { name: "DJ Role", value: s.djRoleId ? `<@&${s.djRoleId}>` : "None", inline: true }
+          { name: "DJ Role", value: s.djRoleId ? `<@&${s.djRoleId}>` : "None", inline: true },
+          { name: "Access Roles", value: accessLabel, inline: false }
         );
       await interaction.editReply({ embeds: [embed] });
       return;
-    }
-
-    if (
-      !member.permissions.has(PermissionsBitField.Flags.ManageGuild) &&
-      !member.permissions.has(PermissionsBitField.Flags.Administrator)
-    ) {
-      throw new Error("You need the **Manage Server** permission to change settings.");
     }
 
     if (sub === "volume") {
@@ -1823,6 +1972,10 @@ export class CadenceBot {
     const member = message.member;
 
     try {
+      if (!this.hasGuildAccess(guildId, member.id)) {
+        await message.reply("You don't have a Discord role with access to Cadence in this server.");
+        return;
+      }
       if (cmd === "play" || cmd === "p") {
         if (!arg) {
           await message.reply(`Usage: \`${prefix}play <song name or URL>\``);

@@ -108,8 +108,8 @@ lavalink:
             channelMix: true
             lowPass: true
         nonAllocatingFrameBuffer: false
-        bufferDurationMs: 200
-        frameBufferDurationMs: 500
+        bufferDurationMs: 100
+        frameBufferDurationMs: 250
         opusEncodingQuality: 10
         resamplingQuality: LOW
         trackStuckThresholdMs: 10000

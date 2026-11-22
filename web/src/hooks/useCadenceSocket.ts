@@ -488,7 +488,6 @@ export function useCadenceSocket(
       if (!selectedGuildId) return;
       const clamped = Math.max(0, Math.min(100, Math.round(volume)));
       volumeLockRef.current = { value: clamped, until: performance.now() + 1200 };
-      setPlayerState((prev) => (prev ? { ...prev, volume: clamped } : prev));
       send({ type: "volume", guildId: selectedGuildId, volume: clamped });
     },
     setRepeat: (mode: RepeatModeType) =>
@@ -504,6 +503,11 @@ export function useCadenceSocket(
     moveQueueToPrevious: (queueIndex: number, previousIndex: number) =>
       selectedGuildId &&
       send({ type: "moveQueueToPrevious", guildId: selectedGuildId, queueIndex, previousIndex }),
+    moveCurrentToQueue: (queueIndex: number) =>
+      selectedGuildId && send({ type: "moveCurrentToQueue", guildId: selectedGuildId, queueIndex }),
+    moveCurrentToPrevious: (previousIndex: number) =>
+      selectedGuildId &&
+      send({ type: "moveCurrentToPrevious", guildId: selectedGuildId, previousIndex }),
     removeTrack: (index: number) =>
       selectedGuildId && send({ type: "removeTrack", guildId: selectedGuildId, index }),
     removePreviousTrack: (index: number) =>
@@ -539,6 +543,8 @@ export function useCadenceSocket(
       send({ type: "addTracksToPlaylist", playlistId, tracks }),
     removeTrackFromPlaylist: (playlistId: string, index: number) =>
       send({ type: "removeTrackFromPlaylist", playlistId, index }),
+    reorderPlaylistTracks: (playlistId: string, fromIndex: number, toIndex: number) =>
+      send({ type: "reorderPlaylistTracks", playlistId, fromIndex, toIndex }),
     toggleLike: (track: TrackDTO) => send({ type: "toggleLike", track }),
     togglePinTrack: (track: TrackDTO) => send({ type: "togglePinTrack", track }),
     reorderPinnedTracks: (trackIds: string[]) => send({ type: "reorderPinnedTracks", trackIds }),

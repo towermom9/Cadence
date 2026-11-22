@@ -86,6 +86,8 @@ interface Props {
   onMovePreviousTrack: (from: number, to: number) => void;
   onMovePreviousToQueue: (previousIndex: number, queueIndex: number) => void;
   onMoveQueueToPrevious: (queueIndex: number, previousIndex: number) => void;
+  onMoveCurrentToQueue: (queueIndex: number) => void;
+  onMoveCurrentToPrevious: (previousIndex: number) => void;
   onRemoveTrack: (index: number) => void;
   onRemovePreviousTrack: (index: number) => void;
   onShuffle: () => void;
@@ -231,6 +233,8 @@ export function NowPlayingView({
   onMovePreviousTrack,
   onMovePreviousToQueue,
   onMoveQueueToPrevious,
+  onMoveCurrentToQueue,
+  onMoveCurrentToPrevious,
   onRemoveTrack,
   onRemovePreviousTrack,
   onShuffle,
@@ -247,7 +251,9 @@ export function NowPlayingView({
 }: Props) {
   type DragTimelineItem =
     | { section: "previous"; prevIndex: number; displayIdx: number }
-    | { section: "queue"; queueIndex: number };
+    | { section: "current" }
+    | { section: "manual"; queueIndex: number }
+    | { section: "autoplay"; queueIndex: number };
 
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
@@ -300,9 +306,20 @@ export function NowPlayingView({
     }, 150);
   }, []);
 
+  const canDropTimeline = useCallback(
+    (source: DragTimelineItem, target: DragTimelineItem): boolean => {
+      // Strictly disallow dragging between Autoplay and main/past/current queue
+      if (source.section === "autoplay" || target.section === "autoplay") {
+        return source.section === "autoplay" && target.section === "autoplay";
+      }
+      return true;
+    },
+    []
+  );
+
   const handleTimelineDrop = useCallback(
     (target: DragTimelineItem) => {
-      if (!privileged || !dragSource) {
+      if (!privileged || !dragSource || !canDropTimeline(dragSource, target)) {
         resetDragState();
         return;
       }
@@ -310,7 +327,10 @@ export function NowPlayingView({
       const pos = dragOverPosition ?? "above";
       resetDragState();
 
-      if (source.section === "queue" && target.section === "queue") {
+      if (
+        (source.section === "manual" && target.section === "manual") ||
+        (source.section === "autoplay" && target.section === "autoplay")
+      ) {
         const rawSlot = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
         const to = rawSlot > source.queueIndex ? rawSlot - 1 : rawSlot;
         if (to !== source.queueIndex && to >= 0 && to < queue.length) {
@@ -337,14 +357,14 @@ export function NowPlayingView({
         return;
       }
 
-      if (source.section === "previous" && target.section === "queue") {
+      if (source.section === "previous" && target.section === "manual") {
         const rawQueueIdx = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
         markJustDragged();
         onMovePreviousToQueue(source.prevIndex, Math.max(0, rawQueueIdx));
         return;
       }
 
-      if (source.section === "queue" && target.section === "previous") {
+      if (source.section === "manual" && target.section === "previous") {
         const rawDisplaySlot = pos === "below" ? target.displayIdx + 1 : target.displayIdx;
         const insertPrevIdx = Math.max(
           0,
@@ -352,12 +372,33 @@ export function NowPlayingView({
         );
         markJustDragged();
         onMoveQueueToPrevious(source.queueIndex, insertPrevIdx);
+        return;
+      }
+
+      if (source.section === "current" && target.section === "manual") {
+        const rawQueueIdx = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
+        markJustDragged();
+        onMoveCurrentToQueue(Math.max(1, rawQueueIdx));
+        return;
+      }
+
+      if (source.section === "current" && target.section === "previous") {
+        const rawDisplaySlot = pos === "below" ? target.displayIdx + 1 : target.displayIdx;
+        const insertPrevIdx = Math.max(
+          0,
+          Math.min(previousEntries.length, previousEntries.length - rawDisplaySlot)
+        );
+        markJustDragged();
+        onMoveCurrentToPrevious(insertPrevIdx);
       }
     },
     [
+      canDropTimeline,
       dragOverPosition,
       dragSource,
       markJustDragged,
+      onMoveCurrentToPrevious,
+      onMoveCurrentToQueue,
       onMovePreviousToQueue,
       onMovePreviousTrack,
       onMoveQueueToPrevious,
@@ -969,7 +1010,14 @@ export function NowPlayingView({
                       setDragSource({ section: "previous", prevIndex, displayIdx });
                     }}
                     onDragOver={(e) => {
-                      if (!privileged || !dragSource) return;
+                      const targetItem: DragTimelineItem = {
+                        section: "previous",
+                        prevIndex,
+                        displayIdx,
+                      };
+                      if (!privileged || !dragSource || !canDropTimeline(dragSource, targetItem)) {
+                        return;
+                      }
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -979,7 +1027,7 @@ export function NowPlayingView({
                         dragTarget.prevIndex !== prevIndex ||
                         dragOverPosition !== pos
                       ) {
-                        setDragTarget({ section: "previous", prevIndex, displayIdx });
+                        setDragTarget(targetItem);
                         setDragOverPosition(pos);
                       }
                     }}
@@ -1073,18 +1121,28 @@ export function NowPlayingView({
                 );
               })}
 
-              {/* Currently playing highlighted row (also acts as drop boundary between past & upcoming) */}
+              {/* Currently playing highlighted row (draggable & drop boundary between past & manual) */}
               {current && (() => {
                 const liked = likedTrackIds.has(current.identifier);
+                const isDraggingCurrent = dragSource?.section === "current";
                 return (
                   <div
+                    draggable={privileged}
+                    onDragStart={(e) => {
+                      if (!privileged) return;
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", "current");
+                      setDragSource({ section: "current" });
+                    }}
                     onDragOver={(e) => {
-                      if (!privileged || !dragSource) return;
+                      if (!privileged || !dragSource || dragSource.section === "autoplay" || dragSource.section === "current") {
+                        return;
+                      }
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                      if (dragSource.section === "queue" && pos === "above") {
+                      if (dragSource.section === "manual" && pos === "above") {
                         setDragTarget({
                           section: "previous",
                           prevIndex: 0,
@@ -1092,7 +1150,7 @@ export function NowPlayingView({
                         });
                         setDragOverPosition("below");
                       } else if (dragSource.section === "previous" && pos === "below") {
-                        setDragTarget({ section: "queue", queueIndex: 0 });
+                        setDragTarget({ section: "manual", queueIndex: 0 });
                         setDragOverPosition("above");
                       } else {
                         setDragTarget(null);
@@ -1100,11 +1158,14 @@ export function NowPlayingView({
                       }
                     }}
                     onDrop={(e) => {
-                      if (!privileged || !dragSource) return;
+                      if (!privileged || !dragSource || dragSource.section === "autoplay" || dragSource.section === "current") {
+                        resetDragState();
+                        return;
+                      }
                       e.preventDefault();
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                      if (dragSource.section === "queue" && pos === "above") {
+                      if (dragSource.section === "manual" && pos === "above") {
                         markJustDragged();
                         const from = dragSource.queueIndex;
                         resetDragState();
@@ -1118,9 +1179,15 @@ export function NowPlayingView({
                         resetDragState();
                       }
                     }}
+                    onDragEnd={resetDragState}
                     onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
-                    className="group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2"
+                    className={`group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2 ${
+                      isDraggingCurrent ? "opacity-40" : ""
+                    }`}
                   >
+                    {privileged && (
+                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-500 transition group-hover:text-zinc-200 active:cursor-grabbing" />
+                    )}
                     <button
                       type="button"
                       onClick={onTogglePause}
@@ -1188,9 +1255,9 @@ export function NowPlayingView({
               {manualEntries.map(({ track, queueIndex }, manualPos) => {
                 const liked = likedTrackIds.has(track.identifier);
                 const isDragging =
-                  dragSource?.section === "queue" && dragSource.queueIndex === queueIndex;
+                  dragSource?.section === "manual" && dragSource.queueIndex === queueIndex;
                 const isOver =
-                  dragTarget?.section === "queue" &&
+                  dragTarget?.section === "manual" &&
                   dragTarget.queueIndex === queueIndex &&
                   !isDragging;
                 return (
@@ -1200,27 +1267,30 @@ export function NowPlayingView({
                     onDragStart={(e) => {
                       if (!privileged) return;
                       e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", `queue:${queueIndex}`);
-                      setDragSource({ section: "queue", queueIndex });
+                      e.dataTransfer.setData("text/plain", `manual:${queueIndex}`);
+                      setDragSource({ section: "manual", queueIndex });
                     }}
                     onDragOver={(e) => {
-                      if (!privileged || !dragSource) return;
+                      const targetItem: DragTimelineItem = { section: "manual", queueIndex };
+                      if (!privileged || !dragSource || !canDropTimeline(dragSource, targetItem)) {
+                        return;
+                      }
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
                       if (
-                        dragTarget?.section !== "queue" ||
+                        dragTarget?.section !== "manual" ||
                         dragTarget.queueIndex !== queueIndex ||
                         dragOverPosition !== pos
                       ) {
-                        setDragTarget({ section: "queue", queueIndex });
+                        setDragTarget(targetItem);
                         setDragOverPosition(pos);
                       }
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      handleTimelineDrop({ section: "queue", queueIndex });
+                      handleTimelineDrop({ section: "manual", queueIndex });
                     }}
                     onDragEnd={resetDragState}
                     onClick={() => {
@@ -1401,9 +1471,9 @@ export function NowPlayingView({
                   autoplayEntries.map(({ track, queueIndex }) => {
                     const liked = likedTrackIds.has(track.identifier);
                     const isDragging =
-                      dragSource?.section === "queue" && dragSource.queueIndex === queueIndex;
+                      dragSource?.section === "autoplay" && dragSource.queueIndex === queueIndex;
                     const isOver =
-                      dragTarget?.section === "queue" &&
+                      dragTarget?.section === "autoplay" &&
                       dragTarget.queueIndex === queueIndex &&
                       !isDragging;
                     return (
@@ -1413,27 +1483,30 @@ export function NowPlayingView({
                         onDragStart={(e) => {
                           if (!privileged) return;
                           e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData("text/plain", `queue:${queueIndex}`);
-                          setDragSource({ section: "queue", queueIndex });
+                          e.dataTransfer.setData("text/plain", `autoplay:${queueIndex}`);
+                          setDragSource({ section: "autoplay", queueIndex });
                         }}
                         onDragOver={(e) => {
-                          if (!privileged || !dragSource) return;
+                          const targetItem: DragTimelineItem = { section: "autoplay", queueIndex };
+                          if (!privileged || !dragSource || !canDropTimeline(dragSource, targetItem)) {
+                            return;
+                          }
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
                           const rect = e.currentTarget.getBoundingClientRect();
                           const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
                           if (
-                            dragTarget?.section !== "queue" ||
+                            dragTarget?.section !== "autoplay" ||
                             dragTarget.queueIndex !== queueIndex ||
                             dragOverPosition !== pos
                           ) {
-                            setDragTarget({ section: "queue", queueIndex });
+                            setDragTarget(targetItem);
                             setDragOverPosition(pos);
                           }
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          handleTimelineDrop({ section: "queue", queueIndex });
+                          handleTimelineDrop({ section: "autoplay", queueIndex });
                         }}
                         onDragEnd={resetDragState}
                         onClick={() => {

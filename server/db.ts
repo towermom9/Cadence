@@ -101,6 +101,7 @@ interface GuildSettingsRow {
   prefix: string;
   default_volume: number;
   dj_role_id: string | null;
+  access_role_ids_json?: string | null;
   stay_247: number;
   autoplay: number;
   allow_duplicates: number;
@@ -268,12 +269,42 @@ export class CadenceDatabase {
     if (!pinnedCols.includes("sort_order")) {
       this.db.exec(`ALTER TABLE pinned_tracks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
     }
+
+    const guildCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(guild_settings)`)
+      .all()
+      .map((col) => col.name);
+    if (!guildCols.includes("access_role_ids_json")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN access_role_ids_json TEXT NOT NULL DEFAULT '[]'`
+      );
+    }
+  }
+
+  private parseRoleIdList(raw: string | null | undefined): string[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      const unique: string[] = [];
+      const seen = new Set<string>();
+      for (const id of parsed) {
+        if (typeof id === "string" && id.trim().length > 0 && !seen.has(id.trim())) {
+          seen.add(id.trim());
+          unique.push(id.trim());
+          if (unique.length >= 25) break;
+        }
+      }
+      return unique;
+    } catch {
+      return [];
+    }
   }
 
   getGuildSettings(guildId: string): GuildSettingsDTO {
     const row = this.db
       .query<GuildSettingsRow, [string]>(
-        `SELECT guild_id, prefix, default_volume, dj_role_id, stay_247, autoplay, allow_duplicates
+        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, stay_247, autoplay, allow_duplicates
          FROM guild_settings WHERE guild_id = ?`
       )
       .get(guildId);
@@ -284,6 +315,7 @@ export class CadenceDatabase {
         prefix: config.botPrefix,
         defaultVolume: 100,
         djRoleId: null,
+        accessRoleIds: [],
         stay247: false,
         autoplay: false,
         allowDuplicates: true,
@@ -295,6 +327,7 @@ export class CadenceDatabase {
       prefix: row.prefix || config.botPrefix,
       defaultVolume: Math.max(0, Math.min(100, row.default_volume)),
       djRoleId: row.dj_role_id,
+      accessRoleIds: this.parseRoleIdList(row.access_role_ids_json),
       stay247: row.stay_247 === 1,
       autoplay: row.autoplay === 1,
       allowDuplicates: row.allow_duplicates === 1,
@@ -306,6 +339,15 @@ export class CadenceDatabase {
     patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>
   ): GuildSettingsDTO {
     const current = this.getGuildSettings(guildId);
+    const sanitizedAccessRoles = Array.isArray(patch.accessRoleIds)
+      ? Array.from(
+          new Set(
+            patch.accessRoleIds
+              .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+              .map((id) => id.trim())
+          )
+        ).slice(0, 25)
+      : current.accessRoleIds ?? [];
     const next: GuildSettingsDTO = {
       guildId,
       prefix:
@@ -317,6 +359,7 @@ export class CadenceDatabase {
           ? Math.max(0, Math.min(100, Math.round(patch.defaultVolume)))
           : current.defaultVolume,
       djRoleId: patch.djRoleId === undefined ? current.djRoleId : patch.djRoleId,
+      accessRoleIds: sanitizedAccessRoles,
       stay247: typeof patch.stay247 === "boolean" ? patch.stay247 : current.stay247,
       autoplay: typeof patch.autoplay === "boolean" ? patch.autoplay : current.autoplay,
       allowDuplicates:
@@ -327,12 +370,13 @@ export class CadenceDatabase {
 
     this.db
       .query(
-        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, stay_247, autoplay, allow_duplicates)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, stay_247, autoplay, allow_duplicates)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id) DO UPDATE SET
            prefix = excluded.prefix,
            default_volume = excluded.default_volume,
            dj_role_id = excluded.dj_role_id,
+           access_role_ids_json = excluded.access_role_ids_json,
            stay_247 = excluded.stay_247,
            autoplay = excluded.autoplay,
            allow_duplicates = excluded.allow_duplicates`
@@ -342,6 +386,7 @@ export class CadenceDatabase {
         next.prefix,
         next.defaultVolume,
         next.djRoleId,
+        JSON.stringify(next.accessRoleIds ?? []),
         next.stay247 ? 1 : 0,
         next.autoplay ? 1 : 0,
         next.allowDuplicates ? 1 : 0
@@ -1024,6 +1069,35 @@ export class CadenceDatabase {
     }
 
     const updatedTracks = playlist.tracks.filter((_, idx) => idx !== index);
+    const now = Date.now();
+    this.db
+      .query(`UPDATE playlists SET tracks_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
+      .run(JSON.stringify(updatedTracks), now, playlistId, userId);
+
+    return { ...playlist, tracks: updatedTracks, updatedAt: now };
+  }
+
+  reorderPlaylistTracks(
+    userId: string,
+    playlistId: string,
+    fromIndex: number,
+    toIndex: number
+  ): PlaylistDTO {
+    const playlist = this.getPlaylist(userId, playlistId);
+    if (!playlist) {
+      throw new Error("Playlist not found.");
+    }
+    const len = playlist.tracks.length;
+    if (fromIndex < 0 || fromIndex >= len || toIndex < 0 || toIndex >= len) {
+      throw new Error("Track position is out of range.");
+    }
+    if (fromIndex === toIndex) {
+      return playlist;
+    }
+
+    const updatedTracks = [...playlist.tracks];
+    const [moved] = updatedTracks.splice(fromIndex, 1);
+    updatedTracks.splice(toIndex, 0, moved);
     const now = Date.now();
     this.db
       .query(`UPDATE playlists SET tracks_json = ?, updated_at = ? WHERE id = ? AND user_id = ?`)

@@ -150,6 +150,7 @@ export class MusicService {
   private recentSeeks = new Map<string, { target: number; at: number }>();
   private uiVolumes = new Map<string, number>();
   private pendingVolumeUpdates = new Map<string, { target: number; inFlight: boolean }>();
+  private dismissedGuilds = new Map<string, number>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
@@ -269,6 +270,7 @@ export class MusicService {
       this.recentSeeks.delete(player.guildId);
       this.uiVolumes.delete(player.guildId);
       this.pendingVolumeUpdates.delete(player.guildId);
+      this.dismissedGuilds.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
       this.onControllerEvent("playerDestroy", player.guildId);
@@ -277,7 +279,9 @@ export class MusicService {
     this.manager.on("trackStart", (player, track) => {
       this.clearInactivityTimer(player.guildId);
       this.recentSeeks.delete(player.guildId);
+      this.dismissedGuilds.delete(player.guildId);
       if (track) {
+        this.clearAutoplayFlag(track);
         if (!this.queueNames.has(player.guildId) && track.info.title) {
           this.queueNames.set(player.guildId, track.info.title);
         }
@@ -310,6 +314,14 @@ export class MusicService {
     });
 
     this.manager.on("trackEnd", (player) => {
+      const dismissedAt = this.dismissedGuilds.get(player.guildId);
+      if (dismissedAt && Date.now() - dismissedAt < 2500) {
+        player.queue.previous.splice(0, player.queue.previous.length);
+        player.queue.current = null;
+        player.playing = false;
+        player.paused = false;
+        void player.queue.utils.save().catch(() => {});
+      }
       this.onStateChange(player.guildId);
     });
 
@@ -339,6 +351,14 @@ export class MusicService {
     });
 
     this.manager.on("queueEnd", (player) => {
+      const dismissedAt = this.dismissedGuilds.get(player.guildId);
+      if (dismissedAt && Date.now() - dismissedAt < 2500) {
+        player.queue.previous.splice(0, player.queue.previous.length);
+        player.queue.current = null;
+        player.playing = false;
+        player.paused = false;
+        void player.queue.utils.save().catch(() => {});
+      }
       this.queueNames.delete(player.guildId);
       this.scheduleInactivityCheck(player.guildId);
       this.onStateChange(player.guildId);
@@ -419,9 +439,7 @@ export class MusicService {
       if (!existing.connected) {
         await existing.connect();
       }
-      if (textChannelId) {
-        existing.textChannelId = textChannelId;
-      }
+      existing.textChannelId = textChannelId || existing.textChannelId || voiceChannelId;
       return existing;
     }
 
@@ -430,7 +448,7 @@ export class MusicService {
     const player = this.manager.createPlayer({
       guildId,
       voiceChannelId,
-      textChannelId,
+      textChannelId: textChannelId || voiceChannelId,
       selfDeaf: true,
       selfMute: false,
       volume: uiVolumeToLavalink(settings.defaultVolume),
@@ -951,10 +969,14 @@ export class MusicService {
     }
 
     const target = player.queue.previous[previousIndex];
+    this.clearAutoplayFlag(target);
     const skippedBack = player.queue.previous.slice(0, previousIndex).reverse();
     const toRequeue: (Track | UnresolvedTrack)[] = [...skippedBack];
     if (player.queue.current) {
       toRequeue.push(player.queue.current);
+    }
+    for (const item of toRequeue) {
+      this.clearAutoplayFlag(item);
     }
 
     player.queue.previous.splice(0, previousIndex + 1);
@@ -1076,7 +1098,6 @@ export class MusicService {
     if (!player) throw new Error("No active player in this server.");
     const clamped = Math.max(0, Math.min(100, Math.round(volume)));
     this.uiVolumes.set(guildId, clamped);
-    this.emitStateChange(guildId);
 
     let entry = this.pendingVolumeUpdates.get(guildId);
     if (entry) {
@@ -1098,6 +1119,7 @@ export class MusicService {
           break;
         }
       }
+      this.emitStateChange(guildId);
     } finally {
       entry.inFlight = false;
       if (this.pendingVolumeUpdates.get(guildId) === entry) {
@@ -1140,17 +1162,16 @@ export class MusicService {
     const wasAutoplay = this.isAutoplayTrack(target);
     const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
 
-    let clampedTo = to;
-    if (!wasAutoplay && firstAutoIdx !== -1 && clampedTo >= firstAutoIdx) {
-      clampedTo = firstAutoIdx - 1;
+    // Strictly separate manual queue and Autoplay sections
+    if (!wasAutoplay && firstAutoIdx !== -1 && to >= firstAutoIdx) {
+      return;
     }
-    if (wasAutoplay && firstAutoIdx !== -1 && clampedTo < firstAutoIdx) {
-      this.clearAutoplayFlag(target);
+    if (wasAutoplay && firstAutoIdx !== -1 && to < firstAutoIdx) {
+      return;
     }
-    if (clampedTo < 0 || from === clampedTo) return;
 
     await player.queue.splice(from, 1);
-    await player.queue.add(target, clampedTo);
+    await player.queue.add(target, to);
     await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
@@ -1259,6 +1280,9 @@ export class MusicService {
       throw new Error("Track position is out of range.");
     }
     const target = player.queue.tracks[queueIndex];
+    if (this.isAutoplayTrack(target)) {
+      throw new Error("Autoplay suggestions cannot be dragged into the main queue.");
+    }
     this.clearAutoplayFlag(target);
     await player.queue.splice(queueIndex, 1);
 
@@ -1268,6 +1292,64 @@ export class MusicService {
     if (player.queue.previous.length > maxPrev) {
       player.queue.previous.splice(maxPrev);
     }
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+  }
+
+  async moveCurrentToQueue(guildId: string, queueIndex: number): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player || !player.queue.current) {
+      throw new Error("Nothing is currently playing.");
+    }
+    const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+    const manualLen = firstAutoIdx === -1 ? player.queue.tracks.length : firstAutoIdx;
+    if (manualLen === 0) {
+      return;
+    }
+
+    const oldCurrent = player.queue.current;
+    this.clearAutoplayFlag(oldCurrent);
+
+    const nextTrack = player.queue.tracks[0];
+    this.clearAutoplayFlag(nextTrack);
+    await player.queue.splice(0, 1);
+
+    const insertAt = Math.max(0, Math.min(queueIndex - 1, manualLen - 1));
+    await player.queue.add(oldCurrent, insertAt);
+    await player.play({ clientTrack: nextTrack, paused: false });
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+  }
+
+  async moveCurrentToPrevious(guildId: string, previousIndex: number): Promise<void> {
+    const player = this.getPlayer(guildId);
+    if (!player || !player.queue.current) {
+      throw new Error("Nothing is currently playing.");
+    }
+
+    const oldCurrent = player.queue.current;
+    this.clearAutoplayFlag(oldCurrent);
+
+    const insertIdx = Math.max(0, Math.min(previousIndex, player.queue.previous.length));
+    player.queue.previous.splice(insertIdx, 0, oldCurrent as Track);
+    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
+    if (player.queue.previous.length > maxPrev) {
+      player.queue.previous.splice(maxPrev);
+    }
+
+    if (player.queue.tracks.length > 0) {
+      const nextTrack = player.queue.tracks[0];
+      this.clearAutoplayFlag(nextTrack);
+      await player.queue.splice(0, 1);
+      await player.play({ clientTrack: nextTrack, paused: false });
+    } else {
+      await player.stopPlaying(true, false);
+      player.queue.current = null;
+      player.playing = false;
+      player.paused = false;
+      this.scheduleInactivityCheck(guildId);
+    }
+
     await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
@@ -1284,6 +1366,7 @@ export class MusicService {
   async dismissQueue(guildId: string): Promise<void> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
+    this.dismissedGuilds.set(guildId, Date.now());
     this.autoplayGeneration.set(guildId, (this.autoplayGeneration.get(guildId) ?? 0) + 1);
     this.queueNames.delete(guildId);
     this.recentSeeks.delete(guildId);
