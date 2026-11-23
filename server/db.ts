@@ -58,11 +58,18 @@ const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
   lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
   defaultSearchSource: "ytmsearch",
+  pauseOnEmpty: true,
+  pauseOnEmptySeconds: 0,
 };
 
 function normalizeSeekSeconds(value: unknown, fallback = 10): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(5, Math.min(30, Math.round(value)));
+}
+
+function normalizeEmptyPauseSeconds(value: unknown, fallback = 0): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(300, Math.round(value)));
 }
 
 export interface StoredAppConfig {
@@ -106,6 +113,8 @@ interface GuildSettingsRow {
   stay_247: number;
   autoplay: number;
   allow_duplicates: number;
+  pause_on_empty?: number;
+  pause_on_empty_seconds?: number;
 }
 
 interface PlaylistRow {
@@ -285,6 +294,16 @@ export class CadenceDatabase {
         `ALTER TABLE guild_settings ADD COLUMN admin_role_ids_json TEXT NOT NULL DEFAULT '[]'`
       );
     }
+    if (!guildCols.includes("pause_on_empty")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN pause_on_empty INTEGER NOT NULL DEFAULT 1`
+      );
+    }
+    if (!guildCols.includes("pause_on_empty_seconds")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN pause_on_empty_seconds INTEGER NOT NULL DEFAULT 0`
+      );
+    }
   }
 
   private parseRoleIdList(raw: string | null | undefined): string[] {
@@ -310,7 +329,7 @@ export class CadenceDatabase {
   getGuildSettings(guildId: string): GuildSettingsDTO {
     const row = this.db
       .query<GuildSettingsRow, [string]>(
-        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates
+        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds
          FROM guild_settings WHERE guild_id = ?`
       )
       .get(guildId);
@@ -326,6 +345,8 @@ export class CadenceDatabase {
         stay247: false,
         autoplay: false,
         allowDuplicates: true,
+        pauseOnEmpty: true,
+        pauseOnEmptySeconds: 0,
       };
     }
 
@@ -339,6 +360,8 @@ export class CadenceDatabase {
       stay247: row.stay_247 === 1,
       autoplay: row.autoplay === 1,
       allowDuplicates: row.allow_duplicates === 1,
+      pauseOnEmpty: row.pause_on_empty === undefined ? true : row.pause_on_empty === 1,
+      pauseOnEmptySeconds: normalizeEmptyPauseSeconds(row.pause_on_empty_seconds, 0),
     };
   }
 
@@ -378,12 +401,18 @@ export class CadenceDatabase {
         typeof patch.allowDuplicates === "boolean"
           ? patch.allowDuplicates
           : current.allowDuplicates,
+      pauseOnEmpty:
+        typeof patch.pauseOnEmpty === "boolean" ? patch.pauseOnEmpty : current.pauseOnEmpty,
+      pauseOnEmptySeconds: normalizeEmptyPauseSeconds(
+        patch.pauseOnEmptySeconds,
+        current.pauseOnEmptySeconds
+      ),
     };
 
     this.db
       .query(
-        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id) DO UPDATE SET
            prefix = excluded.prefix,
            default_volume = excluded.default_volume,
@@ -392,7 +421,9 @@ export class CadenceDatabase {
            admin_role_ids_json = excluded.admin_role_ids_json,
            stay_247 = excluded.stay_247,
            autoplay = excluded.autoplay,
-           allow_duplicates = excluded.allow_duplicates`
+           allow_duplicates = excluded.allow_duplicates,
+           pause_on_empty = excluded.pause_on_empty,
+           pause_on_empty_seconds = excluded.pause_on_empty_seconds`
       )
       .run(
         next.guildId,
@@ -403,7 +434,9 @@ export class CadenceDatabase {
         JSON.stringify(next.adminRoleIds ?? []),
         next.stay247 ? 1 : 0,
         next.autoplay ? 1 : 0,
-        next.allowDuplicates ? 1 : 0
+        next.allowDuplicates ? 1 : 0,
+        next.pauseOnEmpty ? 1 : 0,
+        next.pauseOnEmptySeconds
       );
 
     return next;
@@ -940,6 +973,14 @@ export class CadenceDatabase {
         parsed.defaultSearchSource && VALID_SEARCH_SOURCES.has(parsed.defaultSearchSource)
           ? parsed.defaultSearchSource
           : DEFAULT_USER_PREFERENCES.defaultSearchSource,
+      pauseOnEmpty:
+        typeof parsed.pauseOnEmpty === "boolean"
+          ? parsed.pauseOnEmpty
+          : DEFAULT_USER_PREFERENCES.pauseOnEmpty,
+      pauseOnEmptySeconds: normalizeEmptyPauseSeconds(
+        parsed.pauseOnEmptySeconds,
+        DEFAULT_USER_PREFERENCES.pauseOnEmptySeconds
+      ),
     };
   }
 
@@ -985,6 +1026,14 @@ export class CadenceDatabase {
         patch.defaultSearchSource && VALID_SEARCH_SOURCES.has(patch.defaultSearchSource)
           ? patch.defaultSearchSource
           : current.defaultSearchSource,
+      pauseOnEmpty:
+        typeof patch.pauseOnEmpty === "boolean"
+          ? patch.pauseOnEmpty
+          : current.pauseOnEmpty,
+      pauseOnEmptySeconds: normalizeEmptyPauseSeconds(
+        patch.pauseOnEmptySeconds,
+        current.pauseOnEmptySeconds
+      ),
     };
 
     const now = Date.now();

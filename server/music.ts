@@ -33,6 +33,15 @@ export interface RequesterInfo {
 
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 
+function formatEmptyDelayLabel(seconds: number): string {
+  if (seconds <= 0) return "0s";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins > 0 && secs > 0) return `${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m`;
+  return `${secs}s`;
+}
+
 function isUrl(input: string): boolean {
   return /^https?:\/\/\S+$/i.test(input.trim());
 }
@@ -153,6 +162,9 @@ export class MusicService {
   private pendingVolumeUpdates = new Map<string, { target: number; inFlight: boolean }>();
   private dismissedGuilds = new Map<string, number>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private emptyVcPauseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private emptyVcPauseAt = new Map<string, number>();
+  private autoPausedByEmptyVc = new Set<string>();
   private lastPositionBroadcast = new Map<string, number>();
   private onStateChange: (guildId: string) => void;
   private onControllerEvent: (event: ControllerEventType, guildId: string) => void = () => {};
@@ -266,6 +278,8 @@ export class MusicService {
 
     this.manager.on("playerDestroy", (player) => {
       this.clearInactivityTimer(player.guildId);
+      this.clearEmptyVcTimer(player.guildId);
+      this.autoPausedByEmptyVc.delete(player.guildId);
       this.activeFilters.delete(player.guildId);
       this.repeatModes.delete(player.guildId);
       this.autoplayOverrides.delete(player.guildId);
@@ -284,6 +298,12 @@ export class MusicService {
 
     this.manager.on("trackStart", (player, track) => {
       this.clearInactivityTimer(player.guildId);
+      if (this.getHumanListenerCount(player.guildId) > 0) {
+        this.clearEmptyVcTimer(player.guildId);
+        this.autoPausedByEmptyVc.delete(player.guildId);
+      } else if (!this.emptyVcPauseTimers.has(player.guildId)) {
+        this.handleVoiceChannelEmpty(player.guildId);
+      }
       this.recentSeeks.delete(player.guildId);
       this.dismissedGuilds.delete(player.guildId);
       if (track) {
@@ -393,6 +413,8 @@ export class MusicService {
         player.paused = false;
         void player.queue.utils.save().catch(() => {});
         this.queueNames.delete(player.guildId);
+        this.clearEmptyVcTimer(player.guildId);
+        this.autoPausedByEmptyVc.delete(player.guildId);
         this.scheduleInactivityCheck(player.guildId);
         this.onStateChange(player.guildId);
         this.onControllerEvent("queueEnd", player.guildId);
@@ -425,6 +447,8 @@ export class MusicService {
       }
 
       this.queueNames.delete(player.guildId);
+      this.clearEmptyVcTimer(player.guildId);
+      this.autoPausedByEmptyVc.delete(player.guildId);
       this.scheduleInactivityCheck(player.guildId);
       this.onStateChange(player.guildId);
       this.onControllerEvent("queueEnd", player.guildId);
@@ -823,6 +847,8 @@ export class MusicService {
     const settings = this.db.getGuildSettings(guildId);
     const player = await this.ensurePlayer(guildId, voiceChannelId, textChannelId);
     this.clearInactivityTimer(guildId);
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
     const wasIdle = !player.playing && !player.paused && !player.queue.current;
 
     let filtered = dtos;
@@ -1035,6 +1061,8 @@ export class MusicService {
 
     await player.play({ clientTrack: target, paused: false });
     await player.queue.utils.save();
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
 
     if (this.isAutoplayEnabled(guildId)) {
       const remainingAuto = player.queue.tracks.filter((t) => this.isAutoplayTrack(t)).length;
@@ -1072,12 +1100,17 @@ export class MusicService {
 
     await player.play({ clientTrack: target, paused: false });
     await player.queue.utils.save();
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
     this.emitStateChange(guildId);
   }
 
   async togglePause(guildId: string): Promise<boolean> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
+
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
 
     if (player.paused) {
       await player.resume();
@@ -1091,6 +1124,9 @@ export class MusicService {
   async setPause(guildId: string, paused: boolean): Promise<void> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
+
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
 
     if (paused && !player.paused) {
       await player.pause();
@@ -1478,6 +1514,8 @@ export class MusicService {
     player.paused = false;
 
     await player.queue.utils.save();
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
     this.scheduleInactivityCheck(guildId);
     this.emitStateChange(guildId);
   }
@@ -1486,6 +1524,8 @@ export class MusicService {
     const player = this.getPlayer(guildId);
     if (!player) return;
     this.clearInactivityTimer(guildId);
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
     await player.destroy("Stopped by user");
     this.onStateChange(guildId);
   }
@@ -1951,6 +1991,168 @@ export class MusicService {
     }
   }
 
+  getHumanListenerCount(guildId: string, overrideVcId?: string | null): number {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 0;
+    const player = this.getPlayer(guildId);
+    const vcId =
+      overrideVcId ?? player?.voiceChannelId ?? guild.members.me?.voice.channelId ?? null;
+    if (!vcId) return 0;
+    const vc = guild.channels.cache.get(vcId);
+    if (!vc || !vc.isVoiceBased()) return 0;
+    return vc.members.filter((m) => !m.user.bot).size;
+  }
+
+  clearEmptyVcTimer(guildId: string): void {
+    const existing = this.emptyVcPauseTimers.get(guildId);
+    if (existing) {
+      clearTimeout(existing);
+      this.emptyVcPauseTimers.delete(guildId);
+    }
+    this.emptyVcPauseAt.delete(guildId);
+  }
+
+  private async pauseForEmptyVoice(guildId: string): Promise<void> {
+    this.clearEmptyVcTimer(guildId);
+    const player = this.getPlayer(guildId);
+    if (!player || !player.queue.current) {
+      this.scheduleInactivityCheck(guildId);
+      return;
+    }
+
+    const settings = this.db.getGuildSettings(guildId);
+    if (!settings.pauseOnEmpty) {
+      this.scheduleInactivityCheck(guildId);
+      return;
+    }
+
+    if (this.getHumanListenerCount(guildId) > 0) {
+      return;
+    }
+
+    if (!player.paused) {
+      this.autoPausedByEmptyVc.add(guildId);
+      await player.pause().catch(() => {});
+      this.onGuildToast(
+        guildId,
+        "info",
+        "Paused playback — voice channel is empty."
+      );
+      this.emitStateChange(guildId);
+    }
+  }
+
+  handleVoiceChannelEmpty(guildId: string, overrideVcId?: string | null): void {
+    const player = this.getPlayer(guildId);
+    if (!player) return;
+
+    if (this.getHumanListenerCount(guildId, overrideVcId) > 0) {
+      return;
+    }
+
+    const settings = this.db.getGuildSettings(guildId);
+    if (settings.pauseOnEmpty && player.queue.current) {
+      this.clearInactivityTimer(guildId);
+
+      if (player.paused) {
+        this.autoPausedByEmptyVc.add(guildId);
+        this.emitStateChange(guildId);
+        return;
+      }
+
+      if (this.emptyVcPauseTimers.has(guildId)) {
+        return;
+      }
+
+      const delaySec = Math.max(
+        0,
+        Math.min(300, Math.round(settings.pauseOnEmptySeconds ?? 0))
+      );
+      if (delaySec <= 0) {
+        void this.pauseForEmptyVoice(guildId);
+      } else {
+        const pauseAt = Date.now() + delaySec * 1000;
+        this.emptyVcPauseAt.set(guildId, pauseAt);
+        const timer = setTimeout(() => {
+          this.emptyVcPauseTimers.delete(guildId);
+          this.emptyVcPauseAt.delete(guildId);
+          void this.pauseForEmptyVoice(guildId);
+        }, delaySec * 1000);
+        this.emptyVcPauseTimers.set(guildId, timer);
+        this.onGuildToast(
+          guildId,
+          "info",
+          `Voice channel is empty — pausing in ${formatEmptyDelayLabel(delaySec)}.`
+        );
+        this.emitStateChange(guildId);
+      }
+      return;
+    }
+
+    this.clearEmptyVcTimer(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
+    this.scheduleInactivityCheck(guildId);
+  }
+
+  handleVoiceChannelOccupied(guildId: string): void {
+    this.clearInactivityTimer(guildId);
+    const hadCountdown = this.emptyVcPauseTimers.has(guildId);
+    this.clearEmptyVcTimer(guildId);
+
+    const player = this.getPlayer(guildId);
+    if (!player) return;
+
+    const wasAutoPaused = this.autoPausedByEmptyVc.has(guildId);
+    this.autoPausedByEmptyVc.delete(guildId);
+
+    if (wasAutoPaused && player.paused && player.queue.current) {
+      void player
+        .resume()
+        .then(() => {
+          this.onGuildToast(
+            guildId,
+            "info",
+            "Resumed playback — listener joined voice channel."
+          );
+          this.emitStateChange(guildId);
+        })
+        .catch(() => {});
+      return;
+    }
+
+    if (hadCountdown || wasAutoPaused) {
+      this.emitStateChange(guildId);
+    }
+  }
+
+  onGuildSettingsUpdated(guildId: string): void {
+    const settings = this.db.getGuildSettings(guildId);
+    if (settings.stay247) {
+      this.clearInactivityTimer(guildId);
+    }
+
+    const player = this.getPlayer(guildId);
+    if (!player) return;
+
+    const humans = this.getHumanListenerCount(guildId);
+    if (humans === 0) {
+      if (settings.pauseOnEmpty && player.queue.current) {
+        this.clearInactivityTimer(guildId);
+        if (!player.paused) {
+          this.clearEmptyVcTimer(guildId);
+          this.handleVoiceChannelEmpty(guildId);
+        } else {
+          this.autoPausedByEmptyVc.add(guildId);
+          this.emitStateChange(guildId);
+        }
+      } else {
+        this.clearEmptyVcTimer(guildId);
+        this.autoPausedByEmptyVc.delete(guildId);
+        this.scheduleInactivityCheck(guildId);
+      }
+    }
+  }
+
   scheduleInactivityCheck(guildId: string): void {
     this.clearInactivityTimer(guildId);
     const settings = this.db.getGuildSettings(guildId);
@@ -1958,6 +2160,10 @@ export class MusicService {
 
     const player = this.getPlayer(guildId);
     if (!player) return;
+
+    if (settings.pauseOnEmpty && player.queue.current) {
+      return;
+    }
 
     const guild = this.client.guilds.cache.get(guildId);
     const vc = player.voiceChannelId ? guild?.channels.cache.get(player.voiceChannelId) : null;
@@ -1975,6 +2181,7 @@ export class MusicService {
       if (currentSettings.stay247) return;
       const currentPlayer = this.getPlayer(guildId);
       if (!currentPlayer) return;
+      if (currentSettings.pauseOnEmpty && currentPlayer.queue.current) return;
 
       const currentGuild = this.client.guilds.cache.get(guildId);
       const currentVc = currentPlayer.voiceChannelId
@@ -2080,6 +2287,8 @@ export class MusicService {
         connected: false,
         playing: false,
         paused: false,
+        autoPausedEmptyVc: false,
+        emptyVcPauseAt: null,
         position: 0,
         volume: settings.defaultVolume,
         repeatMode: "off",
@@ -2108,6 +2317,8 @@ export class MusicService {
       connected: Boolean(player.connected),
       playing: Boolean(player.playing),
       paused: Boolean(player.paused),
+      autoPausedEmptyVc: Boolean(player.paused && this.autoPausedByEmptyVc.has(guildId)),
+      emptyVcPauseAt: this.emptyVcPauseAt.get(guildId) ?? null,
       position,
       volume: this.getUiVolume(guildId),
       repeatMode: this.getRepeatMode(guildId),
@@ -2124,9 +2335,13 @@ export class MusicService {
   }
 
   async destroy(): Promise<void> {
-    for (const guildId of this.inactivityTimers.keys()) {
+    for (const guildId of [...this.inactivityTimers.keys()]) {
       this.clearInactivityTimer(guildId);
     }
+    for (const guildId of [...this.emptyVcPauseTimers.keys()]) {
+      this.clearEmptyVcTimer(guildId);
+    }
+    this.autoPausedByEmptyVc.clear();
     for (const player of this.manager.players.values()) {
       await player.destroy("Server shutting down").catch(() => {});
     }

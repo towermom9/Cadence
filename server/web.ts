@@ -295,6 +295,20 @@ export function createWebApp(
     }
 
     const preferences = db.updateUserPreferences(session.user.id, body);
+    if (body.pauseOnEmpty !== undefined || body.pauseOnEmptySeconds !== undefined) {
+      for (const guild of bot.client.guilds.cache.values()) {
+        if (
+          bot.isGuildAdmin(guild.id, session.user.id) ||
+          bot.music.isPrivileged(guild.id, session.user.id)
+        ) {
+          db.updateGuildSettings(guild.id, {
+            pauseOnEmpty: preferences.pauseOnEmpty,
+            pauseOnEmptySeconds: preferences.pauseOnEmptySeconds,
+          });
+          bot.music.onGuildSettingsUpdated(guild.id);
+        }
+      }
+    }
     writePrefsCookie(c, preferences);
     return c.json({ preferences });
   });

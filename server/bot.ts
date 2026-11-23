@@ -537,18 +537,27 @@ export class CadenceBot {
         if (player) {
           player.destroy("Disconnected from voice channel").catch(() => {});
         }
+        this.onGuildStateChange(guildId);
+        return;
       }
 
       if (player) {
-        const botVcId = player.voiceChannelId;
-        if (oldState.channelId === botVcId || newState.channelId === botVcId) {
-          const vc = botVcId ? newState.guild.channels.cache.get(botVcId) : null;
-          const humans =
-            vc && vc.isVoiceBased() ? vc.members.filter((m) => !m.user.bot).size : 0;
+        const botVcId =
+          (newState.id === this.client.user?.id ? newState.channelId : null) ??
+          player.voiceChannelId ??
+          newState.guild.members.me?.voice.channelId ??
+          null;
+        if (
+          botVcId &&
+          (oldState.channelId === botVcId ||
+            newState.channelId === botVcId ||
+            newState.id === this.client.user?.id)
+        ) {
+          const humans = this.music.getHumanListenerCount(guildId, botVcId);
           if (humans === 0) {
-            this.music.scheduleInactivityCheck(guildId);
+            this.music.handleVoiceChannelEmpty(guildId, botVcId);
           } else {
-            this.music.clearInactivityTimer(guildId);
+            this.music.handleVoiceChannelOccupied(guildId);
           }
         }
       }
@@ -760,6 +769,24 @@ export class CadenceBot {
             .addStringOption((opt) =>
               opt.setName("value").setDescription("New prefix (1-5 chars)").setRequired(true).setMaxLength(5)
             )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("emptyvc")
+            .setDescription("Configure auto-pause when voice channel is empty")
+            .addBooleanOption((opt) =>
+              opt
+                .setName("enabled")
+                .setDescription("Pause playback when voice channel is empty and resume on join")
+                .setRequired(true)
+            )
+            .addIntegerOption((opt) =>
+              opt
+                .setName("seconds")
+                .setDescription("How long song continues to play when VC is empty (0 - 300s)")
+                .setMinValue(0)
+                .setMaxValue(300)
+            )
         ),
       new SlashCommandBuilder().setName("dashboard").setDescription("Get the link to the Cadence web dashboard"),
       new SlashCommandBuilder().setName("help").setDescription("Show all Cadence music commands and controls"),
@@ -945,7 +972,9 @@ export class CadenceBot {
       `Duration: ${durationLabel}`,
       `Volume: ${state.volume}%`,
     ];
-    if (state.paused) footerParts.push("Paused");
+    if (state.paused) {
+      footerParts.push(state.autoPausedEmptyVc ? "Paused (Empty VC)" : "Paused");
+    }
     if (loopLabel !== "Off") footerParts.push(`Loop: ${loopLabel}`);
 
     const safeTitle = track.title.replace(/```/g, "'''").slice(0, 180);
@@ -1657,6 +1686,15 @@ export class CadenceBot {
           { name: "24/7 Mode", value: s.stay247 ? "Enabled" : "Disabled", inline: true },
           { name: "Default Autoplay", value: s.autoplay ? "Enabled" : "Disabled", inline: true },
           { name: "Allow Duplicates", value: s.allowDuplicates ? "Yes" : "No", inline: true },
+          {
+            name: "Empty VC Pause",
+            value: s.pauseOnEmpty
+              ? s.pauseOnEmptySeconds > 0
+                ? `After ${s.pauseOnEmptySeconds}s`
+                : "Immediate (0s)"
+              : "Disabled",
+            inline: true,
+          },
           { name: "DJ Role", value: s.djRoleId ? `<@&${s.djRoleId}>` : "None", inline: true },
           { name: "Access Roles", value: accessLabel, inline: false }
         );
@@ -1671,7 +1709,7 @@ export class CadenceBot {
     } else if (sub === "247") {
       const enabled = interaction.options.getBoolean("enabled", true);
       this.db.updateGuildSettings(guildId, { stay247: enabled });
-      if (enabled) this.music.clearInactivityTimer(guildId);
+      this.music.onGuildSettingsUpdated(guildId);
       await interaction.editReply(`24/7 mode is now **${enabled ? "enabled" : "disabled"}**.`);
     } else if (sub === "dj") {
       const role = interaction.options.getRole("role");
@@ -1685,6 +1723,19 @@ export class CadenceBot {
       const value = interaction.options.getString("value", true);
       const updated = this.db.updateGuildSettings(guildId, { prefix: value });
       await interaction.editReply(`Text command prefix set to \`${updated.prefix}\`.`);
+    } else if (sub === "emptyvc") {
+      const enabled = interaction.options.getBoolean("enabled", true);
+      const seconds = interaction.options.getInteger("seconds");
+      const updated = this.db.updateGuildSettings(guildId, {
+        pauseOnEmpty: enabled,
+        ...(seconds !== null ? { pauseOnEmptySeconds: seconds } : {}),
+      });
+      this.music.onGuildSettingsUpdated(guildId);
+      await interaction.editReply(
+        updated.pauseOnEmpty
+          ? `Empty VC auto-pause is **enabled** (continues playing for **${updated.pauseOnEmptySeconds}s** before pausing, auto-resumes on join).`
+          : "Empty VC auto-pause is now **disabled**."
+      );
     }
 
     this.onGuildStateChange(guildId);

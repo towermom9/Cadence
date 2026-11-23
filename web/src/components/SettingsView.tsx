@@ -121,6 +121,16 @@ const AUTOPLAY_CLICK_OPTIONS: {
   },
 ];
 
+function formatEmptyVcDelay(seconds: number): string {
+  const clamped = Math.max(0, Math.min(300, Math.round(seconds)));
+  if (clamped === 0) return "Immediate (0s)";
+  const mins = Math.floor(clamped / 60);
+  const secs = clamped % 60;
+  if (mins > 0 && secs > 0) return `${mins}m ${secs}s`;
+  if (mins > 0) return `${mins}m (${clamped}s)`;
+  return `${secs}s`;
+}
+
 function ThemeSwitch({
   checked,
   onChange,
@@ -180,6 +190,8 @@ export function SettingsView({
   const [stay247, setStay247] = useState(false);
   const [autoplay, setAutoplay] = useState(false);
   const [allowDuplicates, setAllowDuplicates] = useState(true);
+  const [pauseOnEmpty, setPauseOnEmpty] = useState(true);
+  const [pauseOnEmptySeconds, setPauseOnEmptySeconds] = useState(0);
   const [sysInfo, setSysInfo] = useState<SystemInfoDTO | null>(null);
   const [sysLogs, setSysLogs] = useState<DebugLogEntryDTO[]>([]);
   const [sysText, setSysText] = useState("");
@@ -226,7 +238,7 @@ export function SettingsView({
   }, [canAccessSystemSettings, loadSystemLogs, tab]);
 
   useEffect(() => {
-    if (tab === "server" && guildId && canAccessServerSettings) {
+    if (guildId && canAccessServerSettings) {
       onLoadSettings(guildId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,7 +254,29 @@ export function SettingsView({
     setStay247(settings.stay247);
     setAutoplay(settings.autoplay);
     setAllowDuplicates(settings.allowDuplicates);
+    setPauseOnEmpty(settings.pauseOnEmpty ?? true);
+    setPauseOnEmptySeconds(
+      Math.min(300, Math.max(0, Math.round(settings.pauseOnEmptySeconds ?? 0)))
+    );
   }, [settings]);
+
+  const effectivePauseOnEmpty = settings
+    ? pauseOnEmpty
+    : (preferences.pauseOnEmpty ?? true);
+  const effectivePauseOnEmptySeconds = settings
+    ? pauseOnEmptySeconds
+    : Math.min(300, Math.max(0, Math.round(preferences.pauseOnEmptySeconds ?? 0)));
+
+  const handleEmptyVcToggle = (next: boolean) => {
+    setPauseOnEmpty(next);
+    onUpdatePreferences({ pauseOnEmpty: next });
+  };
+
+  const handleEmptyVcSecondsChange = (nextSec: number) => {
+    const clamped = Math.min(300, Math.max(0, Math.round(nextSec)));
+    setPauseOnEmptySeconds(clamped);
+    onUpdatePreferences({ pauseOnEmptySeconds: clamped });
+  };
 
   const toggleAccessRole = (roleId: string) => {
     setAccessRoleIds((prev) =>
@@ -267,6 +301,8 @@ export function SettingsView({
       stay247,
       autoplay,
       allowDuplicates,
+      pauseOnEmpty,
+      pauseOnEmptySeconds: Math.min(300, Math.max(0, Math.round(pauseOnEmptySeconds))),
     });
   };
 
@@ -549,6 +585,64 @@ export function SettingsView({
           </section>
 
           <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h2 className="text-base font-semibold text-white">
+                  Pause When Voice Channel is Empty
+                </h2>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Automatically pause playback when everyone leaves the voice channel and resume when someone joins.
+                </p>
+              </div>
+              <ThemeSwitch
+                checked={effectivePauseOnEmpty}
+                onChange={handleEmptyVcToggle}
+                label="Toggle Pause When Voice Channel is Empty"
+              />
+            </div>
+
+            <div
+              className={`space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4 transition-opacity ${
+                effectivePauseOnEmpty ? "opacity-100" : "opacity-45"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-white">
+                  Continue Playing When Voice Channel is Empty
+                </span>
+                <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                  {formatEmptyVcDelay(effectivePauseOnEmptySeconds)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={300}
+                step={5}
+                disabled={!effectivePauseOnEmpty}
+                value={effectivePauseOnEmptySeconds}
+                onChange={(e) => handleEmptyVcSecondsChange(Number(e.target.value))}
+                style={{ accentColor: "var(--cadence-accent)" }}
+                aria-label="How long song continues to play when voice channel is empty"
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
+              />
+              <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
+                <span>0s</span>
+                <span>1m</span>
+                <span>2m</span>
+                <span>3m</span>
+                <span>4m</span>
+                <span>5m</span>
+              </div>
+              <p className="text-xs text-zinc-500">
+                {effectivePauseOnEmptySeconds === 0
+                  ? "Playback pauses immediately when the voice channel becomes empty and automatically resumes when someone joins."
+                  : `Song continues to play for ${formatEmptyVcDelay(effectivePauseOnEmptySeconds)} when the voice channel is empty before pausing, and automatically resumes when someone joins.`}
+              </p>
+            </div>
+          </section>
+
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div>
               <h2 className="text-base font-semibold text-white">Default Search Provider (Personal)</h2>
               <p className="mt-0.5 text-xs text-zinc-400">
@@ -748,6 +842,59 @@ export function SettingsView({
                     onChange={setAllowDuplicates}
                     label="Toggle Allow Duplicate Tracks"
                   />
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        Pause When Voice Channel is Empty
+                      </p>
+                      <p className="text-xs text-zinc-400">
+                        Pause playback when the voice channel is empty and automatically resume when someone joins.
+                      </p>
+                    </div>
+                    <ThemeSwitch
+                      checked={pauseOnEmpty}
+                      onChange={setPauseOnEmpty}
+                      label="Toggle Server Pause When Voice Channel is Empty"
+                    />
+                  </div>
+
+                  <div
+                    className={`space-y-2 border-t border-white/8 pt-3 transition-opacity ${
+                      pauseOnEmpty ? "opacity-100" : "opacity-45"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-zinc-200">
+                        Continue Playing When Voice Channel is Empty
+                      </span>
+                      <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                        {formatEmptyVcDelay(pauseOnEmptySeconds)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={300}
+                      step={5}
+                      disabled={!pauseOnEmpty}
+                      value={pauseOnEmptySeconds}
+                      onChange={(e) => setPauseOnEmptySeconds(Number(e.target.value))}
+                      style={{ accentColor: "var(--cadence-accent)" }}
+                      aria-label="Server empty voice channel play duration"
+                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
+                      <span>0s</span>
+                      <span>1m</span>
+                      <span>2m</span>
+                      <span>3m</span>
+                      <span>4m</span>
+                      <span>5m</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 

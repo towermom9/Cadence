@@ -181,6 +181,13 @@ export class CadenceWsHub {
         type: "playerState",
         state: this.bot.music.serializePlayer(selectedGuildId, session.user.id),
       });
+      if (this.bot.isGuildAdmin(selectedGuildId, session.user.id)) {
+        const settings = this.db.getGuildSettings(selectedGuildId);
+        this.send(rawWs, {
+          type: "settings",
+          settings: { ...settings, roles: this.bot.getGuildRoles(selectedGuildId) },
+        });
+      }
     }
     this.sendPlaylists(rawWs, session.user.id);
     this.send(rawWs, {
@@ -292,6 +299,13 @@ export class CadenceWsHub {
             type: "playerState",
             state: this.bot.music.serializePlayer(msg.guildId, user.id),
           });
+          if (this.bot.isGuildAdmin(msg.guildId, user.id)) {
+            const settings = this.db.getGuildSettings(msg.guildId);
+            this.send(ws, {
+              type: "settings",
+              settings: { ...settings, roles: this.bot.getGuildRoles(msg.guildId) },
+            });
+          }
           return;
         }
 
@@ -581,8 +595,16 @@ export class CadenceWsHub {
             throw new Error("Server settings require Admin role, Manage Server permission, or Owner access.");
           }
           const updated = this.db.updateGuildSettings(msg.guildId, msg.settings);
-          if (updated.stay247) {
-            this.bot.music.clearInactivityTimer(msg.guildId);
+          this.bot.music.onGuildSettingsUpdated(msg.guildId);
+          if (
+            msg.settings.pauseOnEmpty !== undefined ||
+            msg.settings.pauseOnEmptySeconds !== undefined
+          ) {
+            const prefs = this.db.updateUserPreferences(user.id, {
+              pauseOnEmpty: updated.pauseOnEmpty,
+              pauseOnEmptySeconds: updated.pauseOnEmptySeconds,
+            });
+            this.send(ws, { type: "preferences", preferences: prefs });
           }
           this.send(ws, {
             type: "settings",
@@ -825,6 +847,31 @@ export class CadenceWsHub {
         case "updatePreferences": {
           const prefs = this.db.updateUserPreferences(user.id, msg.preferences);
           this.send(ws, { type: "preferences", preferences: prefs });
+          if (
+            meta.selectedGuildId &&
+            (msg.preferences.pauseOnEmpty !== undefined ||
+              msg.preferences.pauseOnEmptySeconds !== undefined) &&
+            (this.bot.isGuildAdmin(meta.selectedGuildId, user.id) ||
+              this.bot.music.isPrivileged(meta.selectedGuildId, user.id))
+          ) {
+            const updatedSettings = this.db.updateGuildSettings(meta.selectedGuildId, {
+              ...(msg.preferences.pauseOnEmpty !== undefined
+                ? { pauseOnEmpty: prefs.pauseOnEmpty }
+                : {}),
+              ...(msg.preferences.pauseOnEmptySeconds !== undefined
+                ? { pauseOnEmptySeconds: prefs.pauseOnEmptySeconds }
+                : {}),
+            });
+            this.bot.music.onGuildSettingsUpdated(meta.selectedGuildId);
+            this.send(ws, {
+              type: "settings",
+              settings: {
+                ...updatedSettings,
+                roles: this.bot.getGuildRoles(meta.selectedGuildId),
+              },
+            });
+            this.broadcastGuild(meta.selectedGuildId);
+          }
           if (msg.preferences.playlistSort) {
             this.sendPlaylists(ws, user.id);
           }

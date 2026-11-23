@@ -61,6 +61,8 @@ export const DEFAULT_PREFERENCES: UserPreferencesDTO = {
   lyricsAutoScroll: true,
   autoplayClickBehavior: "play_now_here",
   defaultSearchSource: "ytmsearch",
+  pauseOnEmpty: true,
+  pauseOnEmptySeconds: 0,
 };
 
 const STORAGE_KEY = "cadence:prefs";
@@ -113,6 +115,10 @@ function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined
     typeof raw.artworkSeekSeconds === "number" && Number.isFinite(raw.artworkSeekSeconds)
       ? Math.max(5, Math.min(30, Math.round(raw.artworkSeekSeconds)))
       : DEFAULT_PREFERENCES.artworkSeekSeconds;
+  const emptyPauseSecs =
+    typeof raw.pauseOnEmptySeconds === "number" && Number.isFinite(raw.pauseOnEmptySeconds)
+      ? Math.max(0, Math.min(300, Math.round(raw.pauseOnEmptySeconds)))
+      : DEFAULT_PREFERENCES.pauseOnEmptySeconds;
   return {
     playlistSort: raw.playlistSort ?? DEFAULT_PREFERENCES.playlistSort,
     themeAccent:
@@ -142,6 +148,11 @@ function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined
       raw.defaultSearchSource && VALID_SEARCH_SOURCES.has(raw.defaultSearchSource)
         ? raw.defaultSearchSource
         : DEFAULT_PREFERENCES.defaultSearchSource,
+    pauseOnEmpty:
+      typeof raw.pauseOnEmpty === "boolean"
+        ? raw.pauseOnEmpty
+        : DEFAULT_PREFERENCES.pauseOnEmpty,
+    pauseOnEmptySeconds: emptyPauseSecs,
   };
 }
 

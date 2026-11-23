@@ -48,6 +48,8 @@ export interface UserPreferencesDTO {
   lyricsAutoScroll: boolean;
   autoplayClickBehavior: AutoplayClickBehavior;
   defaultSearchSource: SearchSource;
+  pauseOnEmpty: boolean;
+  pauseOnEmptySeconds: number;
 }
 
 export type FilterPreset =
@@ -94,6 +96,8 @@ export interface PlayerStateDTO {
   connected: boolean;
   playing: boolean;
   paused: boolean;
+  autoPausedEmptyVc?: boolean;
+  emptyVcPauseAt?: number | null;
   position: number;
   volume: number;
   repeatMode: RepeatModeType;
@@ -140,6 +144,8 @@ export interface GuildSettingsDTO {
   stay247: boolean;
   autoplay: boolean;
   allowDuplicates: boolean;
+  pauseOnEmpty: boolean;
+  pauseOnEmptySeconds: number;
   roles?: { id: string; name: string }[];
 }
 

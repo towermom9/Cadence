@@ -430,7 +430,7 @@ export function PlayerBar({
             </p>
             <p className="truncate text-xs text-zinc-400">
               {track
-                ? `${track.author}`
+                ? `${track.author}${playerState?.autoPausedEmptyVc && playerState?.paused ? " • Paused (Empty VC)" : ""}`
                 : playerState?.voiceChannelName
                   ? `Connected to #${playerState.voiceChannelName}`
                   : "Tap a song to play"}
@@ -561,6 +561,9 @@ export function PlayerBar({
                   <>
                     <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     <span> • {sourceLabel(track.sourceName)}</span>
+                    {playerState?.autoPausedEmptyVc && playerState?.paused && (
+                      <span className="text-amber-300"> • Paused (Empty VC)</span>
+                    )}
                   </>
                 ) : playerState?.voiceChannelName ? (
                   `Connected to #${playerState.voiceChannelName}`
