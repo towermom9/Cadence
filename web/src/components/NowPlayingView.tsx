@@ -375,10 +375,34 @@ export function NowPlayingView({
         return;
       }
 
+      if (source.section === "manual" && target.section === "current") {
+        markJustDragged();
+        if (pos === "above") {
+          onMoveQueueToPrevious(source.queueIndex, 0);
+        } else if (source.queueIndex !== 0) {
+          onMoveTrack(source.queueIndex, 0);
+        }
+        return;
+      }
+
+      if (source.section === "previous" && target.section === "current") {
+        markJustDragged();
+        if (pos === "above") {
+          if (source.prevIndex !== 0) {
+            onMovePreviousTrack(source.prevIndex, 0);
+          }
+        } else {
+          onMovePreviousToQueue(source.prevIndex, 0);
+        }
+        return;
+      }
+
       if (source.section === "current" && target.section === "manual") {
         const rawQueueIdx = pos === "below" ? target.queueIndex + 1 : target.queueIndex;
-        markJustDragged();
-        onMoveCurrentToQueue(Math.max(1, rawQueueIdx));
+        if (rawQueueIdx > 0) {
+          markJustDragged();
+          onMoveCurrentToQueue(rawQueueIdx);
+        }
         return;
       }
 
@@ -388,8 +412,10 @@ export function NowPlayingView({
           0,
           Math.min(previousEntries.length, previousEntries.length - rawDisplaySlot)
         );
-        markJustDragged();
-        onMoveCurrentToPrevious(insertPrevIdx);
+        if (insertPrevIdx > 0) {
+          markJustDragged();
+          onMoveCurrentToPrevious(insertPrevIdx);
+        }
       }
     },
     [

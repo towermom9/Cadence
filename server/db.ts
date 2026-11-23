@@ -102,6 +102,7 @@ interface GuildSettingsRow {
   default_volume: number;
   dj_role_id: string | null;
   access_role_ids_json?: string | null;
+  admin_role_ids_json?: string | null;
   stay_247: number;
   autoplay: number;
   allow_duplicates: number;
@@ -279,6 +280,11 @@ export class CadenceDatabase {
         `ALTER TABLE guild_settings ADD COLUMN access_role_ids_json TEXT NOT NULL DEFAULT '[]'`
       );
     }
+    if (!guildCols.includes("admin_role_ids_json")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN admin_role_ids_json TEXT NOT NULL DEFAULT '[]'`
+      );
+    }
   }
 
   private parseRoleIdList(raw: string | null | undefined): string[] {
@@ -304,7 +310,7 @@ export class CadenceDatabase {
   getGuildSettings(guildId: string): GuildSettingsDTO {
     const row = this.db
       .query<GuildSettingsRow, [string]>(
-        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, stay_247, autoplay, allow_duplicates
+        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates
          FROM guild_settings WHERE guild_id = ?`
       )
       .get(guildId);
@@ -316,6 +322,7 @@ export class CadenceDatabase {
         defaultVolume: 100,
         djRoleId: null,
         accessRoleIds: [],
+        adminRoleIds: [],
         stay247: false,
         autoplay: false,
         allowDuplicates: true,
@@ -328,6 +335,7 @@ export class CadenceDatabase {
       defaultVolume: Math.max(0, Math.min(100, row.default_volume)),
       djRoleId: row.dj_role_id,
       accessRoleIds: this.parseRoleIdList(row.access_role_ids_json),
+      adminRoleIds: this.parseRoleIdList(row.admin_role_ids_json),
       stay247: row.stay_247 === 1,
       autoplay: row.autoplay === 1,
       allowDuplicates: row.allow_duplicates === 1,
@@ -339,15 +347,18 @@ export class CadenceDatabase {
     patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>
   ): GuildSettingsDTO {
     const current = this.getGuildSettings(guildId);
-    const sanitizedAccessRoles = Array.isArray(patch.accessRoleIds)
-      ? Array.from(
-          new Set(
-            patch.accessRoleIds
-              .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-              .map((id) => id.trim())
-          )
-        ).slice(0, 25)
-      : current.accessRoleIds ?? [];
+    const sanitizeRoleList = (list: unknown, fallback: string[]) =>
+      Array.isArray(list)
+        ? Array.from(
+            new Set(
+              list
+                .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+                .map((id) => id.trim())
+            )
+          ).slice(0, 25)
+        : fallback;
+    const sanitizedAccessRoles = sanitizeRoleList(patch.accessRoleIds, current.accessRoleIds ?? []);
+    const sanitizedAdminRoles = sanitizeRoleList(patch.adminRoleIds, current.adminRoleIds ?? []);
     const next: GuildSettingsDTO = {
       guildId,
       prefix:
@@ -360,6 +371,7 @@ export class CadenceDatabase {
           : current.defaultVolume,
       djRoleId: patch.djRoleId === undefined ? current.djRoleId : patch.djRoleId,
       accessRoleIds: sanitizedAccessRoles,
+      adminRoleIds: sanitizedAdminRoles,
       stay247: typeof patch.stay247 === "boolean" ? patch.stay247 : current.stay247,
       autoplay: typeof patch.autoplay === "boolean" ? patch.autoplay : current.autoplay,
       allowDuplicates:
@@ -370,13 +382,14 @@ export class CadenceDatabase {
 
     this.db
       .query(
-        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, stay_247, autoplay, allow_duplicates)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id) DO UPDATE SET
            prefix = excluded.prefix,
            default_volume = excluded.default_volume,
            dj_role_id = excluded.dj_role_id,
            access_role_ids_json = excluded.access_role_ids_json,
+           admin_role_ids_json = excluded.admin_role_ids_json,
            stay_247 = excluded.stay_247,
            autoplay = excluded.autoplay,
            allow_duplicates = excluded.allow_duplicates`
@@ -387,6 +400,7 @@ export class CadenceDatabase {
         next.defaultVolume,
         next.djRoleId,
         JSON.stringify(next.accessRoleIds ?? []),
+        JSON.stringify(next.adminRoleIds ?? []),
         next.stay247 ? 1 : 0,
         next.autoplay ? 1 : 0,
         next.allowDuplicates ? 1 : 0

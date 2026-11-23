@@ -36,6 +36,7 @@ interface MeResponse {
   authenticated: boolean;
   user?: UserProfileDTO;
   isBotOwner?: boolean;
+  canAccessSystem?: boolean;
   meta: AppMetaDTO;
   guilds?: GuildSummaryDTO[];
   preferences?: UserPreferencesDTO;
@@ -45,6 +46,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserProfileDTO | null>(null);
   const [isBotOwner, setIsBotOwner] = useState(false);
+  const [canAccessSystem, setCanAccessSystem] = useState(false);
   const [meta, setMeta] = useState<AppMetaDTO | null>(null);
   const [guilds, setGuilds] = useState<GuildSummaryDTO[]>([]);
   const [initialPreferences, setInitialPreferences] = useState<UserPreferencesDTO | null>(null);
@@ -73,6 +75,7 @@ export function App() {
         const data = (await res.json()) as MeResponse;
         setUser(data.user ?? null);
         setIsBotOwner(Boolean(data.isBotOwner));
+        setCanAccessSystem(Boolean(data.canAccessSystem));
         setMeta(data.meta);
         setGuilds(data.guilds ?? []);
         if (data.preferences) {
@@ -81,6 +84,7 @@ export function App() {
       } else {
         setUser(null);
         setIsBotOwner(false);
+        setCanAccessSystem(false);
         const metaRes = await fetch("/api/meta");
         if (metaRes.ok) {
           setMeta((await metaRes.json()) as AppMetaDTO);
@@ -770,9 +774,12 @@ export function App() {
                   <SettingsView
                     guildId={socket.selectedGuildId}
                     guildName={currentGuild?.name || "Server"}
+                    username={user.username}
                     canManage={Boolean(currentGuild?.canManage)}
                     isBotOwner={isBotOwner}
                     isGuildOwner={Boolean(currentGuild?.isOwner)}
+                    canAccessSystem={canAccessSystem}
+                    accessTier={currentGuild?.accessTier}
                     settings={socket.settings}
                     preferences={socket.preferences}
                     onUpdatePreferences={socket.updatePreferences}

@@ -108,6 +108,14 @@ export interface PlayerStateDTO {
   updatedAt: number;
 }
 
+export type AccessTier =
+  | "bot_owner"
+  | "server_owner"
+  | "admin"
+  | "dj"
+  | "user"
+  | "none";
+
 export interface GuildSummaryDTO {
   id: string;
   name: string;
@@ -116,6 +124,7 @@ export interface GuildSummaryDTO {
   canManage: boolean;
   isOwner?: boolean;
   hasAccess?: boolean;
+  accessTier?: AccessTier;
   inVoice: boolean;
   hasActivePlayer: boolean;
   memberCount?: number;
@@ -127,6 +136,7 @@ export interface GuildSettingsDTO {
   defaultVolume: number;
   djRoleId: string | null;
   accessRoleIds?: string[];
+  adminRoleIds?: string[];
   stay247: boolean;
   autoplay: boolean;
   allowDuplicates: boolean;

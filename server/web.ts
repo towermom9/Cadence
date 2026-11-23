@@ -27,13 +27,6 @@ import { cleanArtistTag } from "@shared/artists";
 import { config, VALID_SEARCH_SOURCES } from "./config";
 import type { CadenceDatabase } from "./db";
 import { formatLogsText, getLogCount, getRecentLogs } from "./logger";
-import {
-  getUnlockExpiresAt,
-  isScopeUnlocked,
-  requestOtp,
-  revokeSessionUnlocks,
-  verifyOtp,
-} from "./otp";
 import { registerSetupRoutes } from "./setup";
 import type { CadenceWsHub } from "./ws";
 
@@ -226,7 +219,6 @@ export function createWebApp(
   app.post("/api/auth/logout", (c) => {
     const session = getSessionFromContext(c, db);
     if (session) {
-      revokeSessionUnlocks(session.id);
       db.deleteSession(session.id);
       clearGuildCacheForUser(session.user.id);
     }
@@ -252,11 +244,15 @@ export function createWebApp(
 
     const oauthGuilds = await fetchDiscordUserGuilds(session.user.id, session.accessToken);
     const guilds = bot.getUserGuildContext(session.user.id, oauthGuilds);
+    const isBotOwner = bot.isBotOwner(session.user.id);
+    const canAccessSystem =
+      isBotOwner || bot.isAnyGuildOwner(session.user.id) || guilds.some((g) => g.isOwner);
 
     return c.json({
       authenticated: true,
       user: session.user,
-      isBotOwner: bot.isBotOwner(session.user.id),
+      isBotOwner,
+      canAccessSystem,
       meta: bot.getBotMeta(probe),
       guilds,
       preferences,
@@ -624,121 +620,13 @@ export function createWebApp(
     };
   };
 
-  const checkOtpScope = (
-    rawScope: string,
-    userId: string
-  ): { scope: string; allowed: boolean; label: string } | null => {
-    const scope = rawScope.trim();
-    if (scope === "system") {
-      return {
-        scope,
-        allowed: bot.isBotOwner(userId),
-        label: "System Settings & Debug Logs",
-      };
-    }
-    if (scope.startsWith("server:")) {
-      const guildId = scope.slice("server:".length).trim();
-      if (!guildId) return null;
-      const guild = bot.client.guilds.cache.get(guildId);
-      return {
-        scope: `server:${guildId}`,
-        allowed: bot.isBotOwner(userId) || bot.isGuildOwner(guildId, userId),
-        label: `Server Settings (${guild?.name || guildId})`,
-      };
-    }
-    return null;
-  };
-
-  app.get("/api/otp/status", (c) => {
-    const session = getSessionFromContext(c, db);
-    if (!session) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-    const info = checkOtpScope(c.req.query("scope") || "", session.user.id);
-    if (!info) {
-      return c.json({ error: "Invalid OTP scope" }, 400);
-    }
-    const unlocked = info.allowed && isScopeUnlocked(session.id, session.user.id, info.scope);
-    const expiresAt = unlocked ? getUnlockExpiresAt(session.id, session.user.id, info.scope) : null;
-    return c.json({
-      scope: info.scope,
-      allowed: info.allowed,
-      unlocked,
-      expiresAt,
-    });
-  });
-
-  app.post("/api/otp/request", async (c) => {
-    const session = getSessionFromContext(c, db);
-    if (!session) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-    let body: { scope?: string } = {};
-    try {
-      body = (await c.req.json()) as { scope?: string };
-    } catch {
-      return c.json({ error: "Invalid JSON payload" }, 400);
-    }
-    const info = checkOtpScope(body.scope || "", session.user.id);
-    if (!info) {
-      return c.json({ error: "Invalid OTP scope" }, 400);
-    }
-    if (!info.allowed) {
-      return c.json({ error: "You are not authorized to unlock this section." }, 403);
-    }
-
-    try {
-      const { code, expiresAt } = requestOtp(session.id, session.user.id, info.scope);
-      await bot.sendOtpDm(session.user.id, code, info.label);
-      return c.json({ ok: true, expiresAt });
-    } catch (error) {
-      return c.json(
-        { error: error instanceof Error ? error.message : "Failed to send OTP." },
-        400
-      );
-    }
-  });
-
-  app.post("/api/otp/verify", async (c) => {
-    const session = getSessionFromContext(c, db);
-    if (!session) {
-      return c.json({ error: "Unauthorized" }, 401);
-    }
-    let body: { scope?: string; code?: string } = {};
-    try {
-      body = (await c.req.json()) as { scope?: string; code?: string };
-    } catch {
-      return c.json({ error: "Invalid JSON payload" }, 400);
-    }
-    const info = checkOtpScope(body.scope || "", session.user.id);
-    if (!info) {
-      return c.json({ error: "Invalid OTP scope" }, 400);
-    }
-    if (!info.allowed) {
-      return c.json({ error: "You are not authorized to unlock this section." }, 403);
-    }
-
-    try {
-      const { expiresAt } = verifyOtp(session.id, session.user.id, info.scope, body.code || "");
-      return c.json({ ok: true, unlocked: true, expiresAt });
-    } catch (error) {
-      return c.json(
-        { error: error instanceof Error ? error.message : "OTP verification failed." },
-        400
-      );
-    }
-  });
-
   app.get("/api/system/info", (c) => {
     const session = getSessionFromContext(c, db);
     if (!session) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!bot.isBotOwner(session.user.id)) {
-      return c.json({ error: "Bot owner access required." }, 403);
-    }
-    if (!isScopeUnlocked(session.id, session.user.id, "system")) {
-      return c.json({ error: "OTP verification required." }, 403);
+    if (!bot.isBotOwner(session.user.id) && !bot.isAnyGuildOwner(session.user.id)) {
+      return c.json({ error: "Server owner or bot owner access required." }, 403);
     }
     return c.json(buildSystemInfo());
   });
@@ -748,11 +636,8 @@ export function createWebApp(
     if (!session) {
       return c.json({ error: "Unauthorized" }, 401);
     }
-    if (!bot.isBotOwner(session.user.id)) {
-      return c.json({ error: "Bot owner access required." }, 403);
-    }
-    if (!isScopeUnlocked(session.id, session.user.id, "system")) {
-      return c.json({ error: "OTP verification required." }, 403);
+    if (!bot.isBotOwner(session.user.id) && !bot.isAnyGuildOwner(session.user.id)) {
+      return c.json({ error: "Server owner or bot owner access required." }, 403);
     }
     const info = buildSystemInfo();
     if (c.req.query("download") === "1") {

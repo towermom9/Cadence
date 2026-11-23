@@ -9,7 +9,6 @@ import { getSessionFromContext } from "./auth";
 import type { CadenceBot } from "./bot";
 import type { CadenceDatabase, SessionRecord } from "./db";
 import { fetchLyrics } from "./lyrics";
-import { isScopeUnlocked } from "./otp";
 
 type RawSocket = ServerWebSocket<unknown>;
 
@@ -565,11 +564,8 @@ export class CadenceWsHub {
 
         case "getSettings": {
           await this.ensureMemberInGuild(msg.guildId, user.id);
-          if (!this.bot.isBotOwner(user.id) && !this.bot.isGuildOwner(msg.guildId, user.id)) {
-            throw new Error("Server settings are restricted to the server owner or bot owner.");
-          }
-          if (!isScopeUnlocked(meta.session.id, user.id, `server:${msg.guildId}`)) {
-            throw new Error("Server settings require OTP verification.");
+          if (!this.bot.isGuildAdmin(msg.guildId, user.id)) {
+            throw new Error("Server settings require Admin role, Manage Server permission, or Owner access.");
           }
           const settings = this.db.getGuildSettings(msg.guildId);
           this.send(ws, {
@@ -581,11 +577,8 @@ export class CadenceWsHub {
 
         case "updateSettings": {
           await this.ensureMemberInGuild(msg.guildId, user.id);
-          if (!this.bot.isBotOwner(user.id) && !this.bot.isGuildOwner(msg.guildId, user.id)) {
-            throw new Error("Server settings are restricted to the server owner or bot owner.");
-          }
-          if (!isScopeUnlocked(meta.session.id, user.id, `server:${msg.guildId}`)) {
-            throw new Error("Server settings require OTP verification.");
+          if (!this.bot.isGuildAdmin(msg.guildId, user.id)) {
+            throw new Error("Server settings require Admin role, Manage Server permission, or Owner access.");
           }
           const updated = this.db.updateGuildSettings(msg.guildId, msg.settings);
           if (updated.stay247) {

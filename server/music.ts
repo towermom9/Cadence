@@ -1303,20 +1303,19 @@ export class MusicService {
     }
     const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
     const manualLen = firstAutoIdx === -1 ? player.queue.tracks.length : firstAutoIdx;
-    if (manualLen === 0) {
+    const shiftCount = Math.max(0, Math.min(Math.floor(queueIndex), manualLen));
+    if (shiftCount === 0) {
       return;
     }
 
-    const oldCurrent = player.queue.current;
-    this.clearAutoplayFlag(oldCurrent);
-
-    const nextTrack = player.queue.tracks[0];
-    this.clearAutoplayFlag(nextTrack);
-    await player.queue.splice(0, 1);
-
-    const insertAt = Math.max(0, Math.min(queueIndex - 1, manualLen - 1));
-    await player.queue.add(oldCurrent, insertAt);
-    await player.play({ clientTrack: nextTrack, paused: false });
+    // Keep the currently playing song playing uninterrupted; shift the tracks
+    // passed over from Up Next into Previous (above current) in chronological order.
+    const moved = player.queue.tracks.slice(0, shiftCount);
+    await player.queue.splice(0, shiftCount);
+    for (const track of moved) {
+      this.clearAutoplayFlag(track);
+      this.pushPrevious(player, track);
+    }
     await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
@@ -1326,30 +1325,23 @@ export class MusicService {
     if (!player || !player.queue.current) {
       throw new Error("Nothing is currently playing.");
     }
-
-    const oldCurrent = player.queue.current;
-    this.clearAutoplayFlag(oldCurrent);
-
-    const insertIdx = Math.max(0, Math.min(previousIndex, player.queue.previous.length));
-    player.queue.previous.splice(insertIdx, 0, oldCurrent as Track);
-    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
-    if (player.queue.previous.length > maxPrev) {
-      player.queue.previous.splice(maxPrev);
+    const shiftCount = Math.max(
+      0,
+      Math.min(Math.floor(previousIndex), player.queue.previous.length)
+    );
+    if (shiftCount === 0) {
+      return;
     }
 
-    if (player.queue.tracks.length > 0) {
-      const nextTrack = player.queue.tracks[0];
-      this.clearAutoplayFlag(nextTrack);
-      await player.queue.splice(0, 1);
-      await player.play({ clientTrack: nextTrack, paused: false });
-    } else {
-      await player.stopPlaying(true, false);
-      player.queue.current = null;
-      player.playing = false;
-      player.paused = false;
-      this.scheduleInactivityCheck(guildId);
+    // Keep the currently playing song playing uninterrupted; shift the tracks
+    // passed over from Previous into the front of Up Next (below current) in chronological order.
+    const moved = player.queue.previous.splice(0, shiftCount).reverse();
+    for (const track of moved) {
+      this.clearAutoplayFlag(track);
     }
-
+    if (moved.length > 0) {
+      await player.queue.add(moved, 0);
+    }
     await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
@@ -1913,8 +1905,12 @@ export class MusicService {
   }
 
   isPrivileged(guildId: string, userId: string): boolean {
+    if (config.ownerUserId && config.ownerUserId === userId) {
+      return true;
+    }
     const guild = this.client.guilds.cache.get(guildId);
     if (!guild) return false;
+    if (guild.ownerId === userId) return true;
 
     const member = guild.members.cache.get(userId);
     if (!member) return false;
@@ -1927,6 +1923,9 @@ export class MusicService {
     }
 
     const settings = this.db.getGuildSettings(guildId);
+    if ((settings.adminRoleIds ?? []).some((roleId) => member.roles.cache.has(roleId))) {
+      return true;
+    }
     if (settings.djRoleId && member.roles.cache.has(settings.djRoleId)) {
       return true;
     }

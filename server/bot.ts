@@ -208,8 +208,33 @@ export class CadenceBot {
     return Boolean(guild && guild.ownerId === userId);
   }
 
-  hasGuildAccess(guildId: string, userId: string): boolean {
+  isAnyGuildOwner(userId: string): boolean {
+    if (!userId) return false;
+    for (const guild of this.client.guilds.cache.values()) {
+      if (guild.ownerId === userId) return true;
+    }
+    return false;
+  }
+
+  isGuildAdmin(guildId: string, userId: string): boolean {
     if (this.isBotOwner(userId) || this.isGuildOwner(guildId, userId)) {
+      return true;
+    }
+    const guild = this.client.guilds.cache.get(guildId);
+    const member = guild?.members.cache.get(userId);
+    if (!member) return false;
+    if (
+      member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+      member.permissions.has(PermissionsBitField.Flags.ManageGuild)
+    ) {
+      return true;
+    }
+    const settings = this.db.getGuildSettings(guildId);
+    return (settings.adminRoleIds ?? []).some((roleId) => member.roles.cache.has(roleId));
+  }
+
+  hasGuildAccess(guildId: string, userId: string): boolean {
+    if (this.isGuildAdmin(guildId, userId)) {
       return true;
     }
     const settings = this.db.getGuildSettings(guildId);
@@ -220,30 +245,24 @@ export class CadenceBot {
     const guild = this.client.guilds.cache.get(guildId);
     const member = guild?.members.cache.get(userId);
     if (!member) return false;
-    if (member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+    if (settings.djRoleId && member.roles.cache.has(settings.djRoleId)) {
       return true;
     }
     return allowedRoles.some((roleId) => member.roles.cache.has(roleId));
   }
 
-  async sendOtpDm(userId: string, code: string, scopeLabel: string): Promise<void> {
-    if (!this.isReady()) {
-      throw new Error("Discord bot is not ready to send DMs yet.");
+  getUserAccessTier(guildId: string, userId: string): import("@shared/types").AccessTier {
+    if (this.isBotOwner(userId)) return "bot_owner";
+    if (this.isGuildOwner(guildId, userId)) return "server_owner";
+    if (this.isGuildAdmin(guildId, userId)) return "admin";
+    const settings = this.db.getGuildSettings(guildId);
+    const guild = this.client.guilds.cache.get(guildId);
+    const member = guild?.members.cache.get(userId);
+    if (settings.djRoleId && member?.roles.cache.has(settings.djRoleId)) {
+      return "dj";
     }
-    try {
-      const user = await this.client.users.fetch(userId);
-      const embed = new EmbedBuilder()
-        .setColor(BRAND_COLOR)
-        .setTitle("Cadence Security Verification")
-        .setDescription(
-          `Use this one-time passcode to unlock **${scopeLabel}**:\n\n# \`${code}\`\n\nThis code expires in **5 minutes**. If you did not request this, ignore this message.`
-        );
-      await user.send({ embeds: [embed] });
-    } catch {
-      throw new Error(
-        "Could not send OTP to your Discord DMs. Enable Direct Messages from server members in Discord privacy settings and try again."
-      );
-    }
+    if (this.hasGuildAccess(guildId, userId)) return "user";
+    return "none";
   }
 
   async probeLavalink(): Promise<{ reachable: boolean; version: string | null }> {
@@ -341,7 +360,19 @@ export class CadenceBot {
       const player = botGuild ? this.music.getPlayer(og.id) : undefined;
       const hasActivePlayer = Boolean(player && (player.playing || player.paused || player.queue.current));
       const isOwner = Boolean(og.owner) || botGuild?.ownerId === userId;
+      const effectiveCanManage = botGuild
+        ? this.isGuildAdmin(og.id, userId)
+        : canManage || this.isBotOwner(userId);
       const hasAccess = botGuild ? this.hasGuildAccess(og.id, userId) : true;
+      const accessTier = botGuild
+        ? this.getUserAccessTier(og.id, userId)
+        : this.isBotOwner(userId)
+          ? "bot_owner"
+          : isOwner
+            ? "server_owner"
+            : canManage
+              ? "admin"
+              : "user";
 
       summaries.push({
         id: og.id,
@@ -350,9 +381,10 @@ export class CadenceBot {
           ? `https://cdn.discordapp.com/icons/${og.id}/${og.icon}.webp?size=128`
           : botGuild?.iconURL({ size: 128 }) ?? null,
         botPresent: Boolean(botGuild),
-        canManage,
+        canManage: effectiveCanManage,
         isOwner,
         hasAccess,
+        accessTier,
         inVoice,
         hasActivePlayer,
         memberCount: botGuild?.memberCount,
@@ -1498,7 +1530,7 @@ export class CadenceBot {
                 name: "Playlists & Utility",
                 value: [
                   "`/playlist list|create|add|play|delete` — Manage personal playlists",
-                  "`/settings` — Configure server settings (Server / Bot Owner only)",
+                  "`/settings` — Configure server settings (Admin / Owner)",
                   "`/dashboard`, `/ping`, `/help`",
                 ].join("\n"),
               }
@@ -1606,8 +1638,8 @@ export class CadenceBot {
     const guildId = interaction.guildId!;
     const sub = interaction.options.getSubcommand();
 
-    if (!this.isBotOwner(member.id) && !this.isGuildOwner(guildId, member.id)) {
-      throw new Error("Server settings are restricted to the server owner or bot owner.");
+    if (!this.isGuildAdmin(guildId, member.id)) {
+      throw new Error("Server settings require an Admin role, Manage Server permission, or Owner access.");
     }
 
     if (sub === "view") {
