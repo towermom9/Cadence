@@ -7,7 +7,7 @@
 <h1 align="center">Cadence</h1>
 
 <p align="center">
-  <strong>All-in-one Discord music bot &amp; real-time YouTube Music–style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong>
+  <strong>All-in-one Discord music bot &amp; real-time YouTube Music style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong>
 </p>
 
 | Docker Packages (GHCR) | Build & Release Status |
@@ -27,7 +27,7 @@
 
 <div align="left">
 
-A free and open-source Discord music bot and real-time web dashboard inspired by [Vocard](https://github.com/ChocoMeow/Vocard) & [Vocard-Dashboard](https://github.com/ChocoMeow/Vocard-Dashboard). Cadence unifies the Discord bot, OAuth2 + WebSocket API server, YouTube Music–inspired web app, and embedded `bun:sqlite` database into a **single process**, paired with a self-contained **Lavalink v4** audio stack.
+A free and open-source Discord music bot and real-time web dashboard inspired by [Vocard](https://github.com/ChocoMeow/Vocard) & [Vocard-Dashboard](https://github.com/ChocoMeow/Vocard-Dashboard). Cadence unifies the Discord bot, OAuth2 + WebSocket API server, YouTube Music inspired web app, and embedded `bun:sqlite` database into a **single process**, paired with a self-contained **Lavalink v4** audio stack.
 
 ---
 
@@ -36,7 +36,7 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 ### Cadence's core highlights:
 - `Unified Single-Process Architecture` running the Discord bot (`discord.js`), HTTP/OAuth2 + WebSocket server (`Hono` on `Bun`), React 19 web dashboard, and `bun:sqlite` storage in one lightweight container—no MongoDB or IPC bridge required.
 - `Pre-Bundled Self-Contained Lavalink Image` that automatically resolves and bundles the latest `youtube-plugin` (beta/snapshot), `LavaSrc`, and `LavaLyrics` JARs from `maven.lavalink.dev` for ~7-second cold starts and zero host config file mounts.
-- `YouTube Music–Inspired Web Dashboard` with real-time 60fps progress interpolation, instant logarithmic volume curve (`x^1.6`), live Up Next / Lyrics / Related tabs, right-click context menus, and mobile PWA bottom-bar navigation.
+- `YouTube Music Inspired Web Dashboard` with real-time 60fps progress interpolation, instant logarithmic volume curve (`x^1.6`), live Up Next / Lyrics / Related tabs, right-click context menus, and mobile PWA bottom-bar navigation.
 - `True Timeline Queue with Full Drag & Drop` supporting past history, the active track, and upcoming queue items—drag the currently playing song anywhere in the timeline without interrupting playback, and keep manual queue tracks strictly separated from Autoplay suggestions.
 - `Smart Autoplay with 7 Moods` (`All`, `Familiar`, `Discover`, `Popular`, `Deep Cuts`, `Chill`, `Upbeat`) powered by listener history, liked tracks, and YouTube Music radio mixes, with customizable click behavior (`Play now`, `Play next`, or `Add to end`).
 - `Synced ELRC & LRC Lyrics` via LavaLyrics and LRCLIB with word-tag stripping, click-any-line-to-seek, and smooth auto-scroll that automatically pauses when you scroll manually.
@@ -56,10 +56,10 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 - **Personal Library & Playlists**:
   - Built-in **Liked Music** auto-pinned playlist synced with the `❤️` button across the web player, queue hover actions, and Discord controller.
   - **Online Playlist Import & One-Click Sync** for YouTube, YouTube Music, Spotify, SoundCloud, and Deezer playlist URLs.
-  - **Drag-and-Drop Track Reordering** inside playlists and **6 Library Sort Modes** (`Recent activity`, `Recently saved`, `Recently played`, `Recent sync`, `Manual drag order`, `A–Z`) shared between the sidebar and Library view.
+  - **Drag-and-Drop Track Reordering** inside playlists and **6 Library Sort Modes** (`Recent activity`, `Recently saved`, `Recently played`, `Recent sync`, `Manual drag order`, `A-Z`) shared between the sidebar and Library view.
 - **Power-User Controls**:
-  - Click artwork to Play/Pause with optional ±5s–30s floating seek buttons.
-  - Direct numeric volume percentage input (`0%–100%`) alongside the smooth slider.
+  - Click artwork to Play/Pause with optional ±5s-30s floating seek buttons.
+  - Direct numeric volume percentage input (`0%-100%`) alongside the smooth slider.
   - Keyboard shortcuts modal (`?` or `Shift + /`) with Vim-style navigation (`g h`, `g e`, `g l`, `g s`) and media keys.
   - Persistent UI preferences saved across both SQLite and browser cookies.
 
