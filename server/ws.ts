@@ -837,6 +837,18 @@ export class CadenceWsHub {
           this.sendToast(ws, "info", "Play history cleared");
           return;
         }
+
+        case "removeHistoryEntry": {
+          const removed = this.db.removePlayHistoryEntry(user.id, {
+            historyId: msg.historyId,
+            trackIdentifier: msg.trackIdentifier,
+          });
+          this.send(ws, { type: "history", entries: this.db.getPlayHistory(user.id) });
+          if (removed) {
+            this.sendToast(ws, "info", "Removed from play history");
+          }
+          return;
+        }
       }
     } catch (error) {
       console.error("[WS] Failed to handle message:", msg.type, error);

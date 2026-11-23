@@ -12,11 +12,11 @@ plugins:
         allowDirectPlaylistIds: true
         clients:
             - MUSIC
-            - IOS
-            - TV
+            - WEB
             - ANDROID_VR
             - MWEB
-            - WEB
+            - IOS
+            - TV
             - WEBEMBEDDED
             - TVHTML5_SIMPLY
         oauth:

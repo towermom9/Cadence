@@ -581,5 +581,11 @@ export function useCadenceSocket(
       send({ type: "playPlaylist", guildId: selectedGuildId, playlistId, shuffle, startIndex }),
     refreshHistory: () => send({ type: "getHistory" }),
     clearHistory: () => send({ type: "clearHistory" }),
+    removeHistoryEntry: (opts: { historyId?: number; trackIdentifier?: string }) =>
+      send({
+        type: "removeHistoryEntry",
+        historyId: opts.historyId,
+        trackIdentifier: opts.trackIdentifier,
+      }),
   };
 }

@@ -347,6 +347,7 @@ export type WsClientMessage =
   | { type: "updatePreferences"; preferences: Partial<UserPreferencesDTO> }
   | { type: "getHistory" }
   | { type: "clearHistory" }
+  | { type: "removeHistoryEntry"; historyId?: number; trackIdentifier?: string }
   | { type: "ping" };
 
 export type ToastLevel = "info" | "success" | "error";

@@ -533,6 +533,55 @@ export function createWebApp(
     return c.json({ query: q, suggestions, tracks } satisfies SearchSuggestResponseDTO);
   });
 
+  const exploreCache = new Map<string, { at: number; tracks: TrackDTO[] }>();
+  const EXPLORE_DEFAULT_QUERIES: Record<string, string> = {
+    ytmsearch: "top global hits",
+    ytsearch: "trending music video",
+    spsearch: "today top hits",
+    scsearch: "electronic chill remix",
+    dzsearch: "top hits",
+  };
+
+  app.get("/api/explore", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const rawSource = (c.req.query("source") || "ytmsearch") as SearchSource;
+    const source: SearchSource =
+      VALID_SEARCH_SOURCES.has(rawSource) && rawSource !== "auto" ? rawSource : "ytmsearch";
+    const customQuery = (c.req.query("q") || "").trim();
+    const query = customQuery || EXPLORE_DEFAULT_QUERIES[source] || "top hits";
+    const cacheKey = `${source}:${query.toLowerCase()}`;
+    const forceRefresh = c.req.query("refresh") === "1";
+
+    if (!forceRefresh) {
+      const cached = exploreCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < 10 * 60 * 1000 && cached.tracks.length > 0) {
+        return c.json({ source, query, tracks: cached.tracks });
+      }
+    }
+
+    const requester = {
+      id: session.user.id,
+      username: session.user.globalName || session.user.username,
+      avatarUrl: session.user.avatarUrl,
+    };
+
+    try {
+      const { tracks } = await bot.music.search(query, source, requester);
+      const sliced = tracks.slice(0, 12);
+      if (sliced.length > 0) {
+        exploreCache.set(cacheKey, { at: Date.now(), tracks: sliced });
+      }
+      return c.json({ source, query, tracks: sliced });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to load explore tracks.";
+      return c.json({ error: msg, source, query, tracks: [] }, 502);
+    }
+  });
+
   app.get("/api/artist", async (c) => {
     const session = getSessionFromContext(c, db);
     if (!session) {

@@ -53,6 +53,7 @@ export function App() {
 
   const [activeView, setActiveView] = useState<MainView>("home");
   const prevViewRef = useRef<MainView>("home");
+  const [libraryTab, setLibraryTab] = useState<"playlists" | "history">("playlists");
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
@@ -566,6 +567,7 @@ export function App() {
         onRemovePreviousTrack={socket.removePreviousTrack}
         onDismissQueue={socket.dismissQueue}
         onRemoveFromPlaylist={socket.removeTrackFromPlaylist}
+        onRemoveFromHistory={socket.removeHistoryEntry}
         onPlayPlaylist={handlePlayPlaylist}
         onTogglePinPlaylist={socket.togglePinPlaylist}
         onSyncPlaylist={(id) => socket.syncPlaylist(id)}
@@ -696,6 +698,10 @@ export function App() {
                       navigateTo("playlist");
                     }}
                     onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
+                    onViewHistory={() => {
+                      setLibraryTab("history");
+                      navigateTo("library");
+                    }}
                     onClearHistory={socket.clearHistory}
                     onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}
@@ -704,7 +710,14 @@ export function App() {
                 )}
 
                 {activeView === "explore" && (
-                  <ExploreView onSearch={(q, src) => handleSearch(q, src)} />
+                  <ExploreView
+                    defaultSearchSource={socket.preferences.defaultSearchSource}
+                    onSearch={(q, src) => handleSearch(q, src)}
+                    onEnqueue={handleEnqueue}
+                    onOpenSaveModal={handleOpenSaveModal}
+                    onOpenArtist={handleOpenArtist}
+                    onTrackContextMenu={handleTrackContextMenu}
+                  />
                 )}
 
                 {activeView === "library" && (
@@ -712,6 +725,7 @@ export function App() {
                     playlists={sortedPlaylists}
                     playlistSort={socket.playlistSort}
                     history={socket.history}
+                    initialTab={libraryTab}
                     onCreatePlaylist={socket.createPlaylist}
                     onImportPlaylist={socket.importPlaylist}
                     onSetPlaylistSort={socket.setPlaylistSort}

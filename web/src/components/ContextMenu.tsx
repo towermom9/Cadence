@@ -29,6 +29,8 @@ export interface TrackMenuContext {
   isCurrent?: boolean;
   playlistId?: string;
   playlistTrackIndex?: number;
+  historyId?: number;
+  inHistory?: boolean;
 }
 
 export type ContextMenuState =
@@ -66,6 +68,7 @@ interface Props {
   onRemovePreviousTrack: (index: number) => void;
   onDismissQueue: () => void;
   onRemoveFromPlaylist: (playlistId: string, index: number) => void;
+  onRemoveFromHistory?: (opts: { historyId?: number; trackIdentifier?: string }) => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
   onTogglePinPlaylist: (playlistId: string) => void;
   onSyncPlaylist: (playlistId: string) => void;
@@ -121,6 +124,7 @@ export function ContextMenu({
   onRemovePreviousTrack,
   onDismissQueue,
   onRemoveFromPlaylist,
+  onRemoveFromHistory,
   onPlayPlaylist,
   onTogglePinPlaylist,
   onSyncPlaylist,
@@ -457,6 +461,26 @@ export function ContextMenu({
               >
                 <Trash2 className="h-4 w-4" />
                 <span>Remove from playlist</span>
+              </button>
+            </>
+          )}
+
+          {(menu.inHistory || typeof menu.historyId === "number") && onRemoveFromHistory && (
+            <>
+              <div className="my-1 border-t border-white/10" />
+              <button
+                type="button"
+                onClick={() => {
+                  onRemoveFromHistory({
+                    historyId: menu.historyId,
+                    trackIdentifier: menu.track.identifier,
+                  });
+                  onClose();
+                }}
+                className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Remove from history</span>
               </button>
             </>
           )}

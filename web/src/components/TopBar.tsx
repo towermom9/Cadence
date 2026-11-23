@@ -111,8 +111,18 @@ export function TopBar({
       searchInputRef.current?.focus();
       searchInputRef.current?.select();
     };
+    const onSetSearchSource = (e: Event) => {
+      const custom = e as CustomEvent<SearchSource>;
+      if (custom.detail) {
+        setSource(custom.detail);
+      }
+    };
     window.addEventListener("cadence:focus-search", onFocusSearch);
-    return () => window.removeEventListener("cadence:focus-search", onFocusSearch);
+    window.addEventListener("cadence:set-search-source", onSetSearchSource);
+    return () => {
+      window.removeEventListener("cadence:focus-search", onFocusSearch);
+      window.removeEventListener("cadence:set-search-source", onSetSearchSource);
+    };
   }, []);
 
   useEffect(() => {

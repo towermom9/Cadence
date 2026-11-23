@@ -189,7 +189,7 @@ export class MusicService {
       autoSkip: true,
       catchLifeCycleRejections: true,
       queueOptions: {
-        maxPreviousTracks: 25,
+        maxPreviousTracks: Number.MAX_SAFE_INTEGER,
       },
       playerOptions: {
         defaultSearchPlatform: config.defaultSearchSource as SearchPlatform,
@@ -544,10 +544,35 @@ export class MusicService {
           : (config.defaultSearchSource as SearchPlatform)
         : (source as SearchPlatform);
 
-    const result = await node.search(
-      resolvedSource ? { query: trimmed, source: resolvedSource } : { query: trimmed },
-      requester
-    );
+    let result;
+    try {
+      result = await node.search(
+        resolvedSource ? { query: trimmed, source: resolvedSource } : { query: trimmed },
+        requester
+      );
+    } catch (error) {
+      if (!isUrl(trimmed) && resolvedSource && resolvedSource !== "ytmsearch") {
+        result = await node.search({ query: trimmed, source: "ytmsearch" }, requester);
+      } else {
+        throw error;
+      }
+    }
+
+    if (
+      !isUrl(trimmed) &&
+      resolvedSource &&
+      resolvedSource !== "ytmsearch" &&
+      (result.loadType === "error" || result.loadType === "empty" || result.tracks.length === 0)
+    ) {
+      try {
+        const fallback = await node.search({ query: trimmed, source: "ytmsearch" }, requester);
+        if (fallback.loadType !== "error" && fallback.tracks.length > 0) {
+          result = fallback;
+        }
+      } catch {
+        // Keep original result if fallback also fails
+      }
+    }
 
     if (result.loadType === "error") {
       throw new Error(result.exception?.message || "Failed to load tracks from audio source.");
@@ -606,10 +631,6 @@ export class MusicService {
   ): void {
     if (!track) return;
     player.queue.previous.unshift(track as Track);
-    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
-    if (player.queue.previous.length > maxPrev) {
-      player.queue.previous.splice(maxPrev);
-    }
   }
 
   private async fetchRelatedLavalinkTracks(
@@ -1373,10 +1394,6 @@ export class MusicService {
 
     const insertIdx = Math.max(0, Math.min(previousIndex, player.queue.previous.length));
     player.queue.previous.splice(insertIdx, 0, target as Track);
-    const maxPrev = player.queue.options?.maxPreviousTracks || 25;
-    if (player.queue.previous.length > maxPrev) {
-      player.queue.previous.splice(maxPrev);
-    }
     await player.queue.utils.save();
     this.emitStateChange(guildId);
   }
@@ -2099,7 +2116,7 @@ export class MusicService {
       activeFilter: this.activeFilters.get(guildId) ?? "none",
       current: player.queue.current ? trackToDTO(player.queue.current) : null,
       queue: player.queue.tracks.map(trackToDTO),
-      previous: player.queue.previous.slice(0, 25).map(trackToDTO),
+      previous: player.queue.previous.map(trackToDTO),
       listeners,
       isPrivileged: userId ? this.isPrivileged(guildId, userId) : false,
       updatedAt: Date.now(),

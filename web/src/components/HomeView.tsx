@@ -28,6 +28,7 @@ interface Props {
   onReorderPinnedTracks: (trackIds: string[]) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
+  onViewHistory: () => void;
   onClearHistory: () => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
@@ -92,6 +93,7 @@ export function HomeView({
   onReorderPinnedTracks,
   onSelectPlaylist,
   onPlayPlaylist,
+  onViewHistory,
   onClearHistory,
   onOpenArtist,
   onTrackContextMenu,
@@ -226,20 +228,30 @@ export function HomeView({
           </div>
 
           {history.length > 0 && (
-            <button
-              type="button"
-              onClick={onClearHistory}
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Clear history
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onViewHistory}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+              >
+                View more
+              </button>
+              <button
+                type="button"
+                onClick={onClearHistory}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Clear history
+              </button>
+            </div>
           )}
         </div>
 
         {listenAgainItems.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
             {listenAgainItems.slice(0, 10).map(({ track, isPinned }) => {
+              const inHistory = history.some((h) => h.track.identifier === track.identifier);
               const isDragging = isPinned && dragPinnedId === track.identifier;
               const isDragTarget =
                 isPinned &&
@@ -282,7 +294,7 @@ export function HomeView({
                     if (justDraggedRef.current) return;
                     onEnqueue([track], "now");
                   }}
-                  onContextMenu={(e) => onTrackContextMenu(e, track)}
+                  onContextMenu={(e) => onTrackContextMenu(e, track, { inHistory })}
                   className={`group space-y-2.5 transition ${
                     isPinned ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
                   } ${isDragging ? "opacity-40" : ""}`}

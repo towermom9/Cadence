@@ -75,6 +75,10 @@ export function LibraryView({
   const sortRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
     if (!sortOpen) return;
     const onDocClick = (e: globalThis.MouseEvent) => {
       if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
@@ -453,7 +457,9 @@ export function LibraryView({
                 <div
                   key={entry.id}
                   onClick={() => onEnqueue([entry.track], "now")}
-                  onContextMenu={(e) => onTrackContextMenu(e, entry.track)}
+                  onContextMenu={(e) =>
+                    onTrackContextMenu(e, entry.track, { historyId: entry.id, inHistory: true })
+                  }
                   className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
                 >
                   <TrackArtwork
@@ -490,7 +496,9 @@ export function LibraryView({
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => onTrackContextMenu(e, entry.track)}
+                      onClick={(e) =>
+                        onTrackContextMenu(e, entry.track, { historyId: entry.id, inHistory: true })
+                      }
                       title="More options"
                       className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
                     >

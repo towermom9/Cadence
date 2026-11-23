@@ -1125,20 +1125,9 @@ export class CadenceDatabase {
     this.db
       .query(`INSERT INTO play_history (user_id, track_json, played_at) VALUES (?, ?, ?)`)
       .run(userId, JSON.stringify(track), now);
-
-    // Keep at most 50 recent tracks per user.
-    this.db
-      .query(
-        `DELETE FROM play_history
-         WHERE user_id = ?
-           AND id NOT IN (
-             SELECT id FROM play_history WHERE user_id = ? ORDER BY played_at DESC, id DESC LIMIT 50
-           )`
-      )
-      .run(userId, userId);
   }
 
-  getPlayHistory(userId: string, limit = 30): HistoryEntryDTO[] {
+  getPlayHistory(userId: string, limit = 1000): HistoryEntryDTO[] {
     const rows = this.db
       .query<HistoryRow, [string, number]>(
         `SELECT id, user_id, track_json, played_at
@@ -1159,6 +1148,47 @@ export class CadenceDatabase {
       }
     }
     return entries;
+  }
+
+  removePlayHistoryEntry(
+    userId: string,
+    options: { historyId?: number; trackIdentifier?: string }
+  ): boolean {
+    if (typeof options.historyId === "number") {
+      const res = this.db
+        .query(`DELETE FROM play_history WHERE user_id = ? AND id = ?`)
+        .run(userId, options.historyId);
+      if (res.changes > 0) return true;
+    }
+    if (options.trackIdentifier) {
+      const rows = this.db
+        .query<HistoryRow, [string]>(
+          `SELECT id, user_id, track_json, played_at FROM play_history WHERE user_id = ?`
+        )
+        .all(userId);
+      const idsToDelete: number[] = [];
+      for (const row of rows) {
+        try {
+          const track = JSON.parse(row.track_json) as TrackDTO;
+          if (track.identifier === options.trackIdentifier) {
+            idsToDelete.push(row.id);
+          }
+        } catch {
+          // Ignore malformed row
+        }
+      }
+      if (idsToDelete.length > 0) {
+        const delStmt = this.db.query(`DELETE FROM play_history WHERE user_id = ? AND id = ?`);
+        const tx = this.db.transaction((ids: number[]) => {
+          for (const id of ids) {
+            delStmt.run(userId, id);
+          }
+        });
+        tx(idsToDelete);
+        return true;
+      }
+    }
+    return false;
   }
 
   clearPlayHistory(userId: string): void {
