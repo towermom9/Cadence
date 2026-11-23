@@ -98,12 +98,31 @@ const ALLOWED_ARTWORK_HOSTS = new Set([
   "f4.bcbits.com",
 ]);
 
+const ALLOWED_ARTWORK_HOST_SUFFIXES = [
+  ".googleusercontent.com",
+  ".ggpht.com",
+  ".ytimg.com",
+  ".scdn.co",
+  ".spotifycdn.com",
+  ".sndcdn.com",
+  ".discordapp.com",
+  ".dzcdn.net",
+  ".mzstatic.com",
+  ".bcbits.com",
+];
+
 function parseAllowedArtworkUrl(raw: string, base?: URL): URL | null {
   try {
     const parsed = base ? new URL(raw, base) : new URL(raw);
     if (parsed.protocol !== "https:") return null;
-    if (!ALLOWED_ARTWORK_HOSTS.has(parsed.hostname.toLowerCase())) return null;
-    return parsed;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      ALLOWED_ARTWORK_HOSTS.has(host) ||
+      ALLOWED_ARTWORK_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix))
+    ) {
+      return parsed;
+    }
+    return null;
   } catch {
     return null;
   }

@@ -1097,6 +1097,9 @@ export function NowPlayingView({
                       <p className="truncate text-sm font-medium text-zinc-200">{track.title}</p>
                       <p className="truncate text-xs text-zinc-400">
                         <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                        {track.sourceName && (
+                          <span className="text-zinc-500"> · {sourceLabel(track.sourceName)}</span>
+                        )}
                       </p>
                     </div>
                     <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
@@ -1119,17 +1122,46 @@ export function NowPlayingView({
                         </button>
                       )}
                       {privileged && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemovePreviousTrack(prevIndex);
-                          }}
-                          title="Remove from queue"
-                          className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            disabled={displayIdx === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMovePreviousTrack(prevIndex, prevIndex + 1);
+                            }}
+                            title="Move up"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (prevIndex === 0) {
+                                onMovePreviousToQueue(0, 0);
+                              } else {
+                                onMovePreviousTrack(prevIndex, prevIndex - 1);
+                              }
+                            }}
+                            title="Move down"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemovePreviousTrack(prevIndex);
+                            }}
+                            title="Remove from queue"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-rose-500/20 hover:text-rose-300"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </>
                       )}
                       <button
                         type="button"
@@ -1240,6 +1272,9 @@ export function NowPlayingView({
                       <p className="truncate text-sm font-semibold text-white">{current.title}</p>
                       <p className="truncate text-xs text-zinc-300">
                         <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
+                        {current.sourceName && (
+                          <span className="text-zinc-400"> · {sourceLabel(current.sourceName)}</span>
+                        )}
                       </p>
                     </div>
                     <span className="shrink-0 text-xs tabular-nums text-zinc-300 group-hover:hidden">
@@ -1260,6 +1295,34 @@ export function NowPlayingView({
                         >
                           <ThumbsUp className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
                         </button>
+                      )}
+                      {privileged && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={previousEntries.length === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveCurrentToPrevious(1);
+                            }}
+                            title="Move up in queue"
+                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={manualEntries.length === 0}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onMoveCurrentToQueue(1);
+                            }}
+                            title="Move down in queue"
+                            className="rounded-full p-1 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </button>
+                        </>
                       )}
                       <button
                         type="button"
@@ -1352,6 +1415,9 @@ export function NowPlayingView({
                       <p className="truncate text-sm font-medium text-white">{track.title}</p>
                       <p className="truncate text-xs text-zinc-400">
                         <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                        {track.sourceName && (
+                          <span className="text-zinc-500"> · {sourceLabel(track.sourceName)}</span>
+                        )}
                       </p>
                     </div>
 
@@ -1379,14 +1445,17 @@ export function NowPlayingView({
                         <>
                           <button
                             type="button"
-                            disabled={manualPos === 0}
                             onClick={(e) => {
                               e.stopPropagation();
-                              const prevTarget = manualEntries[manualPos - 1];
-                              if (prevTarget) onMoveTrack(queueIndex, prevTarget.queueIndex);
+                              if (manualPos === 0) {
+                                onMoveQueueToPrevious(queueIndex, 0);
+                              } else {
+                                const prevTarget = manualEntries[manualPos - 1];
+                                if (prevTarget) onMoveTrack(queueIndex, prevTarget.queueIndex);
+                              }
                             }}
                             title="Move up"
-                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                            className="rounded-full p-1 text-zinc-400 transition hover:bg-white/10 hover:text-white"
                           >
                             <ArrowUp className="h-3.5 w-3.5" />
                           </button>
@@ -1432,8 +1501,45 @@ export function NowPlayingView({
                 );
               })}
 
-              {/* YouTube Music Autoplay Switch Section */}
-              <div className="mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5">
+              {/* YouTube Music Autoplay Switch Section (also acts as bottom drop zone for manual queue) */}
+              <div
+                onDragOver={(e) => {
+                  if (
+                    !privileged ||
+                    !dragSource ||
+                    dragSource.section === "autoplay" ||
+                    manualEntries.length === 0
+                  ) {
+                    return;
+                  }
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const lastManual = manualEntries[manualEntries.length - 1];
+                  if (
+                    dragTarget?.section !== "manual" ||
+                    dragTarget.queueIndex !== lastManual.queueIndex ||
+                    dragOverPosition !== "below"
+                  ) {
+                    setDragTarget({ section: "manual", queueIndex: lastManual.queueIndex });
+                    setDragOverPosition("below");
+                  }
+                }}
+                onDrop={(e) => {
+                  if (
+                    !privileged ||
+                    !dragSource ||
+                    dragSource.section === "autoplay" ||
+                    manualEntries.length === 0
+                  ) {
+                    resetDragState();
+                    return;
+                  }
+                  e.preventDefault();
+                  const lastManual = manualEntries[manualEntries.length - 1];
+                  handleTimelineDrop({ section: "manual", queueIndex: lastManual.queueIndex });
+                }}
+                className="mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5"
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-white">Autoplay</p>
@@ -1568,6 +1674,9 @@ export function NowPlayingView({
                           <p className="truncate text-sm font-medium text-white">{track.title}</p>
                           <p className="truncate text-xs text-zinc-400">
                             <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
+                            {track.sourceName && (
+                              <span className="text-zinc-500"> · {sourceLabel(track.sourceName)}</span>
+                            )}
                           </p>
                         </div>
 

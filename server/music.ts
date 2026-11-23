@@ -142,6 +142,7 @@ export type ControllerEventType = "trackStart" | "queueEnd" | "playerDestroy" | 
 export class MusicService {
   readonly manager: LavalinkManager;
   private activeFilters = new Map<string, FilterPreset>();
+  private repeatModes = new Map<string, RepeatModeType>();
   private autoplayOverrides = new Map<string, boolean>();
   private autoplayMoods = new Map<string, AutoplayMood>();
   private autoplayGeneration = new Map<string, number>();
@@ -229,6 +230,10 @@ export class MusicService {
     return this.uiVolumes.get(guildId) ?? this.db.getGuildSettings(guildId).defaultVolume;
   }
 
+  getRepeatMode(guildId: string): RepeatModeType {
+    return this.repeatModes.get(guildId) ?? this.getPlayer(guildId)?.repeatMode ?? "off";
+  }
+
   private emitStateChange(guildId: string, withController = true): void {
     this.onStateChange(guildId);
     if (withController) {
@@ -262,6 +267,7 @@ export class MusicService {
     this.manager.on("playerDestroy", (player) => {
       this.clearInactivityTimer(player.guildId);
       this.activeFilters.delete(player.guildId);
+      this.repeatModes.delete(player.guildId);
       this.autoplayOverrides.delete(player.guildId);
       this.autoplayMoods.delete(player.guildId);
       this.autoplayGeneration.delete(player.guildId);
@@ -313,7 +319,7 @@ export class MusicService {
       this.onControllerEvent("trackStart", player.guildId);
     });
 
-    this.manager.on("trackEnd", (player) => {
+    this.manager.on("trackEnd", (player, _track, payload) => {
       const dismissedAt = this.dismissedGuilds.get(player.guildId);
       if (dismissedAt && Date.now() - dismissedAt < 2500) {
         player.queue.previous.splice(0, player.queue.previous.length);
@@ -321,7 +327,35 @@ export class MusicService {
         player.playing = false;
         player.paused = false;
         void player.queue.utils.save().catch(() => {});
+        this.onStateChange(player.guildId);
+        return;
       }
+
+      // If Queue Loop is on and the last manual track just finished, lavalink-client shifted
+      // the first Autoplay track into player.queue.current. Put it back and wrap to the first manual track.
+      if (
+        payload?.reason !== "replaced" &&
+        this.getRepeatMode(player.guildId) === "queue" &&
+        player.queue.current &&
+        this.isAutoplayTrack(player.queue.current) &&
+        player.queue.previous.length > 0
+      ) {
+        player.queue.tracks.unshift(player.queue.current);
+        const firstTrack = player.queue.previous.pop()!;
+        const restManual = player.queue.previous
+          .splice(0, player.queue.previous.length)
+          .reverse();
+        for (const item of restManual) {
+          this.clearAutoplayFlag(item);
+        }
+        this.clearAutoplayFlag(firstTrack);
+        if (restManual.length > 0) {
+          player.queue.tracks.unshift(...restManual);
+        }
+        player.queue.current = firstTrack as Track;
+        void player.queue.utils.save().catch(() => {});
+      }
+
       this.onStateChange(player.guildId);
     });
 
@@ -350,7 +384,7 @@ export class MusicService {
       this.onStateChange(player.guildId);
     });
 
-    this.manager.on("queueEnd", (player) => {
+    this.manager.on("queueEnd", (player, track) => {
       const dismissedAt = this.dismissedGuilds.get(player.guildId);
       if (dismissedAt && Date.now() - dismissedAt < 2500) {
         player.queue.previous.splice(0, player.queue.previous.length);
@@ -358,7 +392,38 @@ export class MusicService {
         player.playing = false;
         player.paused = false;
         void player.queue.utils.save().catch(() => {});
+        this.queueNames.delete(player.guildId);
+        this.scheduleInactivityCheck(player.guildId);
+        this.onStateChange(player.guildId);
+        this.onControllerEvent("queueEnd", player.guildId);
+        return;
       }
+
+      if (this.getRepeatMode(player.guildId) === "queue") {
+        if (track && !this.isAutoplayTrack(track)) {
+          if (player.queue.previous[0]?.info?.identifier !== track.info?.identifier) {
+            this.pushPrevious(player, track);
+          }
+        }
+        if (player.queue.previous.length > 0) {
+          const firstTrack = player.queue.previous.pop()!;
+          const restManual = player.queue.previous
+            .splice(0, player.queue.previous.length)
+            .reverse();
+          for (const item of restManual) {
+            this.clearAutoplayFlag(item);
+          }
+          this.clearAutoplayFlag(firstTrack);
+          if (restManual.length > 0) {
+            player.queue.tracks.unshift(...restManual);
+          }
+          void player.play({ clientTrack: firstTrack, paused: false }).catch(() => {});
+          void player.queue.utils.save().catch(() => {});
+          this.onStateChange(player.guildId);
+          return;
+        }
+      }
+
       this.queueNames.delete(player.guildId);
       this.scheduleInactivityCheck(player.guildId);
       this.onStateChange(player.guildId);
@@ -1018,6 +1083,23 @@ export class MusicService {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
 
+    const firstAutoIdx = player.queue.tracks.findIndex((t) => this.isAutoplayTrack(t));
+    const manualLen = firstAutoIdx === -1 ? player.queue.tracks.length : firstAutoIdx;
+
+    if (this.getRepeatMode(guildId) === "queue" && amount > manualLen) {
+      // In Queue Loop mode, wrapping past the last manual track loops back to the start
+      // of the manual queue and completely ignores Autoplay suggestions.
+      if (player.queue.previous.length > 0) {
+        await this.playPrevious(guildId, player.queue.previous.length - 1);
+        return;
+      }
+      if (player.queue.current) {
+        await player.play({ clientTrack: player.queue.current, paused: false });
+        this.emitStateChange(guildId);
+        return;
+      }
+    }
+
     if (amount > 1 && amount > player.queue.tracks.length) {
       throw new Error(`Cannot skip ${amount} tracks — only ${player.queue.tracks.length} queued.`);
     }
@@ -1133,7 +1215,10 @@ export class MusicService {
   async setRepeatMode(guildId: string, mode: RepeatModeType): Promise<RepeatModeType> {
     const player = this.getPlayer(guildId);
     if (!player) throw new Error("No active player in this server.");
-    await player.setRepeatMode(mode);
+    this.repeatModes.set(guildId, mode);
+    // Keep lavalink-client's internal repeatMode off for "queue" so it doesn't push duplicate
+    // tracks after Autoplay; we handle timeline queue wrap-around ourselves.
+    await player.setRepeatMode(mode === "track" ? "track" : "off");
     this.emitStateChange(guildId);
     return mode;
   }
@@ -1817,6 +1902,7 @@ export class MusicService {
 
   private async handleAutoplay(player: Player, lastPlayedTrack: Track): Promise<void> {
     if (!this.isAutoplayEnabled(player.guildId)) return;
+    if (this.getRepeatMode(player.guildId) === "queue") return;
     if (!lastPlayedTrack?.info?.title) return;
 
     try {
@@ -2007,7 +2093,7 @@ export class MusicService {
       paused: Boolean(player.paused),
       position,
       volume: this.getUiVolume(guildId),
-      repeatMode: player.repeatMode || "off",
+      repeatMode: this.getRepeatMode(guildId),
       autoplay: this.isAutoplayEnabled(guildId),
       autoplayMood: this.getAutoplayMood(guildId),
       activeFilter: this.activeFilters.get(guildId) ?? "none",
