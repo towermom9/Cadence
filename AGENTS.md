@@ -59,12 +59,15 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
 - **Discord VC Chat Controller:**
   - `MusicService.ensurePlayer` must default `textChannelId` to `voiceChannelId` (and `CadenceBot.invokeController` must fall back to `player.voiceChannelId`) so starting playback from the web dashboard posts the Now Playing controller into the voice channel's text chat.
   - Keep the Discord Now Playing controller buttons clean: Row 1 = `Back`, `Pause`/`Resume`, `Skip`; Row 2 = `Leave`, `❤️`, `Queue`, `Web` (no Loop or Shuffle buttons on the embed).
+- **Empty Voice Channel Auto-Pause & Auto-Resume:**
+  - When all non-bot members leave the bot's voice channel and `pauseOnEmpty` is enabled, `MusicService.handleVoiceChannelEmpty` waits `pauseOnEmptySeconds` (`0–300s`) before pausing playback and recording `autoPausedByEmptyVc`, rather than destroying the player via `scheduleInactivityCheck`.
+  - When a human listener joins (`handleVoiceChannelOccupied`), cancel any active empty-VC countdown timer and automatically resume playback only if `autoPausedByEmptyVc` was set (never override a manual pause made while listeners were present).
 - **Lavalink YouTube Client Order & Pre-Bundled Plugins:**
   - In `lavalink/application.yml`, keep `WEB` and `ANDROID_VR` ahead of `IOS` in `plugins.youtube.clients` (`MUSIC`, `WEB`, `ANDROID_VR`, `MWEB`, `IOS`, `TV`, `WEBEMBEDDED`, `TVHTML5_SIMPLY`) so `ytsearch:` queries are handled by `WEB` instead of returning empty results on `IOS`.
   - Keep `lavalink/Dockerfile` and `lavalink/entrypoint.sh` self-contained (pre-bundling the latest `youtube-plugin` beta/snapshot, `lavasrc-plugin`, and `lavalyrics-plugin` from `maven.lavalink.dev` without requiring host volume mounts).
 
 ## Code Quality & Style
 
-- Reuse shared helpers in `shared/` (`shared/types.ts`, `shared/volume.ts`, `shared/artists.ts`) and `web/src/utils/` (`format.ts`, `theme.ts`, `playlists.ts`, `lrc.ts`) before writing new utilities.
+- Reuse shared helpers in `shared/` (`shared/types.ts`, `shared/volume.ts`, `shared/artists.ts`) and `web/src/utils/` (`format.ts`, `theme.ts`, `playlists.ts`) before writing new utilities.
 - Avoid obvious comments; only comment non-obvious "whys" (e.g., Lavalink async event races, Innertube client quirks, or timeline index math).
 - Do not over-engineer: keep changes focused on what was requested without adding speculative abstractions.

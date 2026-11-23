@@ -59,28 +59,29 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
   - **Drag-and-Drop Track Reordering** inside playlists and **6 Library Sort Modes** (`Recent activity`, `Recently saved`, `Recently played`, `Recent sync`, `Manual drag order`, `A-Z`) shared between the sidebar and Library view.
 - **Power-User Controls**:
   - Click artwork to Play/Pause with optional ±5s-30s floating seek buttons.
+  - Auto-pause when voice channel becomes empty with a configurable `0s–5m` continuation delay slider and automatic resume when someone joins.
   - Direct numeric volume percentage input (`0%-100%`) alongside the smooth slider.
-  - Keyboard shortcuts modal (`?` or `Shift + /`) with Vim-style navigation (`g h`, `g e`, `g l`, `g s`) and media keys.
+  - Keyboard shortcuts modal (`?` or `Shift + /`) with Vim-style navigation (`g h`, `g e`, `g l`, `g ,`) and media keys.
   - Persistent UI preferences saved across both SQLite and browser cookies.
 
 </details>
 
 <details>
-  <summary><strong>Discord Slash &amp; Prefix Commands (24 Commands)</strong></summary>
+  <summary><strong>Discord Slash &amp; Prefix Commands (22 Commands)</strong></summary>
 
 - **Playback & Search**:
-  - `/play <query> [mode] [source]` — Queue a song or playlist with live autocomplete from recent history & YouTube suggestions.
+  - `/play <query> [source]` — Queue a song or playlist with live autocomplete from recent history & YouTube suggestions.
   - `/playnow <query> [source]` — Insert track at the front of the queue and play immediately.
   - `/search <query> [source]` — Search and pick from an interactive dropdown menu.
-  - `/pause`, `/resume`, `/skip [amount]`, `/back`, `/seek <seconds>`, `/stop`, `/join`, `/leave`
+  - `/pause`, `/resume`, `/skip [amount]`, `/back`, `/seek <seconds>`, `/stop`
 - **Audio & Queue**:
-  - `/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay [enabled]`, `/filter <preset>` (9 DSP presets: `bassboost`, `nightcore`, `vaporwave`, `8d`, `karaoke`, `lowpass`, `tremolo`, `vibrato`, `none`)
+  - `/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay`, `/filter <preset>` (9 DSP presets: `bassboost`, `nightcore`, `vaporwave`, `8d`, `karaoke`, `lowpass`, `tremolo`, `vibrato`, `none`)
   - `/queue`, `/nowplaying`, `/shuffle`, `/remove <position>`, `/clear`, `/lyrics`
 - **Playlists, Settings & Utility**:
   - `/playlist <list|create|add|play|delete>` — Manage and play your personal playlists from Discord.
-  - `/settings <view|prefix|volume|djrole|247|autoplay>` — Configure server settings (Tier 3 Admin / Owner).
+  - `/settings <view|volume|247|dj|duplicates|prefix|emptyvc>` — Configure server settings (Tier 3 Admin / Owner).
   - `/dashboard`, `/ping`, `/help`
-  - Plus customizable prefix commands (`?play`, `?skip`, `?back`, `?pause`, `?queue`, `?np`, `?vol`, `?shuffle`, `?clear`, `?leave`).
+  - Plus customizable prefix commands (`?play`, `?skip`, `?pause`, `?resume`, `?stop`, `?queue`, `?np`).
 
 </details>
 

@@ -37,7 +37,7 @@ Cadence/
 ├── server/
 │   ├── index.ts                # Unified process entrypoint (HTTP, WS, Discord Bot, SQLite)
 │   ├── auth.ts                 # Discord OAuth2 session & guild cache helpers
-│   ├── bot.ts                  # Discord.js client, 24 slash commands, prefix commands, VC controller
+│   ├── bot.ts                  # Discord.js client, 22 slash commands, prefix commands, VC controller
 │   ├── config.ts               # Runtime environment & dynamic setup configuration
 │   ├── db.ts                   # bun:sqlite schema, migrations, playlists, history, guild settings
 │   ├── logger.ts               # Ring-buffer server logger with automatic secret/PII redaction
@@ -102,6 +102,9 @@ Cadence/
 - **Queue Loop (`repeatMode === "queue"`):**
   - Managed via `MusicService.repeatModes` while keeping `lavalink-client`'s internal repeat mode `"off"` so `lavalink-client` does not duplicate `current` at the tail of `player.queue.tracks`.
   - Wrapping past the last manual track loops back to the oldest track in `previous` and ignores Autoplay tracks.
+- **Empty Voice Channel Auto-Pause & Auto-Resume:**
+  - When all human listeners leave the voice channel and `pauseOnEmpty` is enabled, playback continues for `pauseOnEmptySeconds` (`0s` immediate up to `300s` / `5m`) before pausing and marking the guild in `autoPausedByEmptyVc`.
+  - When a listener joins the voice channel, any pending pause timer is cancelled and playback automatically resumes if it was auto-paused.
 
 ### 2. 4-Tier Discord Role-Based Access (`server/bot.ts`, `server/ws.ts`, `SettingsView.tsx`)
 Permissions cascade upward automatically based on the user's Discord account and guild roles:
