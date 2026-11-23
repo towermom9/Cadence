@@ -4,9 +4,6 @@ services:
   cadence:
     container_name: cadence
     image: ghcr.io/towermom9/cadence:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - path: .env
@@ -17,9 +14,9 @@ services:
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD:-youshallnotpass}
       - DATA_DIR=/app/data
     ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+      - "8686:8000"
     volumes:
-      - ./data:/app/data
+      - /DATA/AppData/cadence/data:/app/data
     networks:
       - cadence
     depends_on:
@@ -29,9 +26,6 @@ services:
   lavalink:
     container_name: cadence-lavalink
     image: ghcr.io/towermom9/cadence-lavalink:latest
-    build:
-      context: ./lavalink
-      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       - _JAVA_OPTIONS=-Xmx1G
