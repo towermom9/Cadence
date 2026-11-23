@@ -12,7 +12,6 @@ plugins:
         allowDirectPlaylistIds: true
         clients:
             - MUSIC
-            - ANDROID
             - IOS
             - TV
             - ANDROID_VR
@@ -79,11 +78,11 @@ plugins:
 
 lavalink:
     plugins:
-        - dependency: "dev.lavalink.youtube:youtube-plugin:e41dd95f8bd134b51e75080fb28cc805fecb431a"
+        - dependency: "dev.lavalink.youtube:youtube-plugin:${YT_PLUGIN_VERSION:e41dd95f8bd134b51e75080fb28cc805fecb431a}"
           snapshot: true
-        - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+        - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:${LAVASRC_PLUGIN_VERSION:4.8.3}"
           snapshot: false
-        - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:1.1.0"
+        - dependency: "com.github.topi314.lavalyrics:lavalyrics-plugin:${LAVALYRICS_PLUGIN_VERSION:1.1.0}"
           snapshot: false
     server:
         password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"

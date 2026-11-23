@@ -3,6 +3,7 @@ name: cadence
 services:
   cadence:
     container_name: cadence
+    image: ghcr.io/towermom9/cadence:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -27,7 +28,10 @@ services:
 
   lavalink:
     container_name: cadence-lavalink
-    image: ghcr.io/lavalink-devs/lavalink:4
+    image: ghcr.io/towermom9/cadence-lavalink:latest
+    build:
+      context: ./lavalink
+      dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       - _JAVA_OPTIONS=-Xmx1G
@@ -45,7 +49,6 @@ services:
       - YT_CIPHER_URL=http://yt-cipher:8001
       - SPOTIFY_TOKEN_ENDPOINT=http://spotify-tokener:49152/api/token
     volumes:
-      - ./lavalink/application.yml:/opt/Lavalink/application.yml:ro
       - ./lavalink/plugins:/opt/Lavalink/plugins
       - ./lavalink/logs:/opt/Lavalink/logs
     expose:
