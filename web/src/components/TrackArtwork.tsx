@@ -194,6 +194,7 @@ export function TrackArtwork({
         alt={alt ?? track.title ?? "Artwork"}
         referrerPolicy="no-referrer"
         loading="lazy"
+        decoding="async"
         onLoad={(e) => {
           const img = e.currentTarget;
           const decoded = decodeURIComponent(baseSrc);

@@ -28,6 +28,8 @@ Thank you for your interest in contributing to **Cadence**! This document covers
 
 ```text
 Cadence/
+├── .githooks/
+│   └── pre-commit              # Verifies package.json version bump & runs typecheck
 ├── .github/workflows/
 │   └── docker-publish.yml      # Builds & publishes cadence and cadence-lavalink to GHCR
 ├── lavalink/
@@ -37,27 +39,28 @@ Cadence/
 ├── server/
 │   ├── index.ts                # Unified process entrypoint (HTTP, WS, Discord Bot, SQLite)
 │   ├── auth.ts                 # Discord OAuth2 session & guild cache helpers
-│   ├── bot.ts                  # Discord.js client, 22 slash commands, prefix commands, VC controller
+│   ├── bot.ts                  # Discord.js client, 23 slash commands, prefix commands, VC controller
 │   ├── config.ts               # Runtime environment & dynamic setup configuration
-│   ├── db.ts                   # bun:sqlite schema, migrations, playlists, history, guild settings
+│   ├── db.ts                   # bun:sqlite schema, migrations, playlists, paginated history, settings
 │   ├── logger.ts               # Ring-buffer server logger with automatic secret/PII redaction
 │   ├── lyrics.ts               # LavaLyrics & LRCLIB synced/ELRC lyrics fetcher
 │   ├── music.ts                # LavalinkManager wrapper, timeline queue, autoplay moods, filters
 │   ├── setup.ts                # 4-step web onboarding wizard API routes
-│   ├── web.ts                  # Hono REST endpoints (/api/me, /api/artwork, /api/explore, etc.)
+│   ├── web.ts                  # Hono REST endpoints (/api/me, /api/history, /api/artwork, etc.)
 │   └── ws.ts                   # Real-time WebSocket hub (/ws)
 ├── shared/
 │   ├── artists.ts              # Multi-artist collaboration parser & tag cleaner
 │   ├── types.ts                # Shared DTOs and WebSocket client/server message contracts
 │   └── volume.ts               # Perceptual volume curve (x^1.6) conversion
+├── tests/                      # Bun unit test suite (artists, volume, LRC parser, isolated SQLite)
 └── web/
     ├── index.html              # SPA shell & PWA manifest links
     ├── vite.config.ts          # Vite bundler config (injects __CADENCE_VERSION__)
     └── src/
         ├── App.tsx             # Root application layout, routing, and keyboard shortcuts
-        ├── components/         # YouTube Music–inspired React 19 UI components
+        ├── components/         # YouTube Music-inspired React 19 UI components
         ├── hooks/              # useCadenceSocket real-time state & 60fps progress interpolation
-        └── utils/              # Theme accents, AMOLED mode, LRC parser, formatters
+        └── utils/              # Theme accents, AMOLED mode, LRC parser (lrc.ts), formatters
 ```
 
 ---
@@ -76,10 +79,10 @@ Cadence/
 
 3. **Run the backend + Discord bot and the Vite frontend dev server:**
    ```bash
-   # Terminal 1 — Backend & Discord bot on http://localhost:8000
+   # Terminal 1 - Backend & Discord bot on http://localhost:8000
    bun run dev
 
-   # Terminal 2 — Vite HMR frontend on http://localhost:5173 (proxies /api and /ws to :8000)
+   # Terminal 2 - Vite HMR frontend on http://localhost:5173 (proxies /api and /ws to :8000)
    bun run dev:web
    ```
 
@@ -137,12 +140,22 @@ Permissions cascade upward automatically based on the user's Discord account and
 
 ## Testing & Verification
 
-1. **Typecheck & Production Build (Mandatory)**:
+1. **Typecheck, Unit Tests & Production Build (Mandatory)**:
+   ```bash
+   bun run verify
+   ```
+   Or run each step individually:
    ```bash
    bun run typecheck
+   bun test
    bun run build:web
    ```
-2. **Database Isolation in Tests**:
+2. **Pre-Commit Hook**:
+   Enable the repository hook once after cloning:
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+3. **Database Isolation in Tests**:
    - **Never** run tests against `data/cadence.sqlite`.
    - Always create a temporary directory and set `process.env.DATA_DIR` before importing `server/db.ts`:
      ```ts

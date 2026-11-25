@@ -97,13 +97,13 @@ const AUTOPLAY_CLICK_OPTIONS: {
 }[] = [
   {
     id: "play_now_here",
-    title: "Play now — right after current",
+    title: "Play now - right after current",
     description:
       "Immediately plays the clicked Autoplay song while keeping your queued songs intact.",
   },
   {
     id: "play_now_end",
-    title: "Play now — move past queued tracks",
+    title: "Play now - move past queued tracks",
     description:
       "Skips ahead and starts playback at that Autoplay song, moving earlier queued items to history.",
   },
@@ -129,6 +129,17 @@ function formatEmptyVcDelay(seconds: number): string {
   if (mins > 0 && secs > 0) return `${mins}m ${secs}s`;
   if (mins > 0) return `${mins}m (${clamped}s)`;
   return `${secs}s`;
+}
+
+function formatEmptyVcDisconnect(minutes: number): string {
+  const clamped = Math.max(0, Math.min(120, Math.round(minutes)));
+  if (clamped === 0) return "Never (Off)";
+  if (clamped >= 60) {
+    const hrs = Math.floor(clamped / 60);
+    const rem = clamped % 60;
+    return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h (${clamped}m)`;
+  }
+  return `${clamped}m`;
 }
 
 function ThemeSwitch({
@@ -192,6 +203,9 @@ export function SettingsView({
   const [allowDuplicates, setAllowDuplicates] = useState(true);
   const [pauseOnEmpty, setPauseOnEmpty] = useState(true);
   const [pauseOnEmptySeconds, setPauseOnEmptySeconds] = useState(0);
+  const [emptyVcDisconnectMinutes, setEmptyVcDisconnectMinutes] = useState(30);
+  const [ignoreDeafenedListeners, setIgnoreDeafenedListeners] = useState(false);
+  const [defaultPlayNext, setDefaultPlayNext] = useState(false);
   const [sysInfo, setSysInfo] = useState<SystemInfoDTO | null>(null);
   const [sysLogs, setSysLogs] = useState<DebugLogEntryDTO[]>([]);
   const [sysText, setSysText] = useState("");
@@ -258,6 +272,11 @@ export function SettingsView({
     setPauseOnEmptySeconds(
       Math.min(300, Math.max(0, Math.round(settings.pauseOnEmptySeconds ?? 0)))
     );
+    setEmptyVcDisconnectMinutes(
+      Math.min(120, Math.max(0, Math.round(settings.emptyVcDisconnectMinutes ?? 30)))
+    );
+    setIgnoreDeafenedListeners(Boolean(settings.ignoreDeafenedListeners));
+    setDefaultPlayNext(Boolean(settings.defaultPlayNext));
   }, [settings]);
 
   const effectivePauseOnEmpty = settings
@@ -303,6 +322,12 @@ export function SettingsView({
       allowDuplicates,
       pauseOnEmpty,
       pauseOnEmptySeconds: Math.min(300, Math.max(0, Math.round(pauseOnEmptySeconds))),
+      emptyVcDisconnectMinutes: Math.min(
+        120,
+        Math.max(0, Math.round(emptyVcDisconnectMinutes))
+      ),
+      ignoreDeafenedListeners,
+      defaultPlayNext,
     });
   };
 
@@ -744,44 +769,21 @@ export function SettingsView({
                 </button>
               </div>
 
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="space-y-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                    Text Command Prefix
-                  </span>
-                  <input
-                    type="text"
-                    maxLength={5}
-                    value={prefix}
-                    onChange={(e) => setPrefix(e.target.value)}
-                    className="w-full rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-white/40"
-                  />
-                  <p className="text-xs text-zinc-500">
-                    Used for message commands like {prefix || "?"}play.
-                  </p>
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                    DJ Role
-                  </span>
-                  <select
-                    value={djRoleId}
-                    onChange={(e) => setDjRoleId(e.target.value)}
-                    className="w-full rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-white/40 [&>option]:bg-[#121212]"
-                  >
-                    <option value="">None (Admins or alone in voice)</option>
-                    {settings?.roles?.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        @{role.name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-zinc-500">
-                    Members with this role can manage volume, filters, and queue order.
-                  </p>
-                </label>
-              </div>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                  Text Command Prefix
+                </span>
+                <input
+                  type="text"
+                  maxLength={5}
+                  value={prefix}
+                  onChange={(e) => setPrefix(e.target.value)}
+                  className="w-full max-w-xs rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-white/40"
+                />
+                <p className="text-xs text-zinc-500">
+                  Used for message commands like {prefix || "?"}play and {prefix || "?"}playnext.
+                </p>
+              </label>
 
               <div className="space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
                 <div className="flex items-center justify-between">
@@ -844,7 +846,21 @@ export function SettingsView({
                   />
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                <div className="flex items-center justify-between rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">Default to Play Next</p>
+                    <p className="text-xs text-zinc-400">
+                      Queue new Discord `/play` tracks right after the current song instead of at the end.
+                    </p>
+                  </div>
+                  <ThemeSwitch
+                    checked={defaultPlayNext}
+                    onChange={setDefaultPlayNext}
+                    label="Toggle Default to Play Next"
+                  />
+                </div>
+
+                <div className="space-y-4 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-sm font-medium text-white">
@@ -895,6 +911,67 @@ export function SettingsView({
                       <span>5m</span>
                     </div>
                   </div>
+
+                  <div
+                    className={`space-y-2 border-t border-white/8 pt-3 transition-opacity ${
+                      pauseOnEmpty && !stay247 ? "opacity-100" : "opacity-45"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-medium text-zinc-200">
+                          Auto-Disconnect After Extended Auto-Pause
+                        </span>
+                        <p className="text-[11px] text-zinc-500">
+                          {stay247
+                            ? "Disabled while 24/7 Mode is enabled."
+                            : "Leave voice channel if nobody joins after playback auto-pauses."}
+                        </p>
+                      </div>
+                      <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                        {stay247 ? "Off (24/7)" : formatEmptyVcDisconnect(emptyVcDisconnectMinutes)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={120}
+                      step={5}
+                      disabled={!pauseOnEmpty || stay247}
+                      value={emptyVcDisconnectMinutes}
+                      onChange={(e) => setEmptyVcDisconnectMinutes(Number(e.target.value))}
+                      style={{ accentColor: "var(--cadence-accent)" }}
+                      aria-label="Auto-disconnect after extended auto-pause"
+                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
+                    />
+                    <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
+                      <span>Never</span>
+                      <span>30m</span>
+                      <span>1h</span>
+                      <span>1.5h</span>
+                      <span>2h</span>
+                    </div>
+                  </div>
+
+                  <div
+                    className={`flex items-center justify-between border-t border-white/8 pt-3 transition-opacity ${
+                      pauseOnEmpty ? "opacity-100" : "opacity-45"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-xs font-medium text-zinc-200">
+                        Ignore Deafened Listeners
+                      </p>
+                      <p className="text-[11px] text-zinc-500">
+                        Treat self-deafened or server-deafened members as not listening when checking if voice chat is empty.
+                      </p>
+                    </div>
+                    <ThemeSwitch
+                      checked={ignoreDeafenedListeners}
+                      onChange={setIgnoreDeafenedListeners}
+                      label="Toggle Ignore Deafened Listeners"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -943,6 +1020,67 @@ export function SettingsView({
                             key={role.id}
                             type="button"
                             onClick={() => toggleAccessRole(role.id)}
+                            style={
+                              selected
+                                ? {
+                                    backgroundColor: "var(--cadence-accent)",
+                                    color: "var(--cadence-accent-fg)",
+                                    borderColor: "transparent",
+                                  }
+                                : undefined
+                            }
+                            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                              selected
+                                ? ""
+                                : "border-white/12 bg-white/[0.04] text-zinc-300 hover:border-white/25 hover:text-white"
+                            }`}
+                          >
+                            {selected && <Check className="h-3 w-3" />}
+                            @{role.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500">
+                      No assignable Discord roles found for this server.
+                    </p>
+                  )}
+                </div>
+
+                {/* Tier 2: DJ Role */}
+                <div className="space-y-2 border-t border-white/8 pt-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        Tier 2 · DJ (Playback &amp; Queue Controls)
+                      </p>
+                      <p className="text-xs text-zinc-400">
+                        {djRoleId
+                          ? "Members with this role can manage volume, loop, shuffle, filters, and queue order."
+                          : "None selected - Admins or listeners alone in voice channel have DJ permissions."}
+                      </p>
+                    </div>
+                    {djRoleId && (
+                      <button
+                        type="button"
+                        onClick={() => setDjRoleId("")}
+                        className="rounded-full border border-white/12 px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                      >
+                        Clear DJ Role
+                      </button>
+                    )}
+                  </div>
+
+                  {settings?.roles && settings.roles.length > 0 ? (
+                    <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pt-1">
+                      {settings.roles.map((role) => {
+                        const selected = djRoleId === role.id;
+                        return (
+                          <button
+                            key={role.id}
+                            type="button"
+                            onClick={() => setDjRoleId(selected ? "" : role.id)}
                             style={
                               selected
                                 ? {
@@ -1033,7 +1171,7 @@ export function SettingsView({
                   <span className="font-semibold uppercase tracking-wider text-zinc-300">
                     Tier 4 · Server Owner &amp; Bot Owner
                   </span>{" "}
-                  — Full access to all playback controls, Server Settings, and System diagnostics &amp; debug logs.
+                  - Full access to all playback controls, Server Settings, and System diagnostics &amp; debug logs.
                 </div>
               </div>
             </form>
@@ -1172,15 +1310,15 @@ export function SettingsView({
                     <dl className="grid grid-cols-2 gap-y-2 text-xs">
                       <dt className="text-zinc-400">Lavalink</dt>
                       <dd className="text-right font-mono text-white">
-                        {sysInfo.lavalink.version || "—"}
+                        {sysInfo.lavalink.version || "-"}
                       </dd>
                       <dt className="text-zinc-400">Lavaplayer</dt>
                       <dd className="text-right font-mono text-zinc-200">
-                        {sysInfo.lavalink.lavaplayer || "—"}
+                        {sysInfo.lavalink.lavaplayer || "-"}
                       </dd>
                       <dt className="text-zinc-400">JVM</dt>
                       <dd className="text-right font-mono text-zinc-200">
-                        {sysInfo.lavalink.jvm || "—"}
+                        {sysInfo.lavalink.jvm || "-"}
                       </dd>
                     </dl>
                     {sysInfo.lavalink.plugins.length > 0 && (

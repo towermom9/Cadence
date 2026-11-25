@@ -90,6 +90,9 @@ export function useCadenceSocket(
   }, [initialPreferences]);
   const playlistSort: PlaylistSortMode = preferences.playlistSort;
   const [history, setHistory] = useState<HistoryEntryDTO[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const [settings, setSettings] = useState<GuildSettingsDTO | null>(null);
   const [lyricsState, setLyricsState] = useState<{
     guildId: string;
@@ -260,6 +263,8 @@ export function useCadenceSocket(
             break;
           case "history":
             setHistory(msg.entries);
+            setHistoryTotal(typeof msg.total === "number" ? msg.total : msg.entries.length);
+            setHistoryHasMore(Boolean(msg.hasMore));
             break;
           case "settings":
             setSettings(msg.settings);
@@ -449,6 +454,42 @@ export function useCadenceSocket(
     }).catch(() => {});
   }, []);
 
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingMoreHistory || !historyHasMore) return;
+    setLoadingMoreHistory(true);
+    try {
+      const res = await fetch(`/api/history?limit=50&offset=${history.length}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        entries?: HistoryEntryDTO[];
+        total?: number;
+        hasMore?: boolean;
+      };
+      const incoming = data.entries ?? [];
+      if (incoming.length > 0) {
+        setHistory((prev) => {
+          const seen = new Set(prev.map((e) => e.id));
+          const merged = [...prev];
+          for (const item of incoming) {
+            if (!seen.has(item.id)) {
+              seen.add(item.id);
+              merged.push(item);
+            }
+          }
+          return merged;
+        });
+      }
+      if (typeof data.total === "number") {
+        setHistoryTotal(data.total);
+      }
+      setHistoryHasMore(Boolean(data.hasMore));
+    } catch {
+      // Ignore transient pagination error
+    } finally {
+      setLoadingMoreHistory(false);
+    }
+  }, [history.length, historyHasMore, loadingMoreHistory]);
+
   return {
     connected,
     meta: liveMeta,
@@ -463,6 +504,9 @@ export function useCadenceSocket(
     playlistSort,
     preferences,
     history,
+    historyTotal,
+    historyHasMore,
+    loadingMoreHistory,
     settings,
     lyricsState,
     toasts,
@@ -580,6 +624,7 @@ export function useCadenceSocket(
       selectedGuildId &&
       send({ type: "playPlaylist", guildId: selectedGuildId, playlistId, shuffle, startIndex }),
     refreshHistory: () => send({ type: "getHistory" }),
+    loadMoreHistory,
     clearHistory: () => send({ type: "clearHistory" }),
     removeHistoryEntry: (opts: { historyId?: number; trackIdentifier?: string }) =>
       send({

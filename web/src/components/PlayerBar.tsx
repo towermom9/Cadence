@@ -106,6 +106,7 @@ export function PlayerBar({
   const [localVolume, setLocalVolume] = useState(serverVolume);
   const [volumeDraft, setVolumeDraft] = useState(String(serverVolume));
   const [isEditingVolume, setIsEditingVolume] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const barRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
@@ -146,6 +147,30 @@ export function PlayerBar({
       }
     };
   }, []);
+
+  const emptyVcPauseAt = playerState?.emptyVcPauseAt ?? null;
+  const countingDownEmptyVc = Boolean(
+    emptyVcPauseAt && !playerState?.paused && emptyVcPauseAt > Date.now()
+  );
+
+  useEffect(() => {
+    if (!emptyVcPauseAt || playerState?.paused) return;
+    setNowMs(Date.now());
+    const id = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, [emptyVcPauseAt, playerState?.paused]);
+
+  const emptyVcRemainingSec =
+    emptyVcPauseAt && !playerState?.paused
+      ? Math.max(0, Math.ceil((emptyVcPauseAt - nowMs) / 1000))
+      : 0;
+
+  const emptyVcCountdownText =
+    emptyVcRemainingSec > 0
+      ? `${Math.floor(emptyVcRemainingSec / 60)}:${String(emptyVcRemainingSec % 60).padStart(2, "0")}`
+      : null;
 
   const sendVolumeImmediate = useCallback(
     (vol: number) => {
@@ -429,11 +454,23 @@ export function PlayerBar({
               {track ? track.title : "Nothing playing"}
             </p>
             <p className="truncate text-xs text-zinc-400">
-              {track
-                ? `${track.author}${playerState?.autoPausedEmptyVc && playerState?.paused ? " • Paused (Empty VC)" : ""}`
-                : playerState?.voiceChannelName
-                  ? `Connected to #${playerState.voiceChannelName}`
-                  : "Tap a song to play"}
+              {track ? (
+                <>
+                  {track.author}
+                  {playerState?.autoPausedEmptyVc && playerState?.paused ? (
+                    <span className="text-amber-300"> • Paused (Empty VC)</span>
+                  ) : countingDownEmptyVc && emptyVcCountdownText ? (
+                    <span className="text-amber-300">
+                      {" "}
+                      • Pausing in {emptyVcCountdownText}
+                    </span>
+                  ) : null}
+                </>
+              ) : playerState?.voiceChannelName ? (
+                `Connected to #${playerState.voiceChannelName}`
+              ) : (
+                "Tap a song to play"
+              )}
             </p>
           </div>
         </button>
@@ -561,9 +598,17 @@ export function PlayerBar({
                   <>
                     <ArtistLinks author={track.author} onOpenArtist={onOpenArtist} />
                     <span> • {sourceLabel(track.sourceName)}</span>
-                    {playerState?.autoPausedEmptyVc && playerState?.paused && (
-                      <span className="text-amber-300"> • Paused (Empty VC)</span>
-                    )}
+                    {playerState?.autoPausedEmptyVc && playerState?.paused ? (
+                      <span className="text-amber-300">
+                        {" "}
+                        • Paused (Empty VC • Waiting for listener)
+                      </span>
+                    ) : countingDownEmptyVc && emptyVcCountdownText ? (
+                      <span className="text-amber-300">
+                        {" "}
+                        • Empty VC • Pausing in {emptyVcCountdownText}
+                      </span>
+                    ) : null}
                   </>
                 ) : playerState?.voiceChannelName ? (
                   `Connected to #${playerState.voiceChannelName}`

@@ -313,6 +313,24 @@ export function createWebApp(
     return c.json({ preferences });
   });
 
+  app.get("/api/history", (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    const rawLimit = Number.parseInt(c.req.query("limit") || "50", 10);
+    const rawOffset = Number.parseInt(c.req.query("offset") || "0", 10);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(200, rawLimit)) : 50;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, rawOffset) : 0;
+    const entries = db.getPlayHistory(session.user.id, limit, offset);
+    const total = db.getPlayHistoryCount(session.user.id);
+    return c.json({
+      entries,
+      total,
+      hasMore: offset + entries.length < total,
+    });
+  });
+
   app.get("/api/recommendations", async (c) => {
     const session = getSessionFromContext(c, db);
     if (!session) {

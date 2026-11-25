@@ -72,6 +72,11 @@ function normalizeEmptyPauseSeconds(value: unknown, fallback = 0): number {
   return Math.max(0, Math.min(300, Math.round(value)));
 }
 
+function normalizeEmptyDisconnectMinutes(value: unknown, fallback = 30): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(120, Math.round(value)));
+}
+
 export interface StoredAppConfig {
   discordToken: string;
   discordClientId: string;
@@ -115,6 +120,9 @@ interface GuildSettingsRow {
   allow_duplicates: number;
   pause_on_empty?: number;
   pause_on_empty_seconds?: number;
+  empty_vc_disconnect_minutes?: number;
+  ignore_deafened_listeners?: number;
+  default_play_next?: number;
 }
 
 interface PlaylistRow {
@@ -144,6 +152,7 @@ interface HistoryRow {
   user_id: string;
   track_json: string;
   played_at: number;
+  playlist_name?: string | null;
 }
 
 interface SessionRow {
@@ -304,6 +313,29 @@ export class CadenceDatabase {
         `ALTER TABLE guild_settings ADD COLUMN pause_on_empty_seconds INTEGER NOT NULL DEFAULT 0`
       );
     }
+    if (!guildCols.includes("empty_vc_disconnect_minutes")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN empty_vc_disconnect_minutes INTEGER NOT NULL DEFAULT 30`
+      );
+    }
+    if (!guildCols.includes("ignore_deafened_listeners")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN ignore_deafened_listeners INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+    if (!guildCols.includes("default_play_next")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN default_play_next INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+
+    const historyCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(play_history)`)
+      .all()
+      .map((col) => col.name);
+    if (!historyCols.includes("playlist_name")) {
+      this.db.exec(`ALTER TABLE play_history ADD COLUMN playlist_name TEXT`);
+    }
   }
 
   private parseRoleIdList(raw: string | null | undefined): string[] {
@@ -329,7 +361,7 @@ export class CadenceDatabase {
   getGuildSettings(guildId: string): GuildSettingsDTO {
     const row = this.db
       .query<GuildSettingsRow, [string]>(
-        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds
+        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next
          FROM guild_settings WHERE guild_id = ?`
       )
       .get(guildId);
@@ -347,6 +379,9 @@ export class CadenceDatabase {
         allowDuplicates: true,
         pauseOnEmpty: true,
         pauseOnEmptySeconds: 0,
+        emptyVcDisconnectMinutes: 30,
+        ignoreDeafenedListeners: false,
+        defaultPlayNext: false,
       };
     }
 
@@ -362,6 +397,12 @@ export class CadenceDatabase {
       allowDuplicates: row.allow_duplicates === 1,
       pauseOnEmpty: row.pause_on_empty === undefined ? true : row.pause_on_empty === 1,
       pauseOnEmptySeconds: normalizeEmptyPauseSeconds(row.pause_on_empty_seconds, 0),
+      emptyVcDisconnectMinutes: normalizeEmptyDisconnectMinutes(
+        row.empty_vc_disconnect_minutes,
+        30
+      ),
+      ignoreDeafenedListeners: row.ignore_deafened_listeners === 1,
+      defaultPlayNext: row.default_play_next === 1,
     };
   }
 
@@ -407,12 +448,24 @@ export class CadenceDatabase {
         patch.pauseOnEmptySeconds,
         current.pauseOnEmptySeconds
       ),
+      emptyVcDisconnectMinutes: normalizeEmptyDisconnectMinutes(
+        patch.emptyVcDisconnectMinutes,
+        current.emptyVcDisconnectMinutes
+      ),
+      ignoreDeafenedListeners:
+        typeof patch.ignoreDeafenedListeners === "boolean"
+          ? patch.ignoreDeafenedListeners
+          : current.ignoreDeafenedListeners,
+      defaultPlayNext:
+        typeof patch.defaultPlayNext === "boolean"
+          ? patch.defaultPlayNext
+          : current.defaultPlayNext,
     };
 
     this.db
       .query(
-        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id) DO UPDATE SET
            prefix = excluded.prefix,
            default_volume = excluded.default_volume,
@@ -423,7 +476,10 @@ export class CadenceDatabase {
            autoplay = excluded.autoplay,
            allow_duplicates = excluded.allow_duplicates,
            pause_on_empty = excluded.pause_on_empty,
-           pause_on_empty_seconds = excluded.pause_on_empty_seconds`
+           pause_on_empty_seconds = excluded.pause_on_empty_seconds,
+           empty_vc_disconnect_minutes = excluded.empty_vc_disconnect_minutes,
+           ignore_deafened_listeners = excluded.ignore_deafened_listeners,
+           default_play_next = excluded.default_play_next`
       )
       .run(
         next.guildId,
@@ -436,7 +492,10 @@ export class CadenceDatabase {
         next.autoplay ? 1 : 0,
         next.allowDuplicates ? 1 : 0,
         next.pauseOnEmpty ? 1 : 0,
-        next.pauseOnEmptySeconds
+        next.pauseOnEmptySeconds,
+        next.emptyVcDisconnectMinutes,
+        next.ignoreDeafenedListeners ? 1 : 0,
+        next.defaultPlayNext ? 1 : 0
       );
 
     return next;
@@ -1169,29 +1228,48 @@ export class CadenceDatabase {
     return { ...playlist, tracks: updatedTracks, updatedAt: now };
   }
 
-  recordPlayHistory(userId: string, track: TrackDTO): void {
+  recordPlayHistory(userId: string, track: TrackDTO, playlistName?: string | null): void {
     const now = Date.now();
+    const cleanPlaylistName = playlistName?.trim() || null;
     this.db
-      .query(`INSERT INTO play_history (user_id, track_json, played_at) VALUES (?, ?, ?)`)
-      .run(userId, JSON.stringify(track), now);
+      .query(
+        `INSERT INTO play_history (user_id, track_json, played_at, playlist_name) VALUES (?, ?, ?, ?)`
+      )
+      .run(userId, JSON.stringify(track), now, cleanPlaylistName);
   }
 
-  getPlayHistory(userId: string, limit = 1000): HistoryEntryDTO[] {
+  getPlayHistoryCount(userId: string): number {
+    const row = this.db
+      .query<{ cnt: number }, [string]>(
+        `SELECT COUNT(*) AS cnt FROM play_history WHERE user_id = ?`
+      )
+      .get(userId);
+    return row?.cnt ?? 0;
+  }
+
+  getPlayHistory(userId: string, limit = 100, offset = 0): HistoryEntryDTO[] {
+    const safeLimit = Math.max(1, Math.min(1000, Math.round(limit)));
+    const safeOffset = Math.max(0, Math.round(offset));
     const rows = this.db
-      .query<HistoryRow, [string, number]>(
-        `SELECT id, user_id, track_json, played_at
+      .query<HistoryRow, [string, number, number]>(
+        `SELECT id, user_id, track_json, played_at, playlist_name
          FROM play_history
          WHERE user_id = ?
          ORDER BY played_at DESC, id DESC
-         LIMIT ?`
+         LIMIT ? OFFSET ?`
       )
-      .all(userId, limit);
+      .all(userId, safeLimit, safeOffset);
 
     const entries: HistoryEntryDTO[] = [];
     for (const row of rows) {
       try {
         const track = JSON.parse(row.track_json) as TrackDTO;
-        entries.push({ id: row.id, track, playedAt: row.played_at });
+        entries.push({
+          id: row.id,
+          track,
+          playedAt: row.played_at,
+          playlistName: row.playlist_name ?? null,
+        });
       } catch {
         // Ignore corrupted history rows
       }

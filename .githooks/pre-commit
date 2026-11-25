@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Cadence pre-commit verification hook (enable with: git config core.hooksPath .githooks)
+
+set -e
+
+if ! git diff --cached --name-only | grep -qx "package.json"; then
+  echo "[pre-commit] ERROR: package.json must be staged with a bumped version on every commit."
+  exit 1
+fi
+
+if ! git diff --cached package.json | grep -Eq '^\+\s*"version":'; then
+  echo "[pre-commit] ERROR: Bump \"version\" in package.json before committing (see AGENTS.md)."
+  exit 1
+fi
+
+bun run typecheck

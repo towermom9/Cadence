@@ -46,7 +46,7 @@ async function main() {
 
   if (config.needsSetup) {
     console.log(
-      `[Cadence] First-time setup required — open ${config.dashboardUrl} in your browser to run the setup wizard.`
+      `[Cadence] First-time setup required - open ${config.dashboardUrl} in your browser to run the setup wizard.`
     );
   }
 

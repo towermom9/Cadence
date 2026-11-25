@@ -725,6 +725,9 @@ export function App() {
                     playlists={sortedPlaylists}
                     playlistSort={socket.playlistSort}
                     history={socket.history}
+                    historyTotal={socket.historyTotal}
+                    historyHasMore={socket.historyHasMore}
+                    loadingMoreHistory={socket.loadingMoreHistory}
                     initialTab={libraryTab}
                     onCreatePlaylist={socket.createPlaylist}
                     onImportPlaylist={socket.importPlaylist}
@@ -737,6 +740,7 @@ export function App() {
                     }}
                     onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
                     onEnqueue={handleEnqueue}
+                    onLoadMoreHistory={socket.loadMoreHistory}
                     onClearHistory={socket.clearHistory}
                     onOpenArtist={handleOpenArtist}
                     onTrackContextMenu={handleTrackContextMenu}

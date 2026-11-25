@@ -153,6 +153,24 @@ export class CadenceWsHub {
     });
   }
 
+  private sendHistoryPage(
+    rawWs: RawSocket,
+    userId: string,
+    limit = 100,
+    offset = 0
+  ): void {
+    const safeLimit = Math.max(1, Math.min(200, Math.round(limit)));
+    const safeOffset = Math.max(0, Math.round(offset));
+    const entries = this.db.getPlayHistory(userId, safeLimit, safeOffset);
+    const total = this.db.getPlayHistoryCount(userId);
+    this.send(rawWs, {
+      type: "history",
+      entries,
+      total,
+      hasMore: safeOffset + entries.length < total,
+    });
+  }
+
   private sendInitialSnapshot(
     rawWs: RawSocket,
     session: SessionRecord,
@@ -194,10 +212,7 @@ export class CadenceWsHub {
       type: "pinnedTracks",
       tracks: this.db.getPinnedTracks(session.user.id),
     });
-    this.send(rawWs, {
-      type: "history",
-      entries: this.db.getPlayHistory(session.user.id),
-    });
+    this.sendHistoryPage(rawWs, session.user.id, 100, 0);
   }
 
   notifyPlaylistsChanged(userId: string): void {
@@ -345,10 +360,7 @@ export class CadenceWsHub {
               ? `Queued "${msg.tracks[0]?.title || "track"}"`
               : `Queued ${res.added} tracks`;
           this.sendToast(ws, "success", label);
-          this.send(ws, {
-            type: "history",
-            entries: this.db.getPlayHistory(user.id),
-          });
+          this.sendHistoryPage(ws, user.id, 100, 0);
           return;
         }
 
@@ -357,10 +369,7 @@ export class CadenceWsHub {
           const res = await this.bot.music.startMix(msg.guildId, vcId, msg.track, requester);
           const suffix = res.added > 0 ? ` (+${res.added} tracks)` : "";
           this.sendToast(ws, "success", `Started mix for "${msg.track.title}"${suffix}`);
-          this.send(ws, {
-            type: "history",
-            entries: this.db.getPlayHistory(user.id),
-          });
+          this.sendHistoryPage(ws, user.id, 100, 0);
           return;
         }
 
@@ -840,7 +849,7 @@ export class CadenceWsHub {
         }
 
         case "getHistory": {
-          this.send(ws, { type: "history", entries: this.db.getPlayHistory(user.id) });
+          this.sendHistoryPage(ws, user.id, msg.limit ?? 100, msg.offset ?? 0);
           return;
         }
 
@@ -880,7 +889,7 @@ export class CadenceWsHub {
 
         case "clearHistory": {
           this.db.clearPlayHistory(user.id);
-          this.send(ws, { type: "history", entries: [] });
+          this.send(ws, { type: "history", entries: [], total: 0, hasMore: false });
           this.sendToast(ws, "info", "Play history cleared");
           return;
         }
@@ -890,7 +899,7 @@ export class CadenceWsHub {
             historyId: msg.historyId,
             trackIdentifier: msg.trackIdentifier,
           });
-          this.send(ws, { type: "history", entries: this.db.getPlayHistory(user.id) });
+          this.sendHistoryPage(ws, user.id, 100, 0);
           if (removed) {
             this.sendToast(ws, "info", "Removed from play history");
           }

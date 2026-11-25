@@ -25,7 +25,7 @@ function cleanTrackTitle(raw: string, artist?: string): string {
   const primaryArtist = splitArtists(artist || "")[0];
   if (primaryArtist) {
     const escaped = primaryArtist.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    title = title.replace(new RegExp(`^${escaped}\\s*[-–—:|]\\s*`, "i"), "");
+    title = title.replace(new RegExp(`^${escaped}\\s*[-–\u2014:|]\\s*`, "i"), "");
   }
 
   return title
@@ -38,7 +38,7 @@ function cleanTrackTitle(raw: string, artist?: string): string {
       ""
     )
     .replace(/\s*\|\s*[^|]+$/g, "")
-    .replace(/\b(ft\.|feat\.)\s+[^-–—()[\]]+/gi, "")
+    .replace(/\b(ft\.|feat\.)\s+[^-–\u2014()[\]]+/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 }

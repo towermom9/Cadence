@@ -273,7 +273,7 @@ export function OnboardingWizard({ onComplete }: Props) {
             <div>
               <CadenceBanner className="h-6" />
               <p className="mt-1 text-xs text-zinc-400">
-                Guided first-time setup — no manual config editing required
+                Guided first-time setup - no manual config editing required
               </p>
             </div>
           </div>
@@ -714,7 +714,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 Bot &amp; Dashboard Preferences
               </h2>
               <p className="mt-1 text-xs text-zinc-400">
-                Choose your theme, command prefix, and music defaults — saved across sessions automatically.
+                Choose your theme, command prefix, and music defaults - saved across sessions automatically.
               </p>
             </div>
 

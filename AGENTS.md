@@ -5,10 +5,11 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
 ## Scope & Safety Constraints
 
 - **Where to make changes:**
-  - `server/` — Bun + Hono HTTP/OAuth2/WebSocket backend, `discord.js` v14 bot, `lavalink-client` audio service, and `bun:sqlite` database layer.
-  - `web/` — React 19 + Tailwind CSS v4 frontend dashboard.
-  - `shared/` — Shared TypeScript DTOs, WebSocket message contracts, artist parsers, and audio volume curves.
-  - `lavalink/` — Self-contained Lavalink v4 Docker image, `entrypoint.sh` plugin version resolver, and `application.yml`.
+  - `server/` - Bun + Hono HTTP/OAuth2/WebSocket backend, `discord.js` v14 bot, `lavalink-client` audio service, and `bun:sqlite` database layer.
+  - `web/` - React 19 + Tailwind CSS v4 frontend dashboard.
+  - `shared/` - Shared TypeScript DTOs, WebSocket message contracts, artist parsers, and audio volume curves.
+  - `lavalink/` - Self-contained Lavalink v4 Docker image, `entrypoint.sh` plugin version resolver, and `application.yml`.
+  - `tests/` - Isolated `bun test` unit tests (`artists`, `volume`, `lrc`, and temp-dir `db` tests).
 - **What NEVER to touch:**
   - **NEVER** delete, overwrite, or modify `data/` (`data/cadence.sqlite` stores live Discord credentials, OAuth2 sessions, user playlists, and guild settings).
   - Any unit or scratch test that instantiates `CadenceDatabase` **must** point `process.env.DATA_DIR` to an isolated temporary directory (`mkdtempSync(join(tmpdir(), "cadence-test-"))`) before importing `server/db.ts`, and clean it up on exit.
@@ -16,20 +17,20 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
 ## Mandatory Versioning, Build & Git Rules
 
 1. **Bump `package.json` version on EVERY commit:**
-   - Every committed change **must** increment the semantic `"version"` field in `package.json` (e.g., `0.1.2` → `0.1.3`).
+   - Every committed change **must** increment the semantic `"version"` field in `package.json` (e.g., `0.1.4` -> `0.1.5`).
    - `/api/health`, `/api/meta`, `/help`, the web footer (`__CADENCE_VERSION__`), and `.github/workflows/docker-publish.yml` all read `"version"` directly from `package.json`.
+   - Enable the pre-commit verification hook locally with `git config core.hooksPath .githooks`.
 2. **Verify before committing:**
-   - Always run typechecking and a production frontend build before creating a commit:
+   - Always run typechecking, unit tests, and a production frontend build before creating a commit:
      ```bash
-     bun run typecheck
-     bun run build:web
+     bun run verify
      ```
-   - Both commands must exit with code `0`.
+     (Runs `bun run typecheck && bun test && bun run build:web`; all must exit with code `0`.)
    - *(Windows PowerShell note)*: If `bun` or `docker` are not on the default shell `PATH`, prepend them first:
      ```powershell
      $env:PATH = "$env:USERPROFILE\.bun\bin;C:\Program Files\Docker\Docker\resources\bin;$env:PATH"
      ```
-3. **Local commits only — do NOT push:**
+3. **Local commits only - do NOT push:**
    - Stage only the modified source files and create a local commit on `main` formatted as `v<version>: <concise summary>`.
    - **NEVER** run `git push` unless the user explicitly asks you to push.
 
@@ -49,25 +50,30 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
   - Lavalink emits an asynchronous `TrackEndEvent` after `stopPlaying(true, false)`. Keep the `dismissedGuilds` timestamp guard in `trackEnd` and `queueEnd` so stopped tracks are not pushed back into `player.queue.previous`.
 - **4-Tier Discord Role-Based Access (No OTP):**
   - Do **not** reintroduce DM OTP verification. Access is determined directly from the authenticated Discord user's identity and guild roles across 4 cascading tiers:
-    1. **Tier 1 · User** (`accessRoleIds`, or everyone if empty) — Search, enqueue, personal playlists/likes/pins/history, remove own queued tracks.
-    2. **Tier 2 · DJ** (`djRoleId`, or alone in voice channel) — Playback controls, seek, volume, loop, shuffle, autoplay, DSP filters, queue reordering/clearing/dismissing.
-    3. **Tier 3 · Admin** (`adminRoleIds`, or Discord `ManageGuild` / `Administrator`) — Server Settings tab and `/settings` command.
-    4. **Tier 4 · Server Owner & Bot Owner** — System Settings tab (`/api/system/info`, `/api/system/logs` with automatic secret/webhook/email/IP redaction in `server/logger.ts`).
+    1. **Tier 1 · User** (`accessRoleIds`, or everyone if empty) - Search, enqueue, personal playlists/likes/pins/history, remove own queued tracks.
+    2. **Tier 2 · DJ** (`djRoleId`, or alone in voice channel) - Playback controls, seek, volume, loop, shuffle, autoplay, DSP filters, queue reordering/clearing/dismissing.
+    3. **Tier 3 · Admin** (`adminRoleIds`, or Discord `ManageGuild` / `Administrator`) - Server Settings tab and `/settings` command.
+    4. **Tier 4 · Server Owner & Bot Owner** - System Settings tab (`/api/system/info`, `/api/system/logs` with automatic secret/webhook/email/IP redaction in `server/logger.ts`).
 - **Perceptual Volume Curve & Smooth Updates:**
   - Always convert UI volume (`0–100%`) to Lavalink volume using `uiVolumeToLavalink` in `shared/volume.ts` (`((clamped / 100) ** 1.6) * 100`).
   - Do not trigger full-app React state updates on every slider pixel drag in `useCadenceSocket.setVolume`; rely on the coalesced volume loop in `MusicService.setVolume`.
-- **Discord VC Chat Controller:**
+- **Discord VC Chat Controller & Message Hygiene:**
   - `MusicService.ensurePlayer` must default `textChannelId` to `voiceChannelId` (and `CadenceBot.invokeController` must fall back to `player.voiceChannelId`) so starting playback from the web dashboard posts the Now Playing controller into the voice channel's text chat.
-  - Keep the Discord Now Playing controller buttons clean: Row 1 = `Back`, `Pause`/`Resume`, `Skip`; Row 2 = `Leave`, `❤️`, `Queue`, `Web` (no Loop or Shuffle buttons on the embed).
-- **Empty Voice Channel Auto-Pause & Auto-Resume:**
-  - When all non-bot members leave the bot's voice channel and `pauseOnEmpty` is enabled, `MusicService.handleVoiceChannelEmpty` waits `pauseOnEmptySeconds` (`0–300s`) before pausing playback and recording `autoPausedByEmptyVc`, rather than destroying the player via `scheduleInactivityCheck`.
-  - When a human listener joins (`handleVoiceChannelOccupied`), cancel any active empty-VC countdown timer and automatically resume playback only if `autoPausedByEmptyVc` was set (never override a manual pause made while listeners were present).
+  - Keep the Discord Now Playing controller buttons clean: Row 1 = `Back`, `Pause`/`Resume`, `Skip`; Row 2 = `Leave`, `❤️`, `Queue`, `Web` (no Loop or Shuffle buttons on the embed, and no phone emoji in the author header).
+  - Non-controller command replies and transient voice status messages are tracked per guild and cleaned up automatically so old bot messages do not accumulate in Discord chat.
+- **Empty Voice Channel Auto-Pause, Auto-Resume & Auto-Disconnect:**
+  - When all non-bot (and optionally non-deafened when `ignoreDeafenedListeners` is enabled) members leave the bot's voice channel and `pauseOnEmpty` is enabled, `MusicService.handleVoiceChannelEmpty` waits `pauseOnEmptySeconds` (`0–300s`) before pausing playback, announcing the pause in Discord chat, and recording `autoPausedByEmptyVc`, rather than destroying the player via `scheduleInactivityCheck`.
+  - When `stay247` is disabled and `emptyVcDisconnectMinutes > 0` (`0–120m`), `scheduleEmptyVcDisconnect` disconnects the bot if nobody returns after extended auto-pause.
+  - When an active listener joins (`handleVoiceChannelOccupied`), cancel any active countdown/disconnect timers and automatically resume playback only if `autoPausedByEmptyVc` was set (never override a manual pause made while listeners were present).
+- **Queue Loop History Deduplication & Playlist Grouping:**
+  - When `repeatMode === "queue"` wraps around (`queueLoopWrapped`), skip calling `db.recordPlayHistory` so looped tracks/playlists do not flood `play_history`. Store `playlistName` on initial playlist playback so history groups consecutive playlist tracks cleanly.
 - **Lavalink YouTube Client Order & Pre-Bundled Plugins:**
   - In `lavalink/application.yml`, keep `WEB` and `ANDROID_VR` ahead of `IOS` in `plugins.youtube.clients` (`MUSIC`, `WEB`, `ANDROID_VR`, `MWEB`, `IOS`, `TV`, `WEBEMBEDDED`, `TVHTML5_SIMPLY`) so `ytsearch:` queries are handled by `WEB` instead of returning empty results on `IOS`.
   - Keep `lavalink/Dockerfile` and `lavalink/entrypoint.sh` self-contained (pre-bundling the latest `youtube-plugin` beta/snapshot, `lavasrc-plugin`, and `lavalyrics-plugin` from `maven.lavalink.dev` without requiring host volume mounts).
 
 ## Code Quality & Style
 
-- Reuse shared helpers in `shared/` (`shared/types.ts`, `shared/volume.ts`, `shared/artists.ts`) and `web/src/utils/` (`format.ts`, `theme.ts`, `playlists.ts`) before writing new utilities.
+- Reuse shared helpers in `shared/` (`shared/types.ts`, `shared/volume.ts`, `shared/artists.ts`) and `web/src/utils/` (`format.ts`, `theme.ts`, `playlists.ts`, `lrc.ts`) before writing new utilities.
+- Avoid em-dashes (`\u2014`) in UI copy, bot messages, and documentation; use standard hyphens (`-`) instead.
 - Avoid obvious comments; only comment non-obvious "whys" (e.g., Lavalink async event races, Innertube client quirks, or timeline index math).
 - Do not over-engineer: keep changes focused on what was requested without adding speculative abstractions.

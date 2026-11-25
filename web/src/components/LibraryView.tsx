@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type MouseEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronDown,
+  ChevronRight,
   Disc3,
   Link2,
+  ListMusic,
+  Loader2,
   MoreVertical,
   Pin,
   Play,
@@ -31,6 +34,9 @@ interface Props {
   playlists: PlaylistDTO[];
   playlistSort: PlaylistSortMode;
   history: HistoryEntryDTO[];
+  historyTotal?: number;
+  historyHasMore?: boolean;
+  loadingMoreHistory?: boolean;
   initialTab?: "playlists" | "history";
   onCreatePlaylist: (name: string) => void;
   onImportPlaylist: (url: string, name?: string) => void;
@@ -40,16 +46,24 @@ interface Props {
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
   onEnqueue: (tracks: TrackDTO[], mode: EnqueueMode, sourceLabel?: string) => void;
+  onLoadMoreHistory?: () => void;
   onClearHistory: () => void;
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
   onPlaylistContextMenu: (e: MouseEvent, playlist: PlaylistDTO) => void;
 }
 
+type HistoryDisplayItem =
+  | { kind: "entry"; entry: HistoryEntryDTO }
+  | { kind: "playlist"; key: string; playlistName: string; entries: HistoryEntryDTO[] };
+
 export function LibraryView({
   playlists,
   playlistSort,
   history,
+  historyTotal,
+  historyHasMore = false,
+  loadingMoreHistory = false,
   initialTab = "playlists",
   onCreatePlaylist,
   onImportPlaylist,
@@ -59,6 +73,7 @@ export function LibraryView({
   onSelectPlaylist,
   onPlayPlaylist,
   onEnqueue,
+  onLoadMoreHistory,
   onClearHistory,
   onOpenArtist,
   onTrackContextMenu,
@@ -72,11 +87,57 @@ export function LibraryView({
   const [sortOpen, setSortOpen] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [visibleHistoryLimit, setVisibleHistoryLimit] = useState(40);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const sortRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (tab !== "history") {
+      setVisibleHistoryLimit(40);
+    }
+  }, [tab]);
+
+  const historyDisplayItems = useMemo<HistoryDisplayItem[]>(() => {
+    const items: HistoryDisplayItem[] = [];
+    let i = 0;
+    while (i < history.length) {
+      const current = history[i];
+      const plName = current.playlistName?.trim();
+      if (plName) {
+        const group: HistoryEntryDTO[] = [current];
+        let j = i + 1;
+        while (j < history.length && history[j].playlistName?.trim() === plName) {
+          group.push(history[j]);
+          j++;
+        }
+        if (group.length > 1) {
+          items.push({
+            kind: "playlist",
+            key: `pl-${current.id}-${plName}`,
+            playlistName: plName,
+            entries: group,
+          });
+          i = j;
+          continue;
+        }
+      }
+      items.push({ kind: "entry", entry: current });
+      i++;
+    }
+    return items;
+  }, [history]);
+
+  const visibleHistoryItems = useMemo(
+    () => historyDisplayItems.slice(0, visibleHistoryLimit),
+    [historyDisplayItems, visibleHistoryLimit]
+  );
+
+  const resolvedHistoryTotal = Math.max(history.length, historyTotal ?? history.length);
+  const hasMoreRendered = visibleHistoryLimit < historyDisplayItems.length;
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -167,7 +228,7 @@ export function LibraryView({
                 : "bg-white/[0.06] text-zinc-300 hover:bg-white/12"
             }`}
           >
-            History ({history.length})
+            History ({resolvedHistoryTotal})
           </button>
         </div>
 
@@ -452,61 +513,230 @@ export function LibraryView({
               Songs you play will show up here.
             </div>
           ) : (
-            <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-[#121212]">
-              {history.map((entry) => (
-                <div
-                  key={entry.id}
-                  onClick={() => onEnqueue([entry.track], "now")}
-                  onContextMenu={(e) =>
-                    onTrackContextMenu(e, entry.track, { historyId: entry.id, inHistory: true })
+            <div className="space-y-3">
+              <div className="divide-y divide-white/8 rounded-xl border border-white/8 bg-[#121212]">
+                {visibleHistoryItems.map((item) => {
+                  if (item.kind === "playlist") {
+                    const expanded = Boolean(expandedGroups[item.key]);
+                    const tracksForPlay = [...item.entries].reverse().map((e) => e.track);
+                    const coverTrack = item.entries[0]?.track;
+                    return (
+                      <div key={item.key} className="divide-y divide-white/[0.05]">
+                        <div
+                          onClick={() =>
+                            setExpandedGroups((prev) => ({
+                              ...prev,
+                              [item.key]: !prev[item.key],
+                            }))
+                          }
+                          className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
+                        >
+                          <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded">
+                            <TrackArtwork
+                              track={coverTrack}
+                              className="h-10 w-10"
+                              iconClassName="h-4 w-4"
+                            />
+                            <span className="absolute bottom-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded bg-black/80 text-white">
+                              <ListMusic className="h-2.5 w-2.5" />
+                            </span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-white">
+                              {item.playlistName}
+                            </p>
+                            <p className="truncate text-xs text-zinc-400">
+                              Playlist • {item.entries.length} tracks played
+                            </p>
+                          </div>
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1"
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onEnqueue(tracksForPlay, "replace", item.playlistName)
+                              }
+                              title="Play playlist"
+                              className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                            >
+                              <Play className="h-4 w-4 fill-current" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onEnqueue(tracksForPlay, "end", item.playlistName)
+                              }
+                              title="Add playlist to queue"
+                              className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedGroups((prev) => ({
+                                  ...prev,
+                                  [item.key]: !prev[item.key],
+                                }))
+                              }
+                              title={expanded ? "Collapse tracks" : "Show tracks"}
+                              className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                            >
+                              {expanded ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {expanded && (
+                          <div className="divide-y divide-white/[0.04] bg-black/25 pl-8">
+                            {item.entries.map((entry) => (
+                              <div
+                                key={entry.id}
+                                onClick={() => onEnqueue([entry.track], "now")}
+                                onContextMenu={(e) =>
+                                  onTrackContextMenu(e, entry.track, {
+                                    historyId: entry.id,
+                                    inHistory: true,
+                                  })
+                                }
+                                className="flex cursor-pointer items-center gap-3 px-4 py-2 transition hover:bg-white/[0.04]"
+                              >
+                                <TrackArtwork
+                                  track={entry.track}
+                                  className="h-8 w-8 shrink-0 rounded"
+                                  iconClassName="h-3.5 w-3.5"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-medium text-zinc-100">
+                                    {entry.track.title}
+                                  </p>
+                                  <p className="truncate text-[11px] text-zinc-400">
+                                    <ArtistLinks
+                                      author={entry.track.author}
+                                      onOpenArtist={onOpenArtist}
+                                    />
+                                    <span>
+                                      {" "}
+                                      • {sourceLabel(entry.track.sourceName)} •{" "}
+                                      {formatMs(entry.track.duration)}
+                                    </span>
+                                  </p>
+                                </div>
+                                <div
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex items-center gap-0.5"
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => onEnqueue([entry.track], "now")}
+                                    title="Play now"
+                                    className="rounded-full p-1.5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                                  >
+                                    <Play className="h-3.5 w-3.5 fill-current" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onEnqueue([entry.track], "end")}
+                                    title="Add to queue"
+                                    className="rounded-full p-1.5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
                   }
-                  className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
-                >
-                  <TrackArtwork
-                    track={entry.track}
-                    className="h-10 w-10 shrink-0 rounded"
-                    iconClassName="h-4 w-4"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-white">{entry.track.title}</p>
-                    <p className="truncate text-xs text-zinc-400">
-                      <ArtistLinks author={entry.track.author} onOpenArtist={onOpenArtist} />
-                      <span> • {sourceLabel(entry.track.sourceName)} • {formatMs(entry.track.duration)}</span>
-                    </p>
-                  </div>
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-0.5"
-                  >
-                    <button
-                      type="button"
+
+                  const entry = item.entry;
+                  return (
+                    <div
+                      key={entry.id}
                       onClick={() => onEnqueue([entry.track], "now")}
-                      title="Play now"
-                      className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <Play className="h-4 w-4 fill-current" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onEnqueue([entry.track], "end")}
-                      title="Add to queue"
-                      className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) =>
+                      onContextMenu={(e) =>
                         onTrackContextMenu(e, entry.track, { historyId: entry.id, inHistory: true })
                       }
-                      title="More options"
-                      className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                      className="flex cursor-pointer items-center gap-3 px-4 py-2.5 transition hover:bg-white/[0.04]"
                     >
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
-                  </div>
+                      <TrackArtwork
+                        track={entry.track}
+                        className="h-10 w-10 shrink-0 rounded"
+                        iconClassName="h-4 w-4"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-white">{entry.track.title}</p>
+                        <p className="truncate text-xs text-zinc-400">
+                          <ArtistLinks author={entry.track.author} onOpenArtist={onOpenArtist} />
+                          <span> • {sourceLabel(entry.track.sourceName)} • {formatMs(entry.track.duration)}</span>
+                        </p>
+                      </div>
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-0.5"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onEnqueue([entry.track], "now")}
+                          title="Play now"
+                          className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                        >
+                          <Play className="h-4 w-4 fill-current" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onEnqueue([entry.track], "end")}
+                          title="Add to queue"
+                          className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) =>
+                            onTrackContextMenu(e, entry.track, { historyId: entry.id, inHistory: true })
+                          }
+                          title="More options"
+                          className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {(hasMoreRendered || historyHasMore) && (
+                <div className="flex justify-center pt-1">
+                  <button
+                    type="button"
+                    disabled={loadingMoreHistory}
+                    onClick={() => {
+                      if (hasMoreRendered) {
+                        setVisibleHistoryLimit((prev) => prev + 40);
+                      } else if (onLoadMoreHistory) {
+                        onLoadMoreHistory();
+                        setVisibleHistoryLimit((prev) => prev + 50);
+                      }
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.05] px-5 py-2 text-xs font-medium text-zinc-200 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  >
+                    {loadingMoreHistory && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {loadingMoreHistory
+                      ? "Loading history..."
+                      : `Load more history (${historyDisplayItems.length - visibleHistoryItems.length > 0 ? `${historyDisplayItems.length - visibleHistoryItems.length} ready` : `${resolvedHistoryTotal - history.length} more`})`}
+                  </button>
                 </div>
-              ))}
+              )}
             </div>
           )}
         </>

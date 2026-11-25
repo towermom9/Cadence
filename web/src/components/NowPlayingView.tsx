@@ -36,6 +36,7 @@ import type {
   UserPreferencesDTO,
 } from "@shared/types";
 import { formatMs, sourceLabel } from "../utils/format";
+import { parseSyncedLyrics, stripInlineTags } from "../utils/lrc";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { TrackArtwork } from "./TrackArtwork";
@@ -101,106 +102,6 @@ interface Props {
   onOpenArtist: (artistName: string) => void;
   onTrackContextMenu: (e: MouseEvent, track: TrackDTO, ctx?: TrackMenuContext) => void;
   appVersion?: string;
-}
-
-interface SyncedWord {
-  timeMs: number;
-  text: string;
-}
-
-interface SyncedLine {
-  timeMs: number;
-  text: string;
-  words?: SyncedWord[];
-}
-
-function toTimestampMs(minStr: string, secStr: string, fracStr?: string): number {
-  const min = Number(minStr);
-  const sec = Number(secStr);
-  const frac = fracStr ? Number(fracStr.padEnd(3, "0").slice(0, 3)) : 0;
-  return min * 60_000 + sec * 1000 + frac;
-}
-
-function stripInlineTags(raw: string): string {
-  return raw
-    .replace(/<\d{1,3}:\d{2}(?:\.\d{1,3})?>/g, " ")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/^ +| +$/gm, "");
-}
-
-function parseEnhancedBody(
-  body: string,
-  lineTimeMs: number,
-  offsetMs: number
-): { text: string; words?: SyncedWord[] } {
-  const inlineRegex = /<(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?>/g;
-  if (!inlineRegex.test(body)) {
-    const clean = body.trim() || "♪";
-    return { text: clean };
-  }
-
-  inlineRegex.lastIndex = 0;
-  const words: SyncedWord[] = [];
-  let lastIdx = 0;
-  let activeTime = lineTimeMs;
-  let match: RegExpExecArray | null;
-
-  while ((match = inlineRegex.exec(body)) !== null) {
-    const chunk = body.slice(lastIdx, match.index);
-    const cleaned = chunk.replace(/\s+/g, " ").trim();
-    if (cleaned) {
-      words.push({ timeMs: activeTime, text: cleaned });
-    }
-    activeTime = Math.max(0, toTimestampMs(match[1], match[2], match[3]) - offsetMs);
-    lastIdx = match.index + match[0].length;
-  }
-
-  const tail = body.slice(lastIdx).replace(/\s+/g, " ").trim();
-  if (tail) {
-    words.push({ timeMs: activeTime, text: tail });
-  }
-
-  const plain = words.map((w) => w.text).join(" ").trim() || "♪";
-  return words.length > 0 ? { text: plain, words } : { text: plain };
-}
-
-function parseSyncedLyrics(raw: string | null | undefined): SyncedLine[] {
-  if (!raw) return [];
-  const rawLines = raw.split(/\r?\n/);
-
-  let offsetMs = 0;
-  for (const l of rawLines) {
-    const om = l.match(/^\[offset:\s*([+-]?\d+)\s*\]$/i);
-    if (om) {
-      offsetMs = Number(om[1]) || 0;
-      break;
-    }
-  }
-
-  const lines: SyncedLine[] = [];
-  const prefixPattern = /^((?:\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]\s*)+)(.*)$/;
-  const singleTagPattern = /\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\]/g;
-
-  for (const rawLine of rawLines) {
-    const match = rawLine.match(prefixPattern);
-    if (!match) continue;
-    const tagBlock = match[1];
-    const body = match[2] ?? "";
-
-    singleTagPattern.lastIndex = 0;
-    let tagMatch: RegExpExecArray | null;
-    while ((tagMatch = singleTagPattern.exec(tagBlock)) !== null) {
-      const timeMs = Math.max(
-        0,
-        toTimestampMs(tagMatch[1], tagMatch[2], tagMatch[3]) - offsetMs
-      );
-      const parsed = parseEnhancedBody(body, timeMs, offsetMs);
-      lines.push({ timeMs, text: parsed.text, words: parsed.words });
-    }
-  }
-
-  lines.sort((a, b) => a.timeMs - b.timeMs);
-  return lines;
 }
 
 export function NowPlayingView({
@@ -1076,13 +977,13 @@ export function NowPlayingView({
                     {isOver && dragOverPosition === "above" && (
                       <div
                         style={{ backgroundColor: "var(--cadence-accent)" }}
-                        className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                        className="pointer-events-none absolute inset-x-2 top-0 z-20 h-[3px] rounded-full"
                       />
                     )}
                     {isOver && dragOverPosition === "below" && (
                       <div
                         style={{ backgroundColor: "var(--cadence-accent)" }}
-                        className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                        className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-[3px] rounded-full"
                       />
                     )}
                     {privileged && (
@@ -1200,19 +1101,9 @@ export function NowPlayingView({
                       e.dataTransfer.dropEffect = "move";
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                      if (dragSource.section === "manual" && pos === "above") {
-                        setDragTarget({
-                          section: "previous",
-                          prevIndex: 0,
-                          displayIdx: Math.max(0, previousEntries.length - 1),
-                        });
-                        setDragOverPosition("below");
-                      } else if (dragSource.section === "previous" && pos === "below") {
-                        setDragTarget({ section: "manual", queueIndex: 0 });
-                        setDragOverPosition("above");
-                      } else {
-                        setDragTarget(null);
-                        setDragOverPosition(null);
+                      if (dragTarget?.section !== "current" || dragOverPosition !== pos) {
+                        setDragTarget({ section: "current" });
+                        setDragOverPosition(pos);
                       }
                     }}
                     onDrop={(e) => {
@@ -1223,26 +1114,48 @@ export function NowPlayingView({
                       e.preventDefault();
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
-                      if (dragSource.section === "manual" && pos === "above") {
+                      if (dragSource.section === "manual") {
                         markJustDragged();
                         const from = dragSource.queueIndex;
                         resetDragState();
-                        onMoveQueueToPrevious(from, 0);
-                      } else if (dragSource.section === "previous" && pos === "below") {
+                        if (pos === "above") {
+                          onMoveQueueToPrevious(from, 0);
+                        } else if (from !== 0) {
+                          onMoveTrack(from, 0);
+                        }
+                      } else if (dragSource.section === "previous") {
                         markJustDragged();
                         const fromPrev = dragSource.prevIndex;
                         resetDragState();
-                        onMovePreviousToQueue(fromPrev, 0);
+                        if (pos === "above") {
+                          if (fromPrev !== 0) {
+                            onMovePreviousTrack(fromPrev, 0);
+                          }
+                        } else {
+                          onMovePreviousToQueue(fromPrev, 0);
+                        }
                       } else {
                         resetDragState();
                       }
                     }}
                     onDragEnd={resetDragState}
                     onContextMenu={(e) => onTrackContextMenu(e, current, { isCurrent: true })}
-                    className={`group flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2 ${
+                    className={`group relative flex items-center gap-3 rounded-lg bg-white/[0.10] px-2.5 py-2 ${
                       isDraggingCurrent ? "opacity-40" : ""
                     }`}
                   >
+                    {dragTarget?.section === "current" && dragOverPosition === "above" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 top-0 z-20 h-[3px] rounded-full"
+                      />
+                    )}
+                    {dragTarget?.section === "current" && dragOverPosition === "below" && (
+                      <div
+                        style={{ backgroundColor: "var(--cadence-accent)" }}
+                        className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-[3px] rounded-full"
+                      />
+                    )}
                     {privileged && (
                       <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-500 transition group-hover:text-zinc-200 active:cursor-grabbing" />
                     )}
@@ -1394,13 +1307,13 @@ export function NowPlayingView({
                     {isOver && dragOverPosition === "above" && (
                       <div
                         style={{ backgroundColor: "var(--cadence-accent)" }}
-                        className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                        className="pointer-events-none absolute inset-x-2 top-0 z-20 h-[3px] rounded-full"
                       />
                     )}
                     {isOver && dragOverPosition === "below" && (
                       <div
                         style={{ backgroundColor: "var(--cadence-accent)" }}
-                        className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                        className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-[3px] rounded-full"
                       />
                     )}
                     {privileged && (
@@ -1538,8 +1451,21 @@ export function NowPlayingView({
                   const lastManual = manualEntries[manualEntries.length - 1];
                   handleTimelineDrop({ section: "manual", queueIndex: lastManual.queueIndex });
                 }}
-                className="mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5"
+                className="relative mt-4 border-t border-white/10 px-2.5 pb-2 pt-3.5"
               >
+                {manualEntries.length > 0 &&
+                  dragTarget?.section === "manual" &&
+                  dragTarget.queueIndex === manualEntries[manualEntries.length - 1]?.queueIndex &&
+                  dragOverPosition === "below" &&
+                  !(
+                    dragSource?.section === "manual" &&
+                    dragSource.queueIndex === manualEntries[manualEntries.length - 1]?.queueIndex
+                  ) && (
+                    <div
+                      style={{ backgroundColor: "var(--cadence-accent)" }}
+                      className="pointer-events-none absolute inset-x-2 -top-0.5 z-20 h-[3px] rounded-full"
+                    />
+                  )}
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-white">Autoplay</p>
@@ -1653,13 +1579,13 @@ export function NowPlayingView({
                         {isOver && dragOverPosition === "above" && (
                           <div
                             style={{ backgroundColor: "var(--cadence-accent)" }}
-                            className="pointer-events-none absolute inset-x-2 top-0 h-0.5 rounded-full"
+                            className="pointer-events-none absolute inset-x-2 top-0 z-20 h-[3px] rounded-full"
                           />
                         )}
                         {isOver && dragOverPosition === "below" && (
                           <div
                             style={{ backgroundColor: "var(--cadence-accent)" }}
-                            className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                            className="pointer-events-none absolute inset-x-2 bottom-0 z-20 h-[3px] rounded-full"
                           />
                         )}
                         {privileged && (

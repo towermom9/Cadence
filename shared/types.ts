@@ -146,6 +146,9 @@ export interface GuildSettingsDTO {
   allowDuplicates: boolean;
   pauseOnEmpty: boolean;
   pauseOnEmptySeconds: number;
+  emptyVcDisconnectMinutes: number;
+  ignoreDeafenedListeners: boolean;
+  defaultPlayNext: boolean;
   roles?: { id: string; name: string }[];
 }
 
@@ -178,6 +181,7 @@ export interface HistoryEntryDTO {
   id: number;
   track: TrackDTO;
   playedAt: number;
+  playlistName?: string | null;
 }
 
 export interface LyricsDTO {
@@ -351,7 +355,7 @@ export type WsClientMessage =
   | { type: "setPlaylistSort"; sort: PlaylistSortMode }
   | { type: "reorderPlaylists"; playlistIds: string[] }
   | { type: "updatePreferences"; preferences: Partial<UserPreferencesDTO> }
-  | { type: "getHistory" }
+  | { type: "getHistory"; limit?: number; offset?: number }
   | { type: "clearHistory" }
   | { type: "removeHistoryEntry"; historyId?: number; trackIdentifier?: string }
   | { type: "ping" };
@@ -374,6 +378,6 @@ export type WsServerMessage =
   | { type: "playlists"; playlists: PlaylistDTO[]; playlistSort?: PlaylistSortMode }
   | { type: "pinnedTracks"; tracks: PinnedTrackDTO[] }
   | { type: "preferences"; preferences: UserPreferencesDTO }
-  | { type: "history"; entries: HistoryEntryDTO[] }
+  | { type: "history"; entries: HistoryEntryDTO[]; total?: number; hasMore?: boolean }
   | { type: "toast"; level: ToastLevel; message: string }
   | { type: "pong" };
