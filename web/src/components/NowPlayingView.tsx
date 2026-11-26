@@ -160,13 +160,62 @@ export function NowPlayingView({
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
   const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
+  const [mobileVolDraft, setMobileVolDraft] = useState(() => String(playerState?.volume ?? 100));
+  const [isEditingMobileVol, setIsEditingMobileVol] = useState(false);
   const [mobileScrub, setMobileScrub] = useState<number | null>(null);
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const isDraggingMobileVolRef = useRef(false);
+  const lastMobileVolSentAtRef = useRef(0);
+  const pendingMobileVolRef = useRef<number | null>(null);
+  const mobileVolThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const justDraggedRef = useRef(false);
   const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendMobileVolumeThrottled = useCallback(
+    (vol: number) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+      const now = performance.now();
+      const elapsed = now - lastMobileVolSentAtRef.current;
+      if (elapsed >= 150) {
+        if (mobileVolThrottleRef.current) {
+          clearTimeout(mobileVolThrottleRef.current);
+          mobileVolThrottleRef.current = null;
+        }
+        pendingMobileVolRef.current = null;
+        lastMobileVolSentAtRef.current = now;
+        onVolume(clamped);
+        return;
+      }
+      pendingMobileVolRef.current = clamped;
+      if (!mobileVolThrottleRef.current) {
+        mobileVolThrottleRef.current = setTimeout(() => {
+          mobileVolThrottleRef.current = null;
+          if (pendingMobileVolRef.current !== null) {
+            const next = pendingMobileVolRef.current;
+            pendingMobileVolRef.current = null;
+            lastMobileVolSentAtRef.current = performance.now();
+            onVolume(next);
+          }
+        }, Math.max(16, 150 - elapsed));
+      }
+    },
+    [onVolume]
+  );
+
+  const commitMobileVolDraft = useCallback(() => {
+    setIsEditingMobileVol(false);
+    const parsed = Number.parseInt(mobileVolDraft.trim(), 10);
+    if (!Number.isFinite(parsed)) {
+      setMobileVolDraft(String(mobileVolume));
+      return;
+    }
+    const clamped = Math.max(0, Math.min(100, parsed));
+    setMobileVolume(clamped);
+    setMobileVolDraft(String(clamped));
+    onVolume(clamped);
+  }, [mobileVolDraft, mobileVolume, onVolume]);
 
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const lyricLineRefs = useRef<(HTMLElement | null)[]>([]);
@@ -783,6 +832,7 @@ export function NowPlayingView({
                     onClick={() => {
                       const next = mobileVolume === 0 ? 100 : 0;
                       setMobileVolume(next);
+                      setMobileVolDraft(String(next));
                       onVolume(next);
                     }}
                     className="text-zinc-300 disabled:opacity-40"
@@ -805,24 +855,63 @@ export function NowPlayingView({
                     }}
                     onPointerUp={() => {
                       isDraggingMobileVolRef.current = false;
-                      onVolume(mobileVolume);
+                      if (pendingMobileVolRef.current !== null) {
+                        const finalVol = pendingMobileVolRef.current;
+                        pendingMobileVolRef.current = null;
+                        if (mobileVolThrottleRef.current) {
+                          clearTimeout(mobileVolThrottleRef.current);
+                          mobileVolThrottleRef.current = null;
+                        }
+                        lastMobileVolSentAtRef.current = performance.now();
+                        onVolume(finalVol);
+                      }
                     }}
                     onTouchEnd={() => {
                       isDraggingMobileVolRef.current = false;
-                      onVolume(mobileVolume);
+                      if (pendingMobileVolRef.current !== null) {
+                        const finalVol = pendingMobileVolRef.current;
+                        pendingMobileVolRef.current = null;
+                        lastMobileVolSentAtRef.current = performance.now();
+                        onVolume(finalVol);
+                      }
                     }}
                     onChange={(e) => {
                       const val = Number(e.target.value);
                       setMobileVolume(val);
-                      onVolume(val);
+                      setMobileVolDraft(String(val));
+                      sendMobileVolumeThrottled(val);
                     }}
                     style={{ accentColor: "var(--cadence-accent)" }}
                     aria-label="Mobile volume slider"
                     className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
                   />
-                  <span className="w-9 text-right text-xs tabular-nums text-zinc-300">
-                    {mobileVolume}%
-                  </span>
+                  <div className="flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 focus-within:border-white/35">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      aria-label="Mobile volume percentage"
+                      disabled={!privileged}
+                      value={isEditingMobileVol ? mobileVolDraft : String(mobileVolume)}
+                      onFocus={(e) => {
+                        setIsEditingMobileVol(true);
+                        setMobileVolDraft(String(mobileVolume));
+                        e.currentTarget.select();
+                      }}
+                      onChange={(e) => setMobileVolDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+                      onBlur={commitMobileVolDraft}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        } else if (e.key === "Escape") {
+                          setIsEditingMobileVol(false);
+                          setMobileVolDraft(String(mobileVolume));
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
+                    />
+                    <span className="ml-0.5 text-[11px] text-zinc-400">%</span>
+                  </div>
                 </div>
               </>
             ) : (

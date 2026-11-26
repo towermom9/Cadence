@@ -48,7 +48,7 @@ Cadence/
 ├── server/
 │   ├── index.ts                # Unified process entrypoint (HTTP, WS, Discord Bot, SQLite)
 │   ├── auth.ts                 # Discord OAuth2 session & guild cache helpers
-│   ├── bot.ts                  # Discord.js client, 35 slash commands, prefix commands, VC controller
+│   ├── bot.ts                  # Discord.js client, 37 slash commands, prefix commands, VC controller
 │   ├── config.ts               # Runtime environment & SQLite app_config overlay
 │   ├── db.ts                   # bun:sqlite schema, migrations, playlists, paginated history, settings
 │   ├── logger.ts               # Ring-buffer server logger with automatic secret/PII redaction
@@ -59,21 +59,26 @@ Cadence/
 │   └── ws.ts                   # Real-time WebSocket hub (/ws)
 ├── shared/
 │   ├── artists.ts              # Multi-artist collaboration parser & "- Topic" cleaner
+│   ├── i18n/                   # BCP 47 locale catalogs (en, es, ja, id, de, fr) & translator
 │   ├── types.ts                # Shared DTOs and WebSocket client/server message contracts
 │   └── volume.ts               # Perceptual volume curve (x^1.6) conversion
 ├── tests/
 │   ├── artists.test.ts         # Artist parser & cleaner unit tests
+│   ├── bot.test.ts             # Slash command builder & 4-tier RBAC mocked Discord tests
 │   ├── db.test.ts              # Isolated SQLite persistence tests (temp DATA_DIR)
+│   ├── i18n.test.ts            # BCP 47 locale resolution & full catalog key parity tests
 │   ├── lrc.test.ts             # Synced LRC / ELRC parser unit tests
+│   ├── theme.test.ts           # Hex normalization, WCAG contrast math & preference sanitization
 │   └── volume.test.ts          # Perceptual volume curve rounding & clamping tests
 └── web/
     ├── index.html              # SPA shell & PWA manifest links
     ├── vite.config.ts          # Vite bundler config (injects __CADENCE_VERSION__)
     └── src/
-        ├── App.tsx             # Root application layout, navigation, context menus & hotkeys
-        ├── components/         # React 19 UI views, PlayerBar, NowPlayingView, SettingsView, AppFooter
+        ├── App.tsx             # Root layout, I18nProvider, skip link, aria-live & hotkeys
+        ├── i18n.tsx            # React i18n context synced with document.documentElement.lang
+        ├── components/         # React 19 UI views, NumericSlider, PlayerBar, SettingsView
         ├── hooks/              # useCadenceSocket real-time state & 60fps progress interpolation
-        └── utils/              # Theme accents, AMOLED surfaces, LRC parser, playlist/format helpers
+        └── utils/              # Theme accents, custom hex/WCAG math, LRC parser, playlists
 ```
 
 ---
@@ -174,18 +179,24 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 - `POST /api/preferences` - Persist user UI preferences in SQLite + `cadence_prefs` cookie
 - `GET /api/history?limit=&offset=` - Paginated play history
 - `GET /api/recommendations`, `GET /api/explore`, `GET /api/search/suggest`, `GET /api/artist`, `GET /api/related`, `GET /api/artwork`
-- `GET /api/system/info`, `POST /api/system/domain`, `GET /api/system/logs` - Tier 4 Owner domain configuration, diagnostics & redacted log report
+- `GET /api/system/info`, `POST /api/system/domain`, `POST /api/system/timeout`, `GET /api/system/logs` - Tier 4 Owner domain/timeout configuration, diagnostics & redacted log report
 
 ### Real-Time WebSocket Hub (`server/ws.ts`, `shared/types.ts`)
 - Upgrade endpoint at `/ws` authenticates via session cookie and pushes `ready`, `meta`, `preferences`, `playerState`, `playlists`, `pinnedTracks`, `historyPage`, `settings`, `lyrics`, `searchResults`, and `toast`.
-- `updateSettings` accepts `{ type: "updateSettings", guildId, settings, silent?: boolean }`: Server Settings auto-save passes `silent: true` so changes persist immediately without toast spam, while syncing `pauseOnEmpty` / `pauseOnEmptySeconds` back to user preferences when changed.
+- `updateSettings` accepts `{ type: "updateSettings", guildId, settings, silent?: boolean }`: Server Settings auto-save passes `silent: true` so changes persist immediately without toast spam.
 
 ---
 
 ## Frontend Conventions
 
-- **Theme Accent Variables (`web/src/utils/theme.ts`)**: Interactive brand colors use `--cadence-accent` and `--cadence-accent-fg` alongside `backgroundMode` (`dark`, `amoled`, `elevated`).
-- **Auto-Saving Server Settings (`SettingsView.tsx`)**: Switches and role pills save immediately; the `Text Command Prefix` input and sliders (`defaultVolume`, `pauseOnEmptySeconds`, `emptyVcDisconnectMinutes`) debounce for `350ms` via `commitServerPatch(..., { debounce: true })` and display an inline auto-save status badge in the Server header.
+- **Theme Accent Variables & Custom Swatches (`web/src/utils/theme.ts`)**: Interactive brand colors use `--cadence-accent` and `--cadence-accent-fg` alongside `backgroundMode` (`dark`, `amoled`, `elevated`) and optional custom hex swatches (`customAccentHex`, `customBgHex`, `customSurfaceHex`) with live WCAG contrast calculation (`getContrastRatio`).
+- **Accessibility Standards (Material 3 + W3C WAI / WCAG 2.2)**:
+  - All new UI controls must support keyboard focus indicators (`:focus-visible`), semantic landmarks (`.skip-link` to `#main-content`), ARIA live track announcements, `>= 44x44px` minimum touch targets when **Larger Touch Targets** (`data-touch="large"`) is active, **High Contrast** (`data-contrast="high"`), **Reduced Motion** (`data-motion="reduced"`), and **Text Scale** (`90% - 130%`).
+  - Use `<NumericSlider />` for configuration sliders so every range input pairs smoothly with direct keyboard numeric entry.
+- **Internationalization (`shared/i18n/`, `web/src/i18n.tsx`)**:
+  - Cadence uses **BCP 47** locale tags (`en`, `es`, `ja`, `id`, `de`, `fr`, plus `"auto"` browser detection) with ICU-style `{placeholder}` message catalogs in `shared/i18n/locales/`.
+  - To add a new language: add its BCP 47 code to `SupportedLocale` (`shared/types.ts`), create `shared/i18n/locales/<locale>.ts` with every key from `en.ts`, register it in `shared/i18n/index.ts`, and verify full key parity via `bun test tests/i18n.test.ts`.
+- **Auto-Saving Server Settings (`SettingsView.tsx`)**: Switches and role pills save immediately; `Text Command Prefix` and sliders (`defaultVolume`, `maxHistory`, `pauseOnEmptySeconds`, `emptyVcDisconnectMinutes`) debounce for `350ms` via `commitServerPatch(..., { debounce: true })` and display an inline auto-save status badge in the Server header.
 - **No Em-Dashes:** Keep all UI copy, Discord embeds, and documentation free of literal em-dashes (`\u2014`); use hyphens (`-`).
 
 ---

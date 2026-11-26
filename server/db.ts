@@ -11,11 +11,13 @@ import type {
   PlaylistDTO,
   PlaylistSortMode,
   SearchSource,
+  SupportedLocale,
   ThemeAccentId,
   TrackDTO,
   UserPreferencesDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { VALID_LOCALES } from "@shared/i18n";
 import { config, VALID_SEARCH_SOURCES } from "./config";
 
 const VALID_PLAYLIST_SORTS = new Set<PlaylistSortMode>([
@@ -60,6 +62,16 @@ const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
   defaultSearchSource: "ytmsearch",
   pauseOnEmpty: true,
   pauseOnEmptySeconds: 0,
+  customAccentHex: null,
+  customBgHex: null,
+  customSurfaceHex: null,
+  highContrast: false,
+  reducedMotion: false,
+  textScale: 100,
+  enhancedFocusRings: false,
+  largerTouchTargets: false,
+  screenReaderAnnouncements: true,
+  locale: "auto",
 };
 
 function normalizeSeekSeconds(value: unknown, fallback = 10): number {
@@ -77,6 +89,29 @@ function normalizeEmptyDisconnectMinutes(value: unknown, fallback = 30): number 
   return Math.max(0, Math.min(120, Math.round(value)));
 }
 
+function normalizeMaxHistory(value: unknown, fallback = 500): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(10000, Math.round(value)));
+}
+
+function normalizeTrackStuckTimeoutMs(value: unknown, fallback = 20000): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(5000, Math.min(60000, Math.round(value)));
+}
+
+function normalizeTextScale(value: unknown, fallback = 100): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(90, Math.min(130, Math.round(value)));
+}
+
+function normalizeHexPref(value: unknown, fallback: string | null = null): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed.toLowerCase() : fallback;
+}
+
 export interface StoredAppConfig {
   discordToken: string;
   discordClientId: string;
@@ -84,6 +119,7 @@ export interface StoredAppConfig {
   dashboardUrl: string;
   botPrefix: string;
   defaultSearchSource: SearchSource;
+  trackStuckTimeoutMs?: number;
   ownerUserId: string | null;
   setupCompleted: boolean;
   updatedAt: number;
@@ -96,6 +132,7 @@ interface AppConfigRow {
   dashboard_url: string;
   bot_prefix: string;
   default_search_source: string;
+  track_stuck_timeout_ms?: number;
   owner_user_id: string | null;
   setup_completed: number;
   updated_at: number;
@@ -123,6 +160,7 @@ interface GuildSettingsRow {
   empty_vc_disconnect_minutes?: number;
   ignore_deafened_listeners?: number;
   default_play_next?: number;
+  max_history?: number;
 }
 
 interface PlaylistRow {
@@ -328,6 +366,21 @@ export class CadenceDatabase {
         `ALTER TABLE guild_settings ADD COLUMN default_play_next INTEGER NOT NULL DEFAULT 0`
       );
     }
+    if (!guildCols.includes("max_history")) {
+      this.db.exec(
+        `ALTER TABLE guild_settings ADD COLUMN max_history INTEGER NOT NULL DEFAULT 500`
+      );
+    }
+
+    const appConfigCols = this.db
+      .query<{ name: string }, []>(`PRAGMA table_info(app_config)`)
+      .all()
+      .map((col) => col.name);
+    if (!appConfigCols.includes("track_stuck_timeout_ms")) {
+      this.db.exec(
+        `ALTER TABLE app_config ADD COLUMN track_stuck_timeout_ms INTEGER NOT NULL DEFAULT 20000`
+      );
+    }
 
     const historyCols = this.db
       .query<{ name: string }, []>(`PRAGMA table_info(play_history)`)
@@ -361,7 +414,7 @@ export class CadenceDatabase {
   getGuildSettings(guildId: string): GuildSettingsDTO {
     const row = this.db
       .query<GuildSettingsRow, [string]>(
-        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next
+        `SELECT guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next, max_history
          FROM guild_settings WHERE guild_id = ?`
       )
       .get(guildId);
@@ -382,6 +435,7 @@ export class CadenceDatabase {
         emptyVcDisconnectMinutes: 30,
         ignoreDeafenedListeners: false,
         defaultPlayNext: false,
+        maxHistory: 500,
       };
     }
 
@@ -403,6 +457,7 @@ export class CadenceDatabase {
       ),
       ignoreDeafenedListeners: row.ignore_deafened_listeners === 1,
       defaultPlayNext: row.default_play_next === 1,
+      maxHistory: normalizeMaxHistory(row.max_history, 500),
     };
   }
 
@@ -460,12 +515,13 @@ export class CadenceDatabase {
         typeof patch.defaultPlayNext === "boolean"
           ? patch.defaultPlayNext
           : current.defaultPlayNext,
+      maxHistory: normalizeMaxHistory(patch.maxHistory, current.maxHistory),
     };
 
     this.db
       .query(
-        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO guild_settings (guild_id, prefix, default_volume, dj_role_id, access_role_ids_json, admin_role_ids_json, stay_247, autoplay, allow_duplicates, pause_on_empty, pause_on_empty_seconds, empty_vc_disconnect_minutes, ignore_deafened_listeners, default_play_next, max_history)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(guild_id) DO UPDATE SET
            prefix = excluded.prefix,
            default_volume = excluded.default_volume,
@@ -479,7 +535,8 @@ export class CadenceDatabase {
            pause_on_empty_seconds = excluded.pause_on_empty_seconds,
            empty_vc_disconnect_minutes = excluded.empty_vc_disconnect_minutes,
            ignore_deafened_listeners = excluded.ignore_deafened_listeners,
-           default_play_next = excluded.default_play_next`
+           default_play_next = excluded.default_play_next,
+           max_history = excluded.max_history`
       )
       .run(
         next.guildId,
@@ -495,7 +552,8 @@ export class CadenceDatabase {
         next.pauseOnEmptySeconds,
         next.emptyVcDisconnectMinutes,
         next.ignoreDeafenedListeners ? 1 : 0,
-        next.defaultPlayNext ? 1 : 0
+        next.defaultPlayNext ? 1 : 0,
+        next.maxHistory
       );
 
     return next;
@@ -1045,6 +1103,46 @@ export class CadenceDatabase {
         parsed.pauseOnEmptySeconds,
         DEFAULT_USER_PREFERENCES.pauseOnEmptySeconds
       ),
+      customAccentHex: normalizeHexPref(
+        parsed.customAccentHex,
+        DEFAULT_USER_PREFERENCES.customAccentHex ?? null
+      ),
+      customBgHex: normalizeHexPref(
+        parsed.customBgHex,
+        DEFAULT_USER_PREFERENCES.customBgHex ?? null
+      ),
+      customSurfaceHex: normalizeHexPref(
+        parsed.customSurfaceHex,
+        DEFAULT_USER_PREFERENCES.customSurfaceHex ?? null
+      ),
+      highContrast:
+        typeof parsed.highContrast === "boolean"
+          ? parsed.highContrast
+          : DEFAULT_USER_PREFERENCES.highContrast,
+      reducedMotion:
+        typeof parsed.reducedMotion === "boolean"
+          ? parsed.reducedMotion
+          : DEFAULT_USER_PREFERENCES.reducedMotion,
+      textScale: normalizeTextScale(
+        parsed.textScale,
+        DEFAULT_USER_PREFERENCES.textScale ?? 100
+      ),
+      enhancedFocusRings:
+        typeof parsed.enhancedFocusRings === "boolean"
+          ? parsed.enhancedFocusRings
+          : DEFAULT_USER_PREFERENCES.enhancedFocusRings,
+      largerTouchTargets:
+        typeof parsed.largerTouchTargets === "boolean"
+          ? parsed.largerTouchTargets
+          : DEFAULT_USER_PREFERENCES.largerTouchTargets,
+      screenReaderAnnouncements:
+        typeof parsed.screenReaderAnnouncements === "boolean"
+          ? parsed.screenReaderAnnouncements
+          : DEFAULT_USER_PREFERENCES.screenReaderAnnouncements,
+      locale:
+        parsed.locale && VALID_LOCALES.has(parsed.locale)
+          ? (parsed.locale as SupportedLocale)
+          : DEFAULT_USER_PREFERENCES.locale,
     };
   }
 
@@ -1098,6 +1196,30 @@ export class CadenceDatabase {
         patch.pauseOnEmptySeconds,
         current.pauseOnEmptySeconds
       ),
+      customAccentHex: normalizeHexPref(patch.customAccentHex, current.customAccentHex ?? null),
+      customBgHex: normalizeHexPref(patch.customBgHex, current.customBgHex ?? null),
+      customSurfaceHex: normalizeHexPref(patch.customSurfaceHex, current.customSurfaceHex ?? null),
+      highContrast:
+        typeof patch.highContrast === "boolean" ? patch.highContrast : current.highContrast,
+      reducedMotion:
+        typeof patch.reducedMotion === "boolean" ? patch.reducedMotion : current.reducedMotion,
+      textScale: normalizeTextScale(patch.textScale, current.textScale ?? 100),
+      enhancedFocusRings:
+        typeof patch.enhancedFocusRings === "boolean"
+          ? patch.enhancedFocusRings
+          : current.enhancedFocusRings,
+      largerTouchTargets:
+        typeof patch.largerTouchTargets === "boolean"
+          ? patch.largerTouchTargets
+          : current.largerTouchTargets,
+      screenReaderAnnouncements:
+        typeof patch.screenReaderAnnouncements === "boolean"
+          ? patch.screenReaderAnnouncements
+          : current.screenReaderAnnouncements,
+      locale:
+        patch.locale && VALID_LOCALES.has(patch.locale)
+          ? (patch.locale as SupportedLocale)
+          : current.locale,
     };
 
     const now = Date.now();
@@ -1233,7 +1355,12 @@ export class CadenceDatabase {
     return { ...playlist, tracks: updatedTracks, updatedAt: now };
   }
 
-  recordPlayHistory(userId: string, track: TrackDTO, playlistName?: string | null): void {
+  recordPlayHistory(
+    userId: string,
+    track: TrackDTO,
+    playlistName?: string | null,
+    maxHistory?: number
+  ): void {
     const now = Date.now();
     const cleanPlaylistName = playlistName?.trim() || null;
     this.db
@@ -1241,6 +1368,22 @@ export class CadenceDatabase {
         `INSERT INTO play_history (user_id, track_json, played_at, playlist_name) VALUES (?, ?, ?, ?)`
       )
       .run(userId, JSON.stringify(track), now, cleanPlaylistName);
+
+    if (typeof maxHistory === "number" && maxHistory > 0) {
+      const limit = Math.max(1, Math.min(10000, Math.round(maxHistory)));
+      this.db
+        .query(
+          `DELETE FROM play_history
+           WHERE user_id = ?
+             AND id NOT IN (
+               SELECT id FROM play_history
+               WHERE user_id = ?
+               ORDER BY played_at DESC, id DESC
+               LIMIT ?
+             )`
+        )
+        .run(userId, userId, limit);
+    }
   }
 
   getPlayHistoryCount(userId: string): number {
@@ -1379,7 +1522,7 @@ export class CadenceDatabase {
     const row = this.db
       .query<AppConfigRow, []>(
         `SELECT discord_token, discord_client_id, discord_client_secret, dashboard_url,
-                bot_prefix, default_search_source, owner_user_id, setup_completed, updated_at
+                bot_prefix, default_search_source, track_stuck_timeout_ms, owner_user_id, setup_completed, updated_at
          FROM app_config WHERE id = 1`
       )
       .get();
@@ -1393,6 +1536,7 @@ export class CadenceDatabase {
       dashboardUrl: row.dashboard_url,
       botPrefix: row.bot_prefix || "?",
       defaultSearchSource: (row.default_search_source || "ytmsearch") as SearchSource,
+      trackStuckTimeoutMs: normalizeTrackStuckTimeoutMs(row.track_stuck_timeout_ms, 20000),
       ownerUserId: row.owner_user_id,
       setupCompleted: row.setup_completed === 1,
       updatedAt: row.updated_at,
@@ -1401,13 +1545,17 @@ export class CadenceDatabase {
 
   saveAppConfig(cfg: Omit<StoredAppConfig, "updatedAt">): StoredAppConfig {
     const updatedAt = Date.now();
+    const stuckTimeoutMs = normalizeTrackStuckTimeoutMs(
+      cfg.trackStuckTimeoutMs,
+      config.trackStuckTimeoutMs
+    );
     this.db
       .query(
         `INSERT INTO app_config (
            id, discord_token, discord_client_id, discord_client_secret,
-           dashboard_url, bot_prefix, default_search_source, owner_user_id,
+           dashboard_url, bot_prefix, default_search_source, track_stuck_timeout_ms, owner_user_id,
            setup_completed, updated_at
-         ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            discord_token = excluded.discord_token,
            discord_client_id = excluded.discord_client_id,
@@ -1415,6 +1563,7 @@ export class CadenceDatabase {
            dashboard_url = excluded.dashboard_url,
            bot_prefix = excluded.bot_prefix,
            default_search_source = excluded.default_search_source,
+           track_stuck_timeout_ms = excluded.track_stuck_timeout_ms,
            owner_user_id = excluded.owner_user_id,
            setup_completed = excluded.setup_completed,
            updated_at = excluded.updated_at`
@@ -1426,12 +1575,13 @@ export class CadenceDatabase {
         cfg.dashboardUrl,
         cfg.botPrefix,
         cfg.defaultSearchSource,
+        stuckTimeoutMs,
         cfg.ownerUserId,
         cfg.setupCompleted ? 1 : 0,
         updatedAt
       );
 
-    return { ...cfg, updatedAt };
+    return { ...cfg, trackStuckTimeoutMs: stuckTimeoutMs, updatedAt };
   }
 
   updateDashboardUrl(dashboardUrl: string): StoredAppConfig {
@@ -1444,6 +1594,23 @@ export class CadenceDatabase {
       dashboardUrl: normalized,
       botPrefix: existing?.botPrefix || config.botPrefix,
       defaultSearchSource: existing?.defaultSearchSource || config.defaultSearchSource,
+      trackStuckTimeoutMs: existing?.trackStuckTimeoutMs ?? config.trackStuckTimeoutMs,
+      ownerUserId: existing?.ownerUserId ?? config.ownerUserId ?? null,
+      setupCompleted: existing?.setupCompleted ?? true,
+    });
+  }
+
+  updateTrackStuckTimeoutMs(timeoutMs: number): StoredAppConfig {
+    const clamped = normalizeTrackStuckTimeoutMs(timeoutMs, 20000);
+    const existing = this.getAppConfig();
+    return this.saveAppConfig({
+      discordToken: existing?.discordToken ?? config.discordToken,
+      discordClientId: existing?.discordClientId ?? config.discordClientId,
+      discordClientSecret: existing?.discordClientSecret ?? config.discordClientSecret,
+      dashboardUrl: existing?.dashboardUrl || config.dashboardUrl,
+      botPrefix: existing?.botPrefix || config.botPrefix,
+      defaultSearchSource: existing?.defaultSearchSource || config.defaultSearchSource,
+      trackStuckTimeoutMs: clamped,
       ownerUserId: existing?.ownerUserId ?? config.ownerUserId ?? null,
       setupCompleted: existing?.setupCompleted ?? true,
     });

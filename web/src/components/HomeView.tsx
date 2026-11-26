@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { GripVertical, Pin, Play, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { Disc3, GripVertical, Pin, Play, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import type {
   DailyRecommendationsDTO,
   EnqueueMode,
@@ -10,6 +10,7 @@ import type {
   TrackDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { useI18n } from "../i18n";
 import { formatMs, sourceLabel } from "../utils/format";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
@@ -99,6 +100,7 @@ export function HomeView({
   onTrackContextMenu,
   onPlaylistContextMenu,
 }: Props) {
+  const { t } = useI18n();
   const [recs, setRecs] = useState<DailyRecommendationsDTO | null>(null);
   const [recsLoading, setRecsLoading] = useState(false);
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null);
@@ -170,23 +172,84 @@ export function HomeView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSeedSource]);
 
+  type ListenAgainEntry =
+    | { kind: "track"; key: string; track: TrackDTO; isPinned: boolean }
+    | { kind: "playlist"; key: string; playlist: PlaylistDTO; savedPlaylistId: string | null; tracks: TrackDTO[] };
+
   const listenAgainItems = useMemo(() => {
-    const items: { track: TrackDTO; isPinned: boolean }[] = [];
-    const seen = new Set<string>();
-    for (const pinned of pinnedTracks) {
-      if (!seen.has(pinned.track.identifier)) {
-        seen.add(pinned.track.identifier);
-        items.push({ track: pinned.track, isPinned: true });
+    const items: ListenAgainEntry[] = [];
+    const seenTracks = new Set<string>();
+    const seenPlaylists = new Set<string>();
+
+    const playlistByNormName = new Map<string, PlaylistDTO>();
+    for (const pl of playlists) {
+      const key = pl.name.trim().toLowerCase();
+      if (key && !playlistByNormName.has(key)) {
+        playlistByNormName.set(key, pl);
       }
     }
+
+    const historyTracksByPlaylist = new Map<string, TrackDTO[]>();
     for (const entry of history) {
-      if (!seen.has(entry.track.identifier)) {
-        seen.add(entry.track.identifier);
-        items.push({ track: entry.track, isPinned: false });
+      const plName = entry.playlistName?.trim();
+      if (!plName) continue;
+      const norm = plName.toLowerCase();
+      const bucket = historyTracksByPlaylist.get(norm) ?? [];
+      if (!bucket.some((t) => t.identifier === entry.track.identifier)) {
+        bucket.push(entry.track);
+      }
+      historyTracksByPlaylist.set(norm, bucket);
+    }
+
+    for (const pinned of pinnedTracks) {
+      if (!seenTracks.has(pinned.track.identifier)) {
+        seenTracks.add(pinned.track.identifier);
+        items.push({
+          kind: "track",
+          key: `track:${pinned.track.identifier}`,
+          track: pinned.track,
+          isPinned: true,
+        });
+      }
+    }
+
+    for (const entry of history) {
+      const plName = entry.playlistName?.trim();
+      if (plName) {
+        const norm = plName.toLowerCase();
+        if (seenPlaylists.has(norm)) continue;
+        seenPlaylists.add(norm);
+        const saved = playlistByNormName.get(norm) ?? null;
+        const groupedTracks = historyTracksByPlaylist.get(norm) ?? [entry.track];
+        const cardPlaylist: PlaylistDTO = saved ?? {
+          id: `history-pl:${norm}`,
+          name: plName,
+          tracks: groupedTracks,
+          createdAt: entry.playedAt,
+          updatedAt: entry.playedAt,
+        };
+        items.push({
+          kind: "playlist",
+          key: `playlist:${norm}`,
+          playlist: cardPlaylist,
+          savedPlaylistId: saved ? saved.id : null,
+          tracks: saved && saved.tracks.length > 0 ? saved.tracks : groupedTracks,
+        });
+        continue;
+      }
+
+      if (!seenTracks.has(entry.track.identifier)) {
+        seenTracks.add(entry.track.identifier);
+        items.push({
+          kind: "track",
+          key: `track:${entry.track.identifier}`,
+          track: entry.track,
+          isPinned: false,
+        });
       }
     }
     return items;
-  }, [history, pinnedTracks]);
+  }, [history, pinnedTracks, playlists]);
 
   return (
     <div className="space-y-9">
@@ -223,7 +286,7 @@ export function HomeView({
               <p className="text-[11px] font-medium uppercase tracking-wider text-zinc-400">
                 {user.globalName || user.username}
               </p>
-              <h2 className="text-2xl font-bold tracking-tight text-white">Listen again</h2>
+              <h2 className="text-2xl font-bold tracking-tight text-white">{t("home.listenAgain")}</h2>
             </div>
           </div>
 
@@ -234,7 +297,7 @@ export function HomeView({
                 onClick={onViewHistory}
                 className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
               >
-                View more
+                {t("home.viewMore")}
               </button>
               <button
                 type="button"
@@ -242,7 +305,7 @@ export function HomeView({
                 className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-white/25 hover:bg-white/10 hover:text-white"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Clear history
+                {t("home.clearHistory")}
               </button>
             </div>
           )}
@@ -250,7 +313,75 @@ export function HomeView({
 
         {listenAgainItems.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-            {listenAgainItems.slice(0, 10).map(({ track, isPinned }) => {
+            {listenAgainItems.slice(0, 10).map((item) => {
+              if (item.kind === "playlist") {
+                const { playlist, savedPlaylistId, tracks } = item;
+                return (
+                  <div
+                    key={item.key}
+                    onClick={() => {
+                      if (savedPlaylistId) {
+                        onPlayPlaylist(savedPlaylistId);
+                      } else if (tracks.length > 0) {
+                        onEnqueue(tracks, "replace", playlist.name);
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      if (savedPlaylistId) {
+                        onPlaylistContextMenu(e, playlist);
+                      }
+                    }}
+                    className="group cursor-pointer space-y-2.5"
+                  >
+                    <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]">
+                      <PlaylistArtwork
+                        playlist={playlist}
+                        className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
+                      />
+                      <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm">
+                        <Disc3 className="h-3 w-3" />
+                        {t("home.playlistLabel")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (tracks.length > 0) {
+                            onEnqueue(tracks, "end", playlist.name);
+                          }
+                        }}
+                        title="Add playlist to queue"
+                        className="absolute right-2.5 top-2.5 rounded-full bg-black/75 p-1.5 text-white opacity-0 transition hover:bg-black group-hover:opacity-100"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <span className="absolute bottom-2.5 right-2.5 flex h-10 w-10 items-center justify-center rounded-full bg-black/80 text-white opacity-0 shadow-lg transition group-hover:opacity-100">
+                        <Play className="ml-0.5 h-5 w-5 fill-current" />
+                      </span>
+                    </div>
+
+                    <div className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          if (savedPlaylistId) {
+                            e.stopPropagation();
+                            onSelectPlaylist(savedPlaylistId);
+                          }
+                        }}
+                        className="block w-full truncate text-left text-sm font-medium text-white hover:underline"
+                      >
+                        {playlist.name}
+                      </button>
+                      <p className="truncate text-xs text-zinc-400">
+                        {t("home.playlistLabel")} • {tracks.length} {tracks.length === 1 ? "track" : "tracks"}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
+              const { track, isPinned } = item;
               const inHistory = history.some((h) => h.track.identifier === track.identifier);
               const isDragging = isPinned && dragPinnedId === track.identifier;
               const isDragTarget =
@@ -260,7 +391,7 @@ export function HomeView({
                 dragPinnedId !== track.identifier;
               return (
                 <div
-                  key={track.identifier}
+                  key={item.key}
                   draggable={isPinned}
                   onDragStart={(e) => {
                     if (!isPinned) return;

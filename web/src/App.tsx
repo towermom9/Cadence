@@ -30,7 +30,55 @@ import { Sidebar, type MainView } from "./components/Sidebar";
 import { ToastStack } from "./components/ToastStack";
 import { TopBar } from "./components/TopBar";
 import { useCadenceSocket } from "./hooks/useCadenceSocket";
+import { I18nProvider, useI18n } from "./i18n";
 import { sortPlaylists } from "./utils/playlists";
+
+function SkipToContentLink() {
+  const { t } = useI18n();
+  return (
+    <a href="#main-content" className="skip-link">
+      {t("nav.skipToContent")}
+    </a>
+  );
+}
+
+function MobileBottomNav({
+  activeView,
+  onNavigate,
+}: {
+  activeView: MainView;
+  onNavigate: (view: MainView) => void;
+}) {
+  const { t } = useI18n();
+  const items = [
+    { id: "home", label: t("nav.home"), icon: Home },
+    { id: "explore", label: t("nav.explore"), icon: Compass },
+    { id: "library", label: t("nav.library"), icon: Bookmark },
+    { id: "settings", label: t("nav.settings"), icon: Settings },
+  ] as const;
+
+  return (
+    <nav className="pb-safe flex shrink-0 items-center justify-around border-t border-white/10 bg-[#030303] px-2 py-1.5 lg:hidden">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active = activeView === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onNavigate(item.id)}
+            className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1 text-[10px] font-medium transition ${
+              active ? "text-white" : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 interface MeResponse {
   authenticated: boolean;
@@ -528,8 +576,18 @@ export function App() {
   const activePlaylist =
     socket.playlists.find((p) => p.id === selectedPlaylistId) ?? null;
 
+  const currentTrackAnnouncement =
+    socket.preferences.screenReaderAnnouncements !== false && socket.playerState?.current
+      ? `${socket.playerState.paused ? "Paused" : "Now playing"}: ${socket.playerState.current.title} by ${socket.playerState.current.author}`
+      : "";
+
   return (
+    <I18nProvider locale={socket.preferences.locale}>
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-[#030303] text-zinc-100">
+      <SkipToContentLink />
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {currentTrackAnnouncement}
+      </div>
       <ToastStack toasts={socket.toasts} onDismiss={socket.dismissToast} />
 
       <SaveToPlaylistModal
@@ -621,10 +679,12 @@ export function App() {
           />
 
           <main
+            id="main-content"
+            tabIndex={-1}
             className={
               nowPlayingOpen
-                ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 lg:overflow-hidden lg:px-8 lg:py-6"
-                : "min-h-0 flex-1 overflow-y-auto px-4 py-6 lg:px-8"
+                ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 focus:outline-none lg:overflow-hidden lg:px-8 lg:py-6"
+                : "min-h-0 flex-1 overflow-y-auto px-4 py-6 focus:outline-none lg:px-8"
             }
           >
             {nowPlayingOpen ? (
@@ -847,34 +907,8 @@ export function App() {
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
-      {!nowPlayingOpen && (
-        <nav className="pb-safe flex shrink-0 items-center justify-around border-t border-white/10 bg-[#030303] px-2 py-1.5 lg:hidden">
-          {(
-            [
-              { id: "home", label: "Home", icon: Home },
-              { id: "explore", label: "Explore", icon: Compass },
-              { id: "library", label: "Library", icon: Bookmark },
-              { id: "settings", label: "Settings", icon: Settings },
-            ] as const
-          ).map((item) => {
-            const Icon = item.icon;
-            const active = activeView === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => navigateTo(item.id)}
-                className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1 text-[10px] font-medium transition ${
-                  active ? "text-white" : "text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-      )}
+      {!nowPlayingOpen && <MobileBottomNav activeView={activeView} onNavigate={navigateTo} />}
     </div>
+    </I18nProvider>
   );
 }

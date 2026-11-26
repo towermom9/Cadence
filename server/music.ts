@@ -163,6 +163,9 @@ export class MusicService {
   private recentSeeks = new Map<string, { target: number; at: number }>();
   private uiVolumes = new Map<string, number>();
   private pendingVolumeUpdates = new Map<string, { target: number; inFlight: boolean }>();
+  private lastVolumeRpcAt = new Map<string, number>();
+  private lastSentLavalinkVolume = new Map<string, number>();
+  private stuckRecoveries = new Map<string, { trackKey: string; attempts: number; lastAttemptAt: number }>();
   private dismissedGuilds = new Map<string, number>();
   private inactivityTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private emptyVcPauseTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -303,6 +306,9 @@ export class MusicService {
       this.recentSeeks.delete(player.guildId);
       this.uiVolumes.delete(player.guildId);
       this.pendingVolumeUpdates.delete(player.guildId);
+      this.lastVolumeRpcAt.delete(player.guildId);
+      this.lastSentLavalinkVolume.delete(player.guildId);
+      this.stuckRecoveries.delete(player.guildId);
       this.dismissedGuilds.delete(player.guildId);
       this.lastPositionBroadcast.delete(player.guildId);
       this.onStateChange(player.guildId);
@@ -326,11 +332,12 @@ export class MusicService {
           this.queueNames.set(player.guildId, track.info.title);
         }
         if (!this.queueLoopWrapped.has(player.guildId)) {
+          const guildSettings = this.db.getGuildSettings(player.guildId);
           const dto = trackToDTO(track);
           const playlistName = this.activePlaylistNames.get(player.guildId) ?? null;
           const requesterId = dto.requester?.id;
           if (requesterId && requesterId !== this.client.user?.id) {
-            this.db.recordPlayHistory(requesterId, dto, playlistName);
+            this.db.recordPlayHistory(requesterId, dto, playlistName, guildSettings.maxHistory);
           }
           // Also record for non-bot voice listeners so Discover "Recently Played" stays rich
           const guild = this.client.guilds.cache.get(player.guildId);
@@ -338,7 +345,7 @@ export class MusicService {
           if (channel && channel.isVoiceBased()) {
             for (const member of channel.members.values()) {
               if (!member.user.bot && member.id !== requesterId) {
-                this.db.recordPlayHistory(member.id, dto, playlistName);
+                this.db.recordPlayHistory(member.id, dto, playlistName, guildSettings.maxHistory);
               }
             }
           }
@@ -415,6 +422,36 @@ export class MusicService {
 
     this.manager.on("trackStuck", (player, track, payload) => {
       const title = track?.info?.title || "Unknown Track";
+      const trackKey = track?.encoded || track?.info?.identifier || title;
+      const now = Date.now();
+      const prev = this.stuckRecoveries.get(player.guildId);
+      const attempts =
+        prev && prev.trackKey === trackKey && now - prev.lastAttemptAt < 120_000
+          ? prev.attempts
+          : 0;
+
+      if (attempts === 0 && track && player.connected) {
+        this.stuckRecoveries.set(player.guildId, { trackKey, attempts: 1, lastAttemptAt: now });
+        const resumePos = Math.max(0, player.position || 0);
+        console.warn(
+          `[Music] Track stuck in guild ${player.guildId} (${title}) after ${payload.thresholdMs}ms; attempting recovery at ${resumePos}ms (configured timeout ${config.trackStuckTimeoutMs}ms)`
+        );
+        this.onGuildToast(player.guildId, "info", `Stream stalled for "${title}", recovering playback...`);
+        void (async () => {
+          try {
+            if (resumePos > 0) {
+              await player.seek(resumePos);
+            } else {
+              await player.play({ clientTrack: track, paused: false });
+            }
+            this.onStateChange(player.guildId);
+          } catch (error) {
+            console.error(`[Music] Recovery failed for stuck track in guild ${player.guildId}:`, error);
+          }
+        })();
+        return;
+      }
+
       console.warn(
         `[Music] Track stuck in guild ${player.guildId} (${title}) after ${payload.thresholdMs}ms`
       );
@@ -1302,8 +1339,17 @@ export class MusicService {
     entry.inFlight = true;
     try {
       while (true) {
+        const elapsed = Date.now() - (this.lastVolumeRpcAt.get(guildId) ?? 0);
+        if (elapsed < 120) {
+          await new Promise((resolve) => setTimeout(resolve, 120 - elapsed));
+        }
         const targetUi = entry.target;
-        await player.setVolume(uiVolumeToLavalink(targetUi));
+        const lavalinkVol = uiVolumeToLavalink(targetUi);
+        if (this.lastSentLavalinkVolume.get(guildId) !== lavalinkVol) {
+          this.lastVolumeRpcAt.set(guildId, Date.now());
+          await player.setVolume(lavalinkVol);
+          this.lastSentLavalinkVolume.set(guildId, lavalinkVol);
+        }
         if (entry.target === targetUi) {
           break;
         }

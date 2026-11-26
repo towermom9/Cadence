@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { PlaylistDTO, PlaylistSortMode } from "@shared/types";
+import { useI18n } from "../i18n";
 import { CadenceBanner } from "./CadenceBrand";
 
 export type MainView =
@@ -41,10 +42,10 @@ interface Props {
   onCloseMobile: () => void;
 }
 
-const NAV_ITEMS: { id: Extract<MainView, "home" | "explore" | "library">; label: string; icon: typeof Home }[] = [
-  { id: "home", label: "Home", icon: Home },
-  { id: "explore", label: "Explore", icon: Compass },
-  { id: "library", label: "Library", icon: Bookmark },
+const NAV_ITEMS: { id: Extract<MainView, "home" | "explore" | "library">; labelKey: "nav.home" | "nav.explore" | "nav.library"; icon: typeof Home }[] = [
+  { id: "home", labelKey: "nav.home", icon: Home },
+  { id: "explore", labelKey: "nav.explore", icon: Compass },
+  { id: "library", labelKey: "nav.library", icon: Bookmark },
 ];
 
 export function Sidebar({
@@ -63,6 +64,7 @@ export function Sidebar({
   mobileOpen,
   onCloseMobile,
 }: Props) {
+  const { t } = useI18n();
   const [panelMode, setPanelMode] = useState<"none" | "create" | "import">("none");
   const [newName, setNewName] = useState("");
   const [importUrl, setImportUrl] = useState("");
@@ -151,7 +153,7 @@ export function Sidebar({
               }`}
             >
               <Icon className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-zinc-300"}`} />
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
             </button>
           );
         })}

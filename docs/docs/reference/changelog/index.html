@@ -52,6 +52,7 @@
           <a class="sidebar-link" href="../../guides/discord-setup/">Discord Bot Setup</a>
           <a class="sidebar-link" href="../../guides/playback/">Playback &amp; Empty VC</a>
           <a class="sidebar-link" href="../../guides/rbac/">Role-Based Access &amp; Domains</a>
+          <a class="sidebar-link" href="../../guides/accessibility-and-i18n/">Accessibility &amp; i18n</a>
         </div>
         <div class="sidebar-group">
           <div class="sidebar-group-title">Reference</div>
@@ -65,7 +66,18 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-1-8">v0.1.8 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-1-9">v0.1.9 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Grouped playlist playback in <strong>Listen again</strong> on the Home dashboard so played playlists render as single playlist cards instead of individual tracks.</li>
+          <li>Added <strong>Max Play History</strong> per-server auto-pruning slider under <strong>Settings -&gt; Server</strong> and <code>/settings maxhistory</code> (0 = Unlimited, up to 10,000 tracks).</li>
+          <li>Added configurable <strong>Stuck-Track Recovery Timeout</strong> (<code>5s - 60s</code>, default <code>20s</code>) under <strong>Settings -&gt; System</strong>, automatic stalled-track recovery in Lavalink, and raised Lavalink audio buffers.</li>
+          <li>Fixed audio stuttering while dragging volume sliders with a 150ms frontend throttle and &gt;= 120ms coalesced Lavalink volume RPC loop, plus added inline typeable numeric inputs to all sliders via <code>&lt;NumericSlider /&gt;</code>.</li>
+          <li>Removed the redundant Settings shortcut inside the TopBar <strong>Play on Server</strong> popover and consolidated <strong>Pause When Voice Channel is Empty</strong> strictly inside <strong>Settings -&gt; Server</strong>.</li>
+          <li>Added collapsible <strong>Advanced · Custom Colors</strong> (Accent, Canvas, Surface hex pickers + WCAG contrast check) in Appearance, a new <strong>Accessibility</strong> settings tab (High Contrast, Reduce Motion, 90%-130% Text Scale, Enhanced Focus Rings, 44px Touch Targets, Screen Reader Announcements, Skip Link), and <strong>BCP 47 i18n</strong> across <code>en</code>, <code>es</code>, <code>ja</code>, <code>id</code>, <code>de</code>, and <code>fr</code>.</li>
+          <li>Expanded isolated <code>bun test</code> coverage with i18n parity tests, WCAG/theme math tests, and mocked Discord slash-command &amp; 4-tier RBAC tests (<code>tests/bot.test.ts</code>).</li>
+        </ul>
+
+        <h2 id="v0-1-8">v0.1.8 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Fixed web player bar and mobile Now Playing controls remaining greyed out briefly after a track starts before Lavalink's first heartbeat arrives.</li>
           <li>Expanded Discord command parity to 35 global slash commands: added <code>/connect</code>, <code>/replay</code>, <code>/skipto</code>, <code>/forward</code>, <code>/rewind</code>, <code>/move</code>, <code>/swap</code>, <code>/history</code>, <code>/grab</code>, <code>/speed</code>, <code>/pitch</code>, <code>/cleareffect</code>, plus new subcommands for <code>/playlist</code> (<code>view</code>, <code>remove</code>, <code>rename</code>, <code>savequeue</code>) and <code>/settings</code> (<code>autoplay</code>, <code>reset</code>) with matching prefix aliases.</li>

@@ -27,6 +27,7 @@ import type {
   TrackDTO,
   UserProfileDTO,
 } from "@shared/types";
+import { useI18n } from "../i18n";
 import { formatMs } from "../utils/format";
 import { loadUiPrefs, saveUiPrefs } from "../utils/theme";
 import { ArtistLinks } from "./ArtistLinks";
@@ -77,6 +78,7 @@ export function TopBar({
   onOpenShortcuts,
   onLogout,
 }: Props) {
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchSource>(() => {
     const saved = loadUiPrefs().searchSource;
@@ -290,7 +292,7 @@ export function TopBar({
                 }
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Search songs, albums, artists, URLs..."
+              placeholder={t("search.placeholder")}
               className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-zinc-400 outline-none"
             />
             {query && (
@@ -481,21 +483,8 @@ export function TopBar({
           <div className="absolute right-10 top-11 z-30 w-72 rounded-xl border border-white/12 bg-[#212121] p-2 shadow-2xl">
             <div className="flex items-center justify-between px-2.5 py-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Play on Server
+                {t("search.serverPill")}
               </span>
-              {currentGuild?.canManage && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenMenu(null);
-                    onOpenSettings();
-                  }}
-                  className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-zinc-300 hover:bg-white/10 hover:text-white"
-                >
-                  <Settings className="h-3 w-3" />
-                  Settings
-                </button>
-              )}
             </div>
 
             <div className="mt-1 max-h-64 space-y-0.5 overflow-y-auto">

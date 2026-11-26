@@ -9,7 +9,7 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
     - `server/index.ts` - Single-process entrypoint wiring `CadenceDatabase`, `CadenceBot`, `CadenceWsHub`, and `createWebApp`.
     - `server/config.ts` - Environment variables + SQLite `app_config` overlay (`config.needsSetup`, `config.dataDir`, `config.dashboardUrl`).
     - `server/db.ts` - `CadenceDatabase` schema, idempotent column migrations, sessions, playlists, pins, paginated history, preferences, and guild settings.
-    - `server/bot.ts` - Discord gateway client, 35 global slash commands, prefix commands, autocomplete, Music Controller embeds, voice status embeds, and cleanup timers.
+    - `server/bot.ts` - Discord gateway client, 37 global slash commands, prefix commands, autocomplete, Music Controller embeds, voice status embeds, and cleanup timers.
     - `server/music.ts` - `MusicService` (`LavalinkManager`), timeline queue operations, Queue Loop wrapping, 7-mood Autoplay, DSP presets, perceptual volume loop, and empty-VC state machine.
     - `server/ws.ts` - `CadenceWsHub` real-time `/ws` router, RBAC enforcement, toast/playerState broadcasts, and playlist/history/settings handlers.
     - `server/web.ts` - Hono REST endpoints (`/api/*`), Discord OAuth2 flow, `/api/artwork` proxy, `/api/recommendations`, `/api/system/*`, and static SPA serving.
@@ -17,10 +17,10 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
     - `server/lyrics.ts` - LavaLyrics + LRCLIB synced/ELRC lyrics fetcher.
     - `server/logger.ts` - In-memory ring buffer logger with secret/token/webhook/email/IP redaction.
     - `server/auth.ts` - Discord OAuth2 user/guild fetchers and signed cookie session helpers.
-  - `shared/` - Shared TypeScript DTOs & WebSocket message contracts (`types.ts`), artist parser (`artists.ts`), and perceptual volume curve (`volume.ts`).
-  - `web/` - React 19 + Tailwind CSS v4 frontend (`App.tsx`, `components/`, `hooks/useCadenceSocket.ts`, `utils/`).
+  - `shared/` - Shared TypeScript DTOs & WebSocket message contracts (`types.ts`), artist parser (`artists.ts`), perceptual volume curve (`volume.ts`), and BCP 47 i18n catalogs (`i18n/`).
+  - `web/` - React 19 + Tailwind CSS v4 frontend (`App.tsx`, `i18n.tsx`, `components/`, `hooks/useCadenceSocket.ts`, `utils/`).
   - `lavalink/` - Self-contained Lavalink v4 Docker image (`Dockerfile`), `entrypoint.sh` plugin version resolver, and `application.yml`.
-  - `tests/` - Isolated `bun test` unit tests (`artists.test.ts`, `volume.test.ts`, `lrc.test.ts`, `db.test.ts`).
+  - `tests/` - Isolated `bun test` unit & mocked Discord tests (`artists.test.ts`, `volume.test.ts`, `lrc.test.ts`, `db.test.ts`, `i18n.test.ts`, `theme.test.ts`, `bot.test.ts`).
   - `docs/` - GitHub Pages documentation site (`docs/index.html`, `docs/assets/`, `docs/docs/guides/*`, `docs/docs/reference/*`), deployed by `.github/workflows/pages.yml`.
 - **What NEVER to touch:**
   - **NEVER** delete, overwrite, or modify `data/` (`data/cadence.sqlite` stores live Discord credentials, OAuth2 sessions, user playlists, and guild settings).
@@ -51,7 +51,7 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
 - **SQLite Schema & Idempotent Migrations (`server/db.ts`):**
   - Core tables are `guild_settings`, `playlists`, `play_history`, `sessions`, `app_config`, `user_preferences`, and `pinned_tracks`.
   - Never issue breaking `DROP TABLE` migrations on existing tables. Add new columns using `PRAGMA table_info(<table>)` checks + conditional `ALTER TABLE ... ADD COLUMN ...` statements with safe defaults.
-  - Normalize and clamp numeric settings (`defaultVolume`, `pauseOnEmptySeconds`, `emptyVcDisconnectMinutes`, `artworkSeekSeconds`) in `server/db.ts` so invalid values cannot persist or crash timers.
+  - Normalize and clamp numeric settings (`defaultVolume`, `pauseOnEmptySeconds`, `emptyVcDisconnectMinutes`, `artworkSeekSeconds`, `maxHistory`, `textScale`, `trackStuckTimeoutMs`) in `server/db.ts` so invalid values cannot persist or crash timers. When `maxHistory > 0`, `recordPlayHistory()` prunes oldest `play_history` rows per user automatically.
 - **Queue Timeline & Autoplay Separation (`server/music.ts`, `NowPlayingView.tsx`):**
   - The queue timeline consists of four logical sections: `previous` (unlimited played history above `current`), `current` (active track), `manual` (non-autoplay tracks in `player.queue.tracks`), and `autoplay` (`track.userData.isAutoplay === 1`).
   - Never allow dragging manual/current/past tracks into the Autoplay section, and never allow dragging Autoplay tracks into the main/current/past queue (`NowPlayingView.tsx` and `MusicService.moveTrack` / `moveQueueToPrevious`).
@@ -74,9 +74,10 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
     4. **Tier 4 · Server Owner & Bot Owner** - System Settings tab (`/api/system/info`, `/api/system/logs` with automatic secret/webhook/email/IP redaction in `server/logger.ts`).
 - **Perceptual Volume Curve & Smooth Updates:**
   - Always convert UI volume (`0-100%`) to Lavalink volume using `uiVolumeToLavalink` in `shared/volume.ts` (`((clamped / 100) ** 1.6) * 100`).
-  - Do not trigger full-app React state updates on every slider pixel drag in `useCadenceSocket.setVolume`; rely on the coalesced volume loop in `MusicService.setVolume`.
+  - Do not trigger full-app React state updates on every slider pixel drag in `useCadenceSocket.setVolume`; rely on the 150ms frontend drag throttle (`PlayerBar.tsx`, `NowPlayingView.tsx`) paired with the >= 120ms coalesced RPC loop and duplicate-Lavalink-volume guard in `MusicService.setVolume`.
+  - Keep Lavalink buffers resilient (`bufferDurationMs: 400`, `frameBufferDurationMs: 1000`, `trackStuckThresholdMs: 20000`) and preserve the one-shot seek/replay stall recovery in `MusicService.manager.on("trackStuck")` plus configurable `POST /api/system/timeout`.
 - **Discord Slash Commands, Controller & Status Embed Hygiene (`server/bot.ts`):**
-  - Keep `registerSlashCommands()` synced globally (`35` commands including `/play`, `/playnext`, `/playnow`, `/connect`, `/skipto`, `/replay`, `/move`, `/swap`, `/grab`, `/history`, `/speed`, `/pitch`, `/cleareffect`) and never register duplicate guild-scoped copies alongside global commands. Respect Discord's 100-char limit on command/option descriptions and choice names/values.
+  - Keep `CadenceBot.buildSlashCommandDefinitions()` synced globally (`37` commands including `/play`, `/playnext`, `/playnow`, `/connect`, `/skipto`, `/replay`, `/move`, `/swap`, `/grab`, `/history`, `/speed`, `/pitch`, `/cleareffect`) and never register duplicate guild-scoped copies alongside global commands. Respect Discord's 100-char limit on command/option descriptions and choice names/values.
   - In `MusicService.serializePlayer()`, derive `connected` from `Boolean(player.connected || player.voiceChannelId || player.playing || player.queue.current)` because `lavalink-client` leaves `player.connected` `undefined` until the first `playerUpdate` heartbeat arrives (similarly, `PlayerBar.tsx` checks `playerState?.connected || playerState?.voiceChannelId || track`).
   - `MusicService.ensurePlayer` must default `textChannelId` to `voiceChannelId` (and `CadenceBot.invokeController` must fall back to `player.voiceChannelId`) so starting playback from the web dashboard posts the Now Playing controller into the voice channel's text chat.
   - Keep the Discord Now Playing controller buttons clean: Row 1 = `Back`, `Pause`/`Resume`, `Skip`; Row 2 = `Leave`, `❤️`, `Queue`, `Web` (no Loop or Shuffle buttons on the embed, and no phone emoji in the author header).
@@ -86,8 +87,11 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
   - When all non-bot (and optionally non-deafened when `ignoreDeafenedListeners` is enabled) members leave the bot's voice channel and `pauseOnEmpty` is enabled, `MusicService.handleVoiceChannelEmpty` waits `pauseOnEmptySeconds` (`0-300s`) before pausing playback, announcing the pause in Discord chat, and recording `autoPausedByEmptyVc`, rather than destroying the player via `scheduleInactivityCheck`.
   - When `stay247` is disabled and `emptyVcDisconnectMinutes > 0` (`0-120m`), `scheduleEmptyVcDisconnect` disconnects the bot if nobody returns after extended auto-pause.
   - When an active listener joins (`handleVoiceChannelOccupied`), cancel any active countdown/disconnect timers and automatically resume playback only if `autoPausedByEmptyVc` was set (never override a manual pause made while listeners were present).
-- **Frontend Theme Tokens & Auto-Save Server Settings (`web/`):**
-  - Style interactive accents via CSS custom properties (`--cadence-accent`, `--cadence-accent-fg`) from `web/src/utils/theme.ts` so all 10 theme accents and `BackgroundMode` (`amoled`, `dark`, `elevated`) stay consistent.
+- **Frontend Theme Tokens, Accessibility & i18n (`web/`, `shared/i18n/`):**
+  - Style interactive accents via CSS custom properties (`--cadence-accent`, `--cadence-accent-fg`, plus optional custom hex swatches `customAccentHex`, `customBgHex`, `customSurfaceHex`) from `web/src/utils/theme.ts` so all 9 presets, custom hex colors, and `BackgroundMode` (`amoled`, `dark`, `elevated`) stay consistent and WCAG contrast-checked (`getContrastRatio`).
+  - Follow Material 3 adaptive clarity and W3C WAI / WCAG 2.2 (POUR) conventions: preserve the `.skip-link` to `#main-content`, polite `aria-live` track announcer, `:root[data-contrast="high"]`, `:root[data-motion="reduced"]`, `:root[data-focus="enhanced"]`, `:root[data-touch="large"]` (`>= 44px` targets), and `90%-130%` text scaling (`index.css`), and use `<NumericSlider />` for settings sliders so every slider accepts exact keyboard entry.
+  - Keep all supported BCP 47 locales in `shared/i18n/locales/` (`en`, `es`, `ja`, `id`, `de`, `fr`) synchronized with English keys (verified by `tests/i18n.test.ts`), synced to `document.documentElement.lang` via `I18nProvider`.
+  - Empty VC Auto-Pause (`pauseOnEmpty`, `pauseOnEmptySeconds`) lives strictly under **Settings -> Server** and Discord `/settings emptyvc`, never in personal Playback preferences.
   - Server Settings in `SettingsView.tsx` auto-save automatically (`commitServerPatch` sends `updateSettings` with `silent: true` immediately for switches/role pills and debounced at `350ms` for sliders and the prefix input). Do not reintroduce a manual "Save Changes" button unless explicitly requested.
 - **Lavalink YouTube Client Order & Pre-Bundled Plugins:**
   - In `lavalink/application.yml`, keep `WEB` and `ANDROID_VR` ahead of `IOS` in `plugins.youtube.clients` (`MUSIC`, `WEB`, `ANDROID_VR`, `MWEB`, `IOS`, `TV`, `WEBEMBEDDED`, `TVHTML5_SIMPLY`) so `ytsearch:` queries are handled by `WEB` instead of returning empty results on `IOS`.

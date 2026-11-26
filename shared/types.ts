@@ -32,6 +32,8 @@ export type ThemeAccentId =
 
 export type BackgroundMode = "amoled" | "dark" | "elevated";
 
+export type SupportedLocale = "auto" | "en" | "es" | "ja" | "id" | "de" | "fr";
+
 export type AutoplayClickBehavior =
   | "play_now_here"
   | "play_now_end"
@@ -50,6 +52,16 @@ export interface UserPreferencesDTO {
   defaultSearchSource: SearchSource;
   pauseOnEmpty: boolean;
   pauseOnEmptySeconds: number;
+  customAccentHex?: string | null;
+  customBgHex?: string | null;
+  customSurfaceHex?: string | null;
+  highContrast?: boolean;
+  reducedMotion?: boolean;
+  textScale?: number;
+  enhancedFocusRings?: boolean;
+  largerTouchTargets?: boolean;
+  screenReaderAnnouncements?: boolean;
+  locale?: SupportedLocale;
 }
 
 export type FilterPreset =
@@ -149,6 +161,7 @@ export interface GuildSettingsDTO {
   emptyVcDisconnectMinutes: number;
   ignoreDeafenedListeners: boolean;
   defaultPlayNext: boolean;
+  maxHistory: number;
   roles?: { id: string; name: string }[];
 }
 
@@ -274,6 +287,7 @@ export interface DebugLogEntryDTO {
 
 export interface SystemInfoDTO {
   appVersion: string;
+  trackStuckTimeoutMs: number;
   domain: {
     dashboardUrl: string;
     redirectUri: string;

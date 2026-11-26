@@ -1,6 +1,7 @@
 import type {
   BackgroundMode,
   SearchSource,
+  SupportedLocale,
   ThemeAccentId,
   UserPreferencesDTO,
 } from "@shared/types";
@@ -63,6 +64,16 @@ export const DEFAULT_PREFERENCES: UserPreferencesDTO = {
   defaultSearchSource: "ytmsearch",
   pauseOnEmpty: true,
   pauseOnEmptySeconds: 0,
+  customAccentHex: null,
+  customBgHex: null,
+  customSurfaceHex: null,
+  highContrast: false,
+  reducedMotion: false,
+  textScale: 100,
+  enhancedFocusRings: false,
+  largerTouchTargets: false,
+  screenReaderAnnouncements: true,
+  locale: "auto",
 };
 
 const STORAGE_KEY = "cadence:prefs";
@@ -73,6 +84,7 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 const VALID_THEME_SET = new Set<ThemeAccentId>(THEME_ACCENTS.map((a) => a.id));
 const VALID_BG_SET = new Set<BackgroundMode>(["amoled", "dark", "elevated"]);
+const VALID_LOCALES = new Set<SupportedLocale>(["auto", "en", "es", "ja", "id", "de", "fr"]);
 const VALID_SEARCH_SOURCES = new Set<SearchSource>([
   "auto",
   "ytsearch",
@@ -81,6 +93,55 @@ const VALID_SEARCH_SOURCES = new Set<SearchSource>([
   "dzsearch",
   "scsearch",
 ]);
+
+export function normalizeHexColor(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  const shortMatch = /^#([0-9a-f]{3})$/i.exec(trimmed);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].toLowerCase().split("");
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  const fullMatch = /^#([0-9a-f]{6})$/i.exec(trimmed);
+  if (fullMatch) {
+    return `#${fullMatch[1].toLowerCase()}`;
+  }
+  return null;
+}
+
+export function hexToRgbTuple(hex: string): [number, number, number] {
+  const clean = normalizeHexColor(hex) ?? "#ff0033";
+  return [
+    Number.parseInt(clean.slice(1, 3), 16),
+    Number.parseInt(clean.slice(3, 5), 16),
+    Number.parseInt(clean.slice(5, 7), 16),
+  ];
+}
+
+export function hexToRgbString(hex: string): string {
+  const [r, g, b] = hexToRgbTuple(hex);
+  return `${r}, ${g}, ${b}`;
+}
+
+export function getRelativeLuminance(hex: string): number {
+  const [r, g, b] = hexToRgbTuple(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function getContrastRatio(hexA: string, hexB: string): number {
+  const lumA = getRelativeLuminance(hexA);
+  const lumB = getRelativeLuminance(hexB);
+  const lighter = Math.max(lumA, lumB);
+  const darker = Math.min(lumA, lumB);
+  return Math.round(((lighter + 0.05) / (darker + 0.05)) * 100) / 100;
+}
+
+export function pickContrastingFg(bgHex: string): "#000000" | "#ffffff" {
+  return getRelativeLuminance(bgHex) > 0.36 ? "#000000" : "#ffffff";
+}
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -107,7 +168,9 @@ function writeCookie(name: string, value: string): void {
   document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secureAttr}`;
 }
 
-function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined): UserPreferencesDTO {
+export function sanitizePreferences(
+  raw: Partial<UserPreferencesDTO> | null | undefined
+): UserPreferencesDTO {
   if (!raw || typeof raw !== "object") {
     return { ...DEFAULT_PREFERENCES };
   }
@@ -119,6 +182,10 @@ function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined
     typeof raw.pauseOnEmptySeconds === "number" && Number.isFinite(raw.pauseOnEmptySeconds)
       ? Math.max(0, Math.min(300, Math.round(raw.pauseOnEmptySeconds)))
       : DEFAULT_PREFERENCES.pauseOnEmptySeconds;
+  const textScale =
+    typeof raw.textScale === "number" && Number.isFinite(raw.textScale)
+      ? Math.max(90, Math.min(130, Math.round(raw.textScale)))
+      : 100;
   return {
     playlistSort: raw.playlistSort ?? DEFAULT_PREFERENCES.playlistSort,
     themeAccent:
@@ -153,6 +220,17 @@ function sanitizePreferences(raw: Partial<UserPreferencesDTO> | null | undefined
         ? raw.pauseOnEmpty
         : DEFAULT_PREFERENCES.pauseOnEmpty,
     pauseOnEmptySeconds: emptyPauseSecs,
+    customAccentHex: normalizeHexColor(raw.customAccentHex),
+    customBgHex: normalizeHexColor(raw.customBgHex),
+    customSurfaceHex: normalizeHexColor(raw.customSurfaceHex),
+    highContrast: Boolean(raw.highContrast),
+    reducedMotion: Boolean(raw.reducedMotion),
+    textScale,
+    enhancedFocusRings: Boolean(raw.enhancedFocusRings),
+    largerTouchTargets: Boolean(raw.largerTouchTargets),
+    screenReaderAnnouncements:
+      typeof raw.screenReaderAnnouncements === "boolean" ? raw.screenReaderAnnouncements : true,
+    locale: raw.locale && VALID_LOCALES.has(raw.locale) ? raw.locale : "auto",
   };
 }
 
@@ -317,13 +395,49 @@ async function updateDynamicFavicon(accentHex: string, fgHex: string): Promise<v
 
 export function applyThemePreferences(prefs: UserPreferencesDTO): void {
   if (typeof document === "undefined") return;
-  const accent =
-    THEME_ACCENTS.find((a) => a.id === prefs.themeAccent) ?? THEME_ACCENTS[0];
+  const preset = THEME_ACCENTS.find((a) => a.id === prefs.themeAccent) ?? THEME_ACCENTS[0];
+  const customAccent = normalizeHexColor(prefs.customAccentHex);
+  const accentHex = customAccent ?? preset.hex;
+  const accentFg = customAccent ? pickContrastingFg(customAccent) : preset.fg;
+  const accentRgb = customAccent ? hexToRgbString(customAccent) : preset.rgb;
+
   const root = document.documentElement;
-  root.style.setProperty("--cadence-accent", accent.hex);
-  root.style.setProperty("--cadence-accent-fg", accent.fg);
-  root.style.setProperty("--cadence-accent-rgb", accent.rgb);
+  root.style.setProperty("--cadence-accent", accentHex);
+  root.style.setProperty("--cadence-accent-fg", accentFg);
+  root.style.setProperty("--cadence-accent-rgb", accentRgb);
+
+  const customBg = normalizeHexColor(prefs.customBgHex);
+  if (customBg) {
+    root.style.setProperty("--cadence-bg", customBg);
+    root.dataset.customBg = "on";
+  } else {
+    root.style.removeProperty("--cadence-bg");
+    delete root.dataset.customBg;
+  }
+
+  const customSurface = normalizeHexColor(prefs.customSurfaceHex);
+  if (customSurface) {
+    root.style.setProperty("--cadence-surface", customSurface);
+    root.style.setProperty("--cadence-card", customSurface);
+    root.dataset.customSurface = "on";
+  } else {
+    root.style.removeProperty("--cadence-surface");
+    root.style.removeProperty("--cadence-card");
+    delete root.dataset.customSurface;
+  }
+
   root.dataset.bg = prefs.backgroundMode;
   root.dataset.ambience = prefs.ambienceMode ? "on" : "off";
-  void updateDynamicFavicon(accent.hex, accent.fg);
+  root.dataset.contrast = prefs.highContrast ? "high" : "normal";
+  root.dataset.motion = prefs.reducedMotion ? "reduced" : "full";
+  root.dataset.focus = prefs.enhancedFocusRings ? "enhanced" : "default";
+  root.dataset.touch = prefs.largerTouchTargets ? "large" : "standard";
+
+  const scale =
+    typeof prefs.textScale === "number" && Number.isFinite(prefs.textScale)
+      ? Math.max(90, Math.min(130, Math.round(prefs.textScale)))
+      : 100;
+  root.style.fontSize = `${(16 * scale) / 100}px`;
+
+  void updateDynamicFavicon(accentHex, accentFg);
 }

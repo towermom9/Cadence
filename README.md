@@ -44,7 +44,8 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 - `True Timeline Queue with Full Drag & Drop` supporting past history, the active track, and upcoming queue items - drag the currently playing song anywhere in the timeline without interrupting playback, and keep manual queue tracks strictly separated from Autoplay suggestions.
 - `Smart Autoplay with 7 Moods` (`All`, `Familiar`, `Discover`, `Popular`, `Deep Cuts`, `Chill`, `Upbeat`) powered by listener history, liked tracks, and YouTube Music radio mixes, with customizable click behavior (`Play now`, `Play next`, or `Add to end`).
 - `Synced ELRC & LRC Lyrics` via LavaLyrics and LRCLIB with word-tag stripping, click-any-line-to-seek, and smooth auto-scroll that automatically pauses when you scroll manually.
-- `Dynamic Theme Accents & AMOLED Mode` with 10 live brand color accents (dynamically recoloring the Cadence logo, favicon, switches, and progress bar), true `#000000` AMOLED surfaces, and artwork Ambience glow.
+- `Dynamic Theme Accents, Custom Colors & AMOLED Mode` with 9 preset accents, custom hex color swatches with live WCAG contrast validation, true `#000000` AMOLED surfaces, and artwork Ambience glow.
+- `Accessibility & Multi-Language (i18n)` designed around Material 3 adaptive clarity and W3C WAI / WCAG 2.2 principles (High Contrast, Reduce Motion, `90%-130%` Text Scale, Enhanced Keyboard Focus Rings, `>= 44px` Touch Targets, Skip Link, Screen Reader Track Announcements, typeable sliders, and BCP 47 i18n across English, Spanish, Japanese, Indonesian, German, and French).
 - `4-Tier Discord Role-Based Access Control` cascading cleanly from **Tier 1 (User)** -> **Tier 2 (DJ)** -> **Tier 3 (Admin / Server Settings)** -> **Tier 4 (Server Owner & Bot Owner / System Diagnostics)** using your logged-in Discord identity.
 - `Guided 4-Step Web Onboarding Wizard` that validates your Discord Bot Token and Gateway Intents live, generates your OAuth2 Redirect URI, and launches the bot without touching config files.
 - `Vocard-Style Discord VC Chat Controller` that automatically posts interactive Now Playing controls (`Back`, `Pause/Resume`, `Skip`, `Leave`, `❤️`, `Queue`, `Web`) into your voice channel's text chat - even when playback is started from the web dashboard.
@@ -53,26 +54,26 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
   <summary><strong>Web Dashboard &amp; Library Features</strong></summary>
 
 - **Home & Discovery**:
-  - **Listen Again** shelf with drag-to-reorder pinned tracks.
+  - **Listen Again** shelf with drag-to-reorder pinned tracks and playlist grouping (playlists played in history render as playlist cards instead of individual track cards).
   - **Recommendations for Today** personalized from your recent play history, liked songs, and pinned tracks.
   - **Search Autofill & Instant Track Previews** with per-user default search provider (`YouTube Music`, `YouTube`, `Spotify`, `SoundCloud`, `Deezer`, or `Server Default`).
   - **Artist Profiles** with full catalog search, Top Songs, Albums & Singles, and clickable multi-artist collaboration links (e.g. `Lime & LilyPichu`).
-- **Personal Library & Playlists**:
-  - Built-in **Liked Music** auto-pinned playlist synced with the `❤️` button across the web player, queue hover actions, and Discord controller.
-  - **Online Playlist Import & One-Click Sync** for YouTube, YouTube Music, Spotify, SoundCloud, and Deezer playlist URLs.
-  - **Drag-and-Drop Track Reordering** inside playlists and **6 Library Sort Modes** (`Recent activity`, `Recently saved`, `Recently played`, `Recent sync`, `Manual drag order`, `A-Z`) shared between the sidebar and Library view.
+- **Accessibility & Multi-Language (i18n)**:
+  - Dedicated **Settings -> Accessibility** tab following Material 3 & W3C WAI / WCAG 2.2 (`High Contrast`, `Reduce Motion`, `90%-130%` Text Size Scale, `Enhanced Keyboard Focus Rings`, `Larger 44px Touch Targets`, `Screen Reader Track Announcements`, and Skip-to-Content link).
+  - **BCP 47 i18n** under **Settings -> Appearance** with automatic browser detection plus English (`en`), Spanish (`es`), Japanese (`ja`), Indonesian (`id`), German (`de`), and French (`fr`).
 - **Power-User Controls**:
   - Click artwork to Play/Pause with optional ±5s-30s floating seek buttons.
-  - Auto-pause when voice channel becomes empty with a configurable `0s-5m` continuation delay slider, auto-resume on listener join, optional extended auto-disconnect (`Off` / `5m-2h`), and deafened listener filtering.
+  - Server-level **Empty VC Automation** (under **Settings -> Server**): auto-pause when voice channel becomes empty with a configurable `0s-5m` continuation delay, auto-resume on join, optional extended auto-disconnect (`Off` / `5m-2h`), deafened listener filtering, and configurable **Max Play History** auto-pruning (`0` = Unlimited).
+  - **Stuck-Track Recovery Timeout** (`5s-60s`, default `20s`) under **Settings -> System** paired with tuned Lavalink audio buffers (`400ms` / `1000ms`) and automatic stalled-stream recovery.
   - Paginated play history with grouped playlist entries and automatic queue-loop deduplication.
-  - Direct numeric volume percentage input (`0%-100%`) alongside the smooth slider.
+  - Smooth throttled volume sliders paired with inline typeable numeric inputs on **every** slider (`<NumericSlider />`, PlayerBar, and Mobile Now Playing).
   - Keyboard shortcuts modal (`?` or `Shift + /`) with Vim-style navigation (`g h`, `g e`, `g l`, `g ,`) and media keys.
   - Persistent UI preferences saved across both SQLite and browser cookies.
 
 </details>
 
 <details>
-  <summary><strong>Discord Slash &amp; Prefix Commands (35 Commands)</strong></summary>
+  <summary><strong>Discord Slash &amp; Prefix Commands (37 Commands)</strong></summary>
 
 - **Playback & Search**:
   - `/play <query> [source]` - Queue a song or playlist with live autocomplete from recent history & YouTube suggestions.
@@ -85,7 +86,7 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
   - `/queue`, `/history`, `/nowplaying`, `/grab`, `/shuffle`, `/move <from> <to>`, `/swap <first> <second>`, `/remove <position>`, `/clear`, `/lyrics`
 - **Playlists, Settings & Utility**:
   - `/playlist <list|view|create|add|savequeue|remove|rename|play|delete>` - Manage and play your personal playlists from Discord.
-  - `/settings <view|volume|247|autoplay|dj|duplicates|prefix|emptyvc|playnext|reset>` - Configure server settings (Tier 3 Admin / Owner).
+  - `/settings <view|volume|247|autoplay|dj|duplicates|prefix|emptyvc|playnext|maxhistory|reset>` - Configure server settings (Tier 3 Admin / Owner).
   - `/dashboard`, `/ping`, `/help`
   - Plus customizable prefix commands (`?play`, `?playnext`, `?connect`, `?skip`, `?skipto`, `?back`, `?replay`, `?forward`, `?rewind`, `?pause`, `?resume`, `?stop`, `?volume`, `?loop`, `?shuffle`, `?move`, `?swap`, `?clear`, `?autoplay`, `?cleareffect`, `?queue`, `?history`, `?grab`, `?np`).
 

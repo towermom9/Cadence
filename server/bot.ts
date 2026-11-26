@@ -627,10 +627,8 @@ export class CadenceBot {
     });
   }
 
-  private async registerSlashCommands(): Promise<void> {
-    if (!this.client.application) return;
-
-    const builders = [
+  static buildSlashCommandDefinitions() {
+    return [
       new SlashCommandBuilder()
         .setName("play")
         .setDescription("Play a song or playlist from YouTube, Spotify, Deezer, SoundCloud, or URL")
@@ -972,12 +970,31 @@ export class CadenceBot {
             )
         )
         .addSubcommand((sub) =>
+          sub
+            .setName("maxhistory")
+            .setDescription("Set max play history entries kept per listener (0 = Unlimited)")
+            .addIntegerOption((opt) =>
+              opt
+                .setName("count")
+                .setDescription("0 for Unlimited, or 1 - 10000")
+                .setRequired(true)
+                .setMinValue(0)
+                .setMaxValue(10000)
+            )
+        )
+        .addSubcommand((sub) =>
           sub.setName("reset").setDescription("Reset all server settings back to factory defaults")
         ),
       new SlashCommandBuilder().setName("dashboard").setDescription("Get the link to the Cadence web dashboard"),
       new SlashCommandBuilder().setName("help").setDescription("Show all Cadence music commands and controls"),
       new SlashCommandBuilder().setName("ping").setDescription("Check bot and Lavalink latency"),
     ];
+  }
+
+  private async registerSlashCommands(): Promise<void> {
+    if (!this.client.application) return;
+
+    const builders = CadenceBot.buildSlashCommandDefinitions();
 
     try {
       const payload = builders.map((b) => b.toJSON());
@@ -2303,6 +2320,11 @@ export class CadenceBot {
             inline: true,
           },
           {
+            name: "Max History",
+            value: s.maxHistory === 0 ? "Unlimited" : `${s.maxHistory} tracks`,
+            inline: true,
+          },
+          {
             name: "Empty VC Pause",
             value: s.pauseOnEmpty
               ? s.pauseOnEmptySeconds > 0
@@ -2409,6 +2431,16 @@ export class CadenceBot {
         guildId,
         interaction,
         `Default Play Next is now **${enabled ? "enabled" : "disabled"}**.`
+      );
+    } else if (sub === "maxhistory") {
+      const count = interaction.options.getInteger("count", true);
+      const updated = this.db.updateGuildSettings(guildId, { maxHistory: count });
+      await this.editAndTrackReply(
+        guildId,
+        interaction,
+        updated.maxHistory === 0
+          ? "Max play history per user set to **Unlimited**."
+          : `Max play history per user set to **${updated.maxHistory}** tracks.`
       );
     } else if (sub === "reset") {
       this.db.resetGuildSettings(guildId);

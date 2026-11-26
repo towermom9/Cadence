@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Accessibility,
   Check,
+  ChevronDown,
   Copy,
   Download,
   Globe,
+  Languages,
   Loader2,
   Palette,
   Play,
   RefreshCw,
+  RotateCcw,
   Server,
   ShieldCheck,
   Sparkles,
   Terminal,
   Users,
 } from "lucide-react";
+import { SUPPORTED_LOCALES } from "@shared/i18n";
 import type {
   AccessTier,
   AutoplayClickBehavior,
@@ -23,8 +28,15 @@ import type {
   SystemInfoDTO,
   UserPreferencesDTO,
 } from "@shared/types";
-import { BACKGROUND_MODES, THEME_ACCENTS } from "../utils/theme";
+import { useI18n } from "../i18n";
+import {
+  BACKGROUND_MODES,
+  THEME_ACCENTS,
+  getContrastRatio,
+  normalizeHexColor,
+} from "../utils/theme";
 import { CadenceBanner, CadenceIcon } from "./CadenceBrand";
+import { NumericSlider } from "./NumericSlider";
 
 interface Props {
   guildId: string | null;
@@ -54,7 +66,7 @@ const ACCESS_TIER_LABELS: Record<AccessTier, string> = {
   none: "Restricted",
 };
 
-type SettingsTab = "appearance" | "playback" | "server" | "system";
+type SettingsTab = "appearance" | "playback" | "accessibility" | "server" | "system";
 
 const SEARCH_PROVIDER_OPTIONS: {
   id: SearchSource;
@@ -190,12 +202,16 @@ export function SettingsView({
   onLoadSettings,
   onSaveSettings,
 }: Props) {
+  const { t, locale: resolvedLocale } = useI18n();
   const canAccessServerSettings = isBotOwner || isGuildOwner || canManage;
   const canAccessSystemSettings = isBotOwner || isGuildOwner || canAccessSystem;
   const resolvedTier: AccessTier =
     accessTier ??
     (isBotOwner ? "bot_owner" : isGuildOwner ? "server_owner" : canManage ? "admin" : "user");
   const [tab, setTab] = useState<SettingsTab>("appearance");
+  const [advancedColorsOpen, setAdvancedColorsOpen] = useState(() =>
+    Boolean(preferences.customAccentHex || preferences.customBgHex || preferences.customSurfaceHex)
+  );
   const [prefix, setPrefix] = useState("?");
   const [defaultVolume, setDefaultVolume] = useState(100);
   const [djRoleId, setDjRoleId] = useState<string>("");
@@ -209,6 +225,13 @@ export function SettingsView({
   const [emptyVcDisconnectMinutes, setEmptyVcDisconnectMinutes] = useState(30);
   const [ignoreDeafenedListeners, setIgnoreDeafenedListeners] = useState(false);
   const [defaultPlayNext, setDefaultPlayNext] = useState(false);
+  const [maxHistory, setMaxHistory] = useState(500);
+  const [stuckTimeoutSec, setStuckTimeoutSec] = useState(20);
+  const [timeoutSaving, setTimeoutSaving] = useState(false);
+  const [timeoutStatus, setTimeoutStatus] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [sysInfo, setSysInfo] = useState<SystemInfoDTO | null>(null);
   const [sysLogs, setSysLogs] = useState<DebugLogEntryDTO[]>([]);
   const [sysText, setSysText] = useState("");
@@ -253,6 +276,9 @@ export function SettingsView({
         setSysInfo(data.info);
         if (data.info.domain?.dashboardUrl) {
           setDomainInput(data.info.domain.dashboardUrl);
+        }
+        if (typeof data.info.trackStuckTimeoutMs === "number") {
+          setStuckTimeoutSec(Math.max(5, Math.min(60, Math.round(data.info.trackStuckTimeoutMs / 1000))));
         }
       }
       setSysLogs(data.logs ?? []);
@@ -313,6 +339,41 @@ export function SettingsView({
     }
   }, [domainInput]);
 
+  const handleSaveTimeout = useCallback(async () => {
+    const ms = Math.max(5, Math.min(60, Math.round(stuckTimeoutSec))) * 1000;
+    setTimeoutSaving(true);
+    setTimeoutStatus(null);
+    try {
+      const res = await fetch("/api/system/timeout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackStuckTimeoutMs: ms }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        info?: SystemInfoDTO;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (data.info) {
+        setSysInfo(data.info);
+        setStuckTimeoutSec(Math.round(data.info.trackStuckTimeoutMs / 1000));
+      }
+      setTimeoutStatus({
+        type: "success",
+        message: `Stuck-track recovery threshold saved (${Math.round(ms / 1000)}s). Also update TRACK_STUCK_THRESHOLD_MS in Lavalink if running separately.`,
+      });
+    } catch (error) {
+      setTimeoutStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to save stuck-track timeout.",
+      });
+    } finally {
+      setTimeoutSaving(false);
+    }
+  }, [stuckTimeoutSec]);
+
   useEffect(() => {
     if (guildId && canAccessServerSettings) {
       onLoadSettings(guildId);
@@ -339,25 +400,8 @@ export function SettingsView({
     );
     setIgnoreDeafenedListeners(Boolean(settings.ignoreDeafenedListeners));
     setDefaultPlayNext(Boolean(settings.defaultPlayNext));
+    setMaxHistory(Math.max(0, Math.min(10000, Math.round(settings.maxHistory ?? 500))));
   }, [settings]);
-
-  const effectivePauseOnEmpty = settings
-    ? pauseOnEmpty
-    : (preferences.pauseOnEmpty ?? true);
-  const effectivePauseOnEmptySeconds = settings
-    ? pauseOnEmptySeconds
-    : Math.min(300, Math.max(0, Math.round(preferences.pauseOnEmptySeconds ?? 0)));
-
-  const handleEmptyVcToggle = (next: boolean) => {
-    setPauseOnEmpty(next);
-    onUpdatePreferences({ pauseOnEmpty: next });
-  };
-
-  const handleEmptyVcSecondsChange = (nextSec: number) => {
-    const clamped = Math.min(300, Math.max(0, Math.round(nextSec)));
-    setPauseOnEmptySeconds(clamped);
-    onUpdatePreferences({ pauseOnEmptySeconds: clamped });
-  };
 
   const clearAutoSaveTimers = useCallback(() => {
     if (autoSaveTimerRef.current) {
@@ -443,30 +487,40 @@ export function SettingsView({
   };
 
   const visibleTabs = [
-    { id: "appearance" as const, label: "Appearance", icon: Palette },
-    { id: "playback" as const, label: "Playback", icon: Play },
+    { id: "appearance" as const, label: t("settings.tab.appearance"), icon: Palette },
+    { id: "playback" as const, label: t("settings.tab.playback"), icon: Play },
+    { id: "accessibility" as const, label: t("settings.tab.accessibility"), icon: Accessibility },
     ...(canAccessServerSettings
-      ? [{ id: "server" as const, label: "Server", icon: Server }]
+      ? [{ id: "server" as const, label: t("settings.tab.server"), icon: Server }]
       : []),
     ...(canAccessSystemSettings
-      ? [{ id: "system" as const, label: "System", icon: Terminal }]
+      ? [{ id: "system" as const, label: t("settings.tab.system"), icon: Terminal }]
       : []),
   ];
+
+  const activeAccentHex =
+    normalizeHexColor(preferences.customAccentHex) ||
+    THEME_ACCENTS.find((a) => a.id === preferences.themeAccent)?.hex ||
+    "#ff0033";
+  const activeBgHex =
+    normalizeHexColor(preferences.customBgHex) ||
+    BACKGROUND_MODES.find((b) => b.id === preferences.backgroundMode)?.swatch ||
+    "#030303";
+  const activeSurfaceHex = normalizeHexColor(preferences.customSurfaceHex) || "#121212";
+  const accentBgContrast = getContrastRatio(activeAccentHex, activeBgHex);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 pb-8">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Settings</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white">{t("settings.title")}</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-0.5 text-[11px] font-medium text-zinc-300">
               <ShieldCheck className="h-3 w-3 text-emerald-400" />
               @{username} · {ACCESS_TIER_LABELS[resolvedTier]}
             </span>
           </div>
-          <p className="mt-1 text-xs text-zinc-400">
-            Customize theme colors, AMOLED surfaces, playback controls, and role-tiered access.
-          </p>
+          <p className="mt-1 text-xs text-zinc-400">{t("settings.subtitle")}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -608,6 +662,174 @@ export function SettingsView({
               />
             </div>
           </section>
+
+          {/* Language (i18n) */}
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
+                  <Languages className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">
+                    {t("appearance.language.title")}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-zinc-400">{t("appearance.language.desc")}</p>
+                </div>
+              </div>
+              <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 font-mono text-[11px] text-zinc-300">
+                BCP 47: {resolvedLocale}
+              </span>
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {SUPPORTED_LOCALES.map((loc) => {
+                const selected = (preferences.locale || "auto") === loc.id;
+                return (
+                  <button
+                    key={loc.id}
+                    type="button"
+                    onClick={() => onUpdatePreferences({ locale: loc.id })}
+                    className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+                      selected
+                        ? "border-white bg-white/10 text-white"
+                        : "border-white/10 bg-[#0b0b0b] text-zinc-300 hover:border-white/25 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{loc.nativeLabel}</p>
+                      <p className="truncate text-[11px] text-zinc-400">{loc.label}</p>
+                    </div>
+                    {selected && <Check className="h-4 w-4 shrink-0 text-white" />}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* Advanced · Custom Colors */}
+          <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <button
+              type="button"
+              onClick={() => setAdvancedColorsOpen((o) => !o)}
+              aria-expanded={advancedColorsOpen}
+              className="flex w-full items-center justify-between gap-4 text-left"
+            >
+              <div>
+                <h2 className="text-base font-semibold text-white">
+                  {t("appearance.customColors.title")}
+                </h2>
+                <p className="mt-0.5 text-xs text-zinc-400">{t("appearance.customColors.desc")}</p>
+              </div>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-zinc-400 transition-transform ${
+                  advancedColorsOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {advancedColorsOpen && (
+              <div className="mt-4 space-y-4 border-t border-white/10 pt-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {(
+                    [
+                      {
+                        key: "customAccentHex" as const,
+                        label: "Accent Hex",
+                        value: activeAccentHex,
+                        customValue: preferences.customAccentHex ?? "",
+                      },
+                      {
+                        key: "customBgHex" as const,
+                        label: "Canvas Background",
+                        value: activeBgHex,
+                        customValue: preferences.customBgHex ?? "",
+                      },
+                      {
+                        key: "customSurfaceHex" as const,
+                        label: "Card Surface",
+                        value: activeSurfaceHex,
+                        customValue: preferences.customSurfaceHex ?? "",
+                      },
+                    ] as const
+                  ).map((field) => (
+                    <div
+                      key={field.key}
+                      className="space-y-2 rounded-xl border border-white/10 bg-[#0b0b0b] p-3.5"
+                    >
+                      <label className="block text-xs font-medium text-zinc-200">
+                        {field.label}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={field.value}
+                          aria-label={`${field.label} picker`}
+                          onChange={(e) =>
+                            onUpdatePreferences({ [field.key]: e.target.value.toLowerCase() })
+                          }
+                          className="h-9 w-11 shrink-0 cursor-pointer rounded border border-white/15 bg-transparent p-0.5"
+                        />
+                        <input
+                          type="text"
+                          value={field.customValue || field.value}
+                          maxLength={7}
+                          placeholder={field.value}
+                          aria-label={`${field.label} hex value`}
+                          onChange={(e) => {
+                            const norm = normalizeHexColor(e.target.value);
+                            if (norm) {
+                              onUpdatePreferences({ [field.key]: norm });
+                            }
+                          }}
+                          className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#161616] px-2.5 py-1.5 font-mono text-xs text-white outline-none focus:border-white/40"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-zinc-400">WCAG Accent vs Canvas Contrast:</span>
+                    <span className="font-mono font-semibold text-white">
+                      {accentBgContrast.toFixed(2)}:1
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        accentBgContrast >= 4.5
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : accentBgContrast >= 3
+                            ? "bg-amber-500/15 text-amber-300"
+                            : "bg-rose-500/15 text-rose-300"
+                      }`}
+                    >
+                      {accentBgContrast >= 4.5
+                        ? "WCAG AA Pass"
+                        : accentBgContrast >= 3
+                          ? "Large Text AA"
+                          : "Low Contrast"}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdatePreferences({
+                        customAccentHex: null,
+                        customBgHex: null,
+                        customSurfaceHex: null,
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {t("appearance.customColors.reset")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
         </div>
       )}
 
@@ -695,86 +917,16 @@ export function SettingsView({
                   {preferences.artworkSeekSeconds}s
                 </span>
               </div>
-              <input
-                type="range"
+              <NumericSlider
+                value={preferences.artworkSeekSeconds}
                 min={5}
                 max={30}
                 step={5}
+                suffix="s"
                 disabled={!preferences.artworkSeekButtons}
-                value={preferences.artworkSeekSeconds}
-                onChange={(e) =>
-                  onUpdatePreferences({ artworkSeekSeconds: Number(e.target.value) })
-                }
-                style={{ accentColor: "var(--cadence-accent)" }}
-                aria-label="Seek jump interval seconds"
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
+                ariaLabel="Seek jump interval seconds"
+                onChange={(next) => onUpdatePreferences({ artworkSeekSeconds: next })}
               />
-              <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
-                <span>5s</span>
-                <span>10s</span>
-                <span>15s</span>
-                <span>20s</span>
-                <span>25s</span>
-                <span>30s</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-base font-semibold text-white">
-                  Pause When Voice Channel is Empty
-                </h2>
-                <p className="mt-0.5 text-xs text-zinc-400">
-                  Automatically pause playback when everyone leaves the voice channel and resume when someone joins.
-                </p>
-              </div>
-              <ThemeSwitch
-                checked={effectivePauseOnEmpty}
-                onChange={handleEmptyVcToggle}
-                label="Toggle Pause When Voice Channel is Empty"
-              />
-            </div>
-
-            <div
-              className={`space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4 transition-opacity ${
-                effectivePauseOnEmpty ? "opacity-100" : "opacity-45"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-white">
-                  Continue Playing When Voice Channel is Empty
-                </span>
-                <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
-                  {formatEmptyVcDelay(effectivePauseOnEmptySeconds)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={300}
-                step={5}
-                disabled={!effectivePauseOnEmpty}
-                value={effectivePauseOnEmptySeconds}
-                onChange={(e) => handleEmptyVcSecondsChange(Number(e.target.value))}
-                style={{ accentColor: "var(--cadence-accent)" }}
-                aria-label="How long song continues to play when voice channel is empty"
-                className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
-              />
-              <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
-                <span>0s</span>
-                <span>1m</span>
-                <span>2m</span>
-                <span>3m</span>
-                <span>4m</span>
-                <span>5m</span>
-              </div>
-              <p className="text-xs text-zinc-500">
-                {effectivePauseOnEmptySeconds === 0
-                  ? "Playback pauses immediately when the voice channel becomes empty and automatically resumes when someone joins."
-                  : `Song continues to play for ${formatEmptyVcDelay(effectivePauseOnEmptySeconds)} when the voice channel is empty before pausing, and automatically resumes when someone joins.`}
-              </p>
             </div>
           </section>
 
@@ -843,6 +995,125 @@ export function SettingsView({
                 onChange={(val) => onUpdatePreferences({ lyricsAutoScroll: val })}
                 label="Toggle Lyrics Auto-Scroll"
               />
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* SERVER TAB */}
+      {tab === "accessibility" && (
+        <div className="space-y-6">
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/8 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
+                  <Accessibility className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">{t("a11y.banner.title")}</h2>
+                  <p className="mt-0.5 text-xs text-zinc-400">{t("a11y.banner.desc")}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onUpdatePreferences({
+                    highContrast: false,
+                    reducedMotion: false,
+                    textScale: 100,
+                    enhancedFocusRings: false,
+                    largerTouchTargets: false,
+                    screenReaderAnnouncements: true,
+                  })
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset Defaults
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("a11y.highContrast.title")}</p>
+                  <p className="text-xs text-zinc-400">{t("a11y.highContrast.desc")}</p>
+                </div>
+                <ThemeSwitch
+                  checked={Boolean(preferences.highContrast)}
+                  onChange={(val) => onUpdatePreferences({ highContrast: val })}
+                  label={t("a11y.highContrast.title")}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("a11y.reducedMotion.title")}</p>
+                  <p className="text-xs text-zinc-400">{t("a11y.reducedMotion.desc")}</p>
+                </div>
+                <ThemeSwitch
+                  checked={Boolean(preferences.reducedMotion)}
+                  onChange={(val) => onUpdatePreferences({ reducedMotion: val })}
+                  label={t("a11y.reducedMotion.title")}
+                />
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-white">{t("a11y.textScale.title")}</p>
+                    <p className="text-xs text-zinc-400">{t("a11y.textScale.desc")}</p>
+                  </div>
+                  <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                    {preferences.textScale ?? 100}%
+                  </span>
+                </div>
+                <NumericSlider
+                  value={preferences.textScale ?? 100}
+                  min={90}
+                  max={130}
+                  step={5}
+                  suffix="%"
+                  ariaLabel={t("a11y.textScale.title")}
+                  onChange={(next) => onUpdatePreferences({ textScale: next })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("a11y.focusRings.title")}</p>
+                  <p className="text-xs text-zinc-400">{t("a11y.focusRings.desc")}</p>
+                </div>
+                <ThemeSwitch
+                  checked={Boolean(preferences.enhancedFocusRings)}
+                  onChange={(val) => onUpdatePreferences({ enhancedFocusRings: val })}
+                  label={t("a11y.focusRings.title")}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("a11y.touchTargets.title")}</p>
+                  <p className="text-xs text-zinc-400">{t("a11y.touchTargets.desc")}</p>
+                </div>
+                <ThemeSwitch
+                  checked={Boolean(preferences.largerTouchTargets)}
+                  onChange={(val) => onUpdatePreferences({ largerTouchTargets: val })}
+                  label={t("a11y.touchTargets.title")}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-white">{t("a11y.srAnnounce.title")}</p>
+                  <p className="text-xs text-zinc-400">{t("a11y.srAnnounce.desc")}</p>
+                </div>
+                <ThemeSwitch
+                  checked={preferences.screenReaderAnnouncements !== false}
+                  onChange={(val) => onUpdatePreferences({ screenReaderAnnouncements: val })}
+                  label={t("a11y.srAnnounce.title")}
+                />
+              </div>
             </div>
           </section>
         </div>
@@ -939,18 +1210,41 @@ export function SettingsView({
                     {defaultVolume}%
                   </span>
                 </div>
-                <input
-                  type="range"
+                <NumericSlider
+                  value={defaultVolume}
                   min={0}
                   max={100}
-                  value={defaultVolume}
-                  onChange={(e) => {
-                    const next = Math.min(100, Math.max(0, Number(e.target.value)));
+                  step={1}
+                  suffix="%"
+                  ariaLabel="Default Starting Volume"
+                  onChange={(next, source) => {
                     setDefaultVolume(next);
-                    commitServerPatch({ defaultVolume: next }, { debounce: true });
+                    commitServerPatch({ defaultVolume: next }, { debounce: source === "slider" });
                   }}
-                  style={{ accentColor: "var(--cadence-accent)" }}
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20"
+                />
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-white">{t("server.maxHistory.title")}</p>
+                    <p className="text-xs text-zinc-400">{t("server.maxHistory.desc")}</p>
+                  </div>
+                  <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                    {maxHistory === 0 ? "Unlimited" : maxHistory}
+                  </span>
+                </div>
+                <NumericSlider
+                  value={maxHistory}
+                  min={0}
+                  max={5000}
+                  step={50}
+                  zeroLabel="Unlimited (No Pruning)"
+                  ariaLabel={t("server.maxHistory.title")}
+                  onChange={(next, source) => {
+                    setMaxHistory(next);
+                    commitServerPatch({ maxHistory: next }, { debounce: source === "slider" });
+                  }}
                 />
               </div>
 
@@ -1056,30 +1350,24 @@ export function SettingsView({
                         {formatEmptyVcDelay(pauseOnEmptySeconds)}
                       </span>
                     </div>
-                    <input
-                      type="range"
+                    <NumericSlider
+                      value={pauseOnEmptySeconds}
                       min={0}
                       max={300}
                       step={5}
+                      suffix="s"
+                      zeroLabel="Immediate (0s)"
                       disabled={!pauseOnEmpty}
-                      value={pauseOnEmptySeconds}
-                      onChange={(e) => {
-                        const next = Math.min(300, Math.max(0, Math.round(Number(e.target.value))));
+                      formatValue={(v) => formatEmptyVcDelay(v)}
+                      ariaLabel="Server empty voice channel play duration"
+                      onChange={(next, source) => {
                         setPauseOnEmptySeconds(next);
-                        commitServerPatch({ pauseOnEmptySeconds: next }, { debounce: true });
+                        commitServerPatch(
+                          { pauseOnEmptySeconds: next },
+                          { debounce: source === "slider" }
+                        );
                       }}
-                      style={{ accentColor: "var(--cadence-accent)" }}
-                      aria-label="Server empty voice channel play duration"
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
                     />
-                    <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
-                      <span>0s</span>
-                      <span>1m</span>
-                      <span>2m</span>
-                      <span>3m</span>
-                      <span>4m</span>
-                      <span>5m</span>
-                    </div>
                   </div>
 
                   <div
@@ -1102,29 +1390,24 @@ export function SettingsView({
                         {stay247 ? "Off (24/7)" : formatEmptyVcDisconnect(emptyVcDisconnectMinutes)}
                       </span>
                     </div>
-                    <input
-                      type="range"
+                    <NumericSlider
+                      value={emptyVcDisconnectMinutes}
                       min={0}
                       max={120}
                       step={5}
+                      suffix="m"
+                      zeroLabel="Never (Off)"
                       disabled={!pauseOnEmpty || stay247}
-                      value={emptyVcDisconnectMinutes}
-                      onChange={(e) => {
-                        const next = Math.min(120, Math.max(0, Math.round(Number(e.target.value))));
+                      formatValue={(v) => formatEmptyVcDisconnect(v)}
+                      ariaLabel="Auto-disconnect after extended auto-pause"
+                      onChange={(next, source) => {
                         setEmptyVcDisconnectMinutes(next);
-                        commitServerPatch({ emptyVcDisconnectMinutes: next }, { debounce: true });
+                        commitServerPatch(
+                          { emptyVcDisconnectMinutes: next },
+                          { debounce: source === "slider" }
+                        );
                       }}
-                      style={{ accentColor: "var(--cadence-accent)" }}
-                      aria-label="Auto-disconnect after extended auto-pause"
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
                     />
-                    <div className="flex justify-between text-[11px] tabular-nums text-zinc-500">
-                      <span>Never</span>
-                      <span>30m</span>
-                      <span>1h</span>
-                      <span>1.5h</span>
-                      <span>2h</span>
-                    </div>
                   </div>
 
                   <div
@@ -1555,6 +1838,63 @@ export function SettingsView({
                       )}
                     </button>
                   </div>
+                </section>
+
+                {/* Stuck-Track Recovery Timeout */}
+                <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">
+                        {t("system.timeout.title")}
+                      </h3>
+                      <p className="text-xs text-zinc-400">{t("system.timeout.desc")}</p>
+                    </div>
+                    <span className="rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                      {stuckTimeoutSec}s ({stuckTimeoutSec * 1000}ms)
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="min-w-0 flex-1">
+                      <NumericSlider
+                        value={stuckTimeoutSec}
+                        min={5}
+                        max={60}
+                        step={5}
+                        suffix="s"
+                        ariaLabel={t("system.timeout.title")}
+                        onChange={(next) => {
+                          setStuckTimeoutSec(next);
+                          if (timeoutStatus) setTimeoutStatus(null);
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={timeoutSaving}
+                      onClick={() => void handleSaveTimeout()}
+                      style={{
+                        backgroundColor: "var(--cadence-accent)",
+                        color: "var(--cadence-accent-fg)",
+                      }}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold shadow-sm transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {timeoutSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {timeoutSaving ? "Saving..." : "Save Timeout"}
+                    </button>
+                  </div>
+
+                  {timeoutStatus && (
+                    <div
+                      className={`rounded-xl border px-3.5 py-2 text-xs ${
+                        timeoutStatus.type === "success"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                          : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                      }`}
+                    >
+                      {timeoutStatus.message}
+                    </div>
+                  )}
                 </section>
 
                 <div className="grid gap-4 sm:grid-cols-2">

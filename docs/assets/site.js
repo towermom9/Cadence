@@ -105,21 +105,27 @@
     },
     {
       section: "Guides / RBAC & Domains",
-      title: "Change Public Domain Under System Settings",
+      title: "Change Public Domain & Stuck-Track Timeout Under System Settings",
       path: "docs/guides/rbac/#domain-settings",
-      content: "Settings System Public Domain Dashboard URL Use Current URL Save Domain OAuth2 Redirect URI copy live update without restart.",
+      content: "Settings System Public Domain Dashboard URL Use Current URL Save Domain OAuth2 Redirect URI Stuck-Track Recovery Timeout 5s 60s.",
+    },
+    {
+      section: "Guides / Accessibility & i18n",
+      title: "Accessibility, Custom Colors, Typeable Sliders & BCP 47 i18n",
+      path: "docs/guides/accessibility-and-i18n/#accessibility",
+      content: "Material 3 WCAG 2.2 High Contrast Reduce Motion Text Size Scale Focus Rings 44px Touch Targets Screen Reader Track Announcements Skip Link Custom Colors hex WCAG contrast BCP 47 i18n en es ja id de fr NumericSlider.",
     },
     {
       section: "Reference / Commands",
-      title: "35 Discord Slash Commands & Prefix Aliases",
+      title: "Discord Slash Commands & Prefix Aliases",
       path: "docs/reference/commands/#slash-commands",
-      content: "/play /playnext /playnow /search /connect /pause /resume /skip /skipto /back /replay /seek /forward /rewind /stop /volume /loop /shuffle /move /swap /remove /clear /history /grab /autoplay /filter /speed /pitch /cleareffect /queue /nowplaying /lyrics /playlist /settings /dashboard /help /ping.",
+      content: "/play /playnext /playnow /search /connect /pause /resume /skip /skipto /back /replay /seek /forward /rewind /stop /volume /loop /shuffle /move /swap /remove /clear /history /grab /autoplay /filter /speed /pitch /cleareffect /queue /nowplaying /lyrics /playlist /settings maxhistory /dashboard /help /ping.",
     },
     {
       section: "Reference / Commands",
       title: "Playlist & Settings Subcommands & Hotkeys",
       path: "docs/reference/commands/#playlist-commands",
-      content: "playlist list view create add savequeue remove rename play delete settings view volume 247 autoplay dj duplicates prefix emptyvc playnext reset keyboard shortcuts Space Left Right = - m s r + g h.",
+      content: "playlist list view create add savequeue remove rename play delete settings view volume 247 autoplay dj duplicates prefix emptyvc playnext maxhistory reset keyboard shortcuts Space Left Right = - m s r + g h.",
     },
     {
       section: "Reference / Troubleshooting",
@@ -141,9 +147,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.1.8)",
-      path: "docs/reference/changelog/#v0-1-8",
-      content: "v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog.",
+      title: "Release Changelogs (v0.0.0 to v0.1.9)",
+      path: "docs/reference/changelog/#v0-1-9",
+      content: "v0.1.9 v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog accessibility i18n custom colors.",
     },
   ];
 

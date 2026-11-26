@@ -96,6 +96,7 @@ export interface RuntimeConfig {
   ownerUserId: string | null;
   botPrefix: string;
   defaultSearchSource: SearchSource;
+  trackStuckTimeoutMs: number;
   lavalink: {
     host: string;
     port: number;
@@ -131,6 +132,13 @@ function buildConfigState(stored: StoredAppConfig | null): Omit<RuntimeConfig, "
   const defaultSearchSource: SearchSource =
     candidateSource && VALID_SEARCH_SOURCES.has(candidateSource) ? candidateSource : envSearchSource;
 
+  const envStuckTimeout = parsePositiveInt(process.env.TRACK_STUCK_THRESHOLD_MS, 20000);
+  const rawStuckTimeout = stored?.trackStuckTimeoutMs;
+  const trackStuckTimeoutMs =
+    typeof rawStuckTimeout === "number" && Number.isFinite(rawStuckTimeout)
+      ? Math.max(5000, Math.min(60000, Math.round(rawStuckTimeout)))
+      : Math.max(5000, Math.min(60000, envStuckTimeout));
+
   const hasBotToken = isConfiguredValue(discordToken);
   const hasOAuthConfig =
     isConfiguredValue(discordClientId) && isConfiguredValue(discordClientSecret);
@@ -150,6 +158,7 @@ function buildConfigState(stored: StoredAppConfig | null): Omit<RuntimeConfig, "
     ownerUserId: useStored ? stored?.ownerUserId ?? null : null,
     botPrefix,
     defaultSearchSource,
+    trackStuckTimeoutMs,
     isSecureCookie: dashboardUrl.startsWith("https://"),
   };
 }

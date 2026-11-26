@@ -1,4 +1,5 @@
 import type { AppMetaDTO } from "@shared/types";
+import { useI18n } from "../i18n";
 import type { MainView } from "./Sidebar";
 
 interface Props {
@@ -14,6 +15,7 @@ export function AppFooter({
   onOpenShortcuts,
   onOpenPlayer,
 }: Props) {
+  const { t } = useI18n();
   const version = meta?.appVersion || __CADENCE_VERSION__;
 
   return (
@@ -26,42 +28,42 @@ export function AppFooter({
               onClick={() => onNavigate("home")}
               className="transition hover:text-white"
             >
-              Home
+              {t("nav.home")}
             </button>
             <button
               type="button"
               onClick={() => onNavigate("explore")}
               className="transition hover:text-white"
             >
-              Explore
+              {t("nav.explore")}
             </button>
             <button
               type="button"
               onClick={() => onNavigate("library")}
               className="transition hover:text-white"
             >
-              Library
+              {t("nav.library")}
             </button>
             <button
               type="button"
               onClick={() => onNavigate("settings")}
               className="transition hover:text-white"
             >
-              Settings
+              {t("nav.settings")}
             </button>
             <button
               type="button"
               onClick={onOpenPlayer}
               className="transition hover:text-white"
             >
-              Now Playing
+              {t("nav.nowPlaying")}
             </button>
             <button
               type="button"
               onClick={onOpenShortcuts}
               className="inline-flex items-center gap-1.5 transition hover:text-white"
             >
-              <span>Shortcuts</span>
+              <span>{t("nav.shortcuts")}</span>
               <kbd className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
                 ?
               </kbd>

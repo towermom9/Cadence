@@ -138,3 +138,87 @@ body,
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(var(--cadence-accent-rgb), 0.65);
 }
+
+/* Custom user background & surface overrides */
+:root[data-custom-bg="on"] .bg-\[\#030303\] {
+  background-color: var(--cadence-bg) !important;
+}
+
+:root[data-custom-surface="on"] .bg-\[\#0b0b0b\],
+:root[data-custom-surface="on"] .bg-\[\#0f0f0f\],
+:root[data-custom-surface="on"] .bg-\[\#121212\],
+:root[data-custom-surface="on"] .bg-\[\#141414\],
+:root[data-custom-surface="on"] .bg-\[\#181818\],
+:root[data-custom-surface="on"] .bg-\[\#212121\] {
+  background-color: var(--cadence-surface) !important;
+}
+
+/* Accessibility: WCAG 2.2 / Material 3 High Contrast */
+:root[data-contrast="high"] .text-zinc-400,
+:root[data-contrast="high"] .text-zinc-500 {
+  color: #e4e4e7 !important;
+}
+
+:root[data-contrast="high"] [class*="border-white/"] {
+  border-color: rgba(255, 255, 255, 0.42) !important;
+}
+
+/* Accessibility: Reduced Motion */
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Accessibility: Enhanced Keyboard Focus Rings */
+:root[data-focus="enhanced"] :focus-visible {
+  outline: 3px solid var(--cadence-accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* Accessibility: Material 3 Large Touch Targets (>= 44x44px) */
+:root[data-touch="large"] button,
+:root[data-touch="large"] a,
+:root[data-touch="large"] [role="switch"] {
+  min-height: 44px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.skip-link {
+  position: fixed;
+  top: -100px;
+  left: 16px;
+  z-index: 100;
+  background: var(--cadence-accent);
+  color: var(--cadence-accent-fg);
+  padding: 10px 18px;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  top: 16px;
+}

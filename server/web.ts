@@ -295,20 +295,6 @@ export function createWebApp(
     }
 
     const preferences = db.updateUserPreferences(session.user.id, body);
-    if (body.pauseOnEmpty !== undefined || body.pauseOnEmptySeconds !== undefined) {
-      for (const guild of bot.client.guilds.cache.values()) {
-        if (
-          bot.isGuildAdmin(guild.id, session.user.id) ||
-          bot.music.isPrivileged(guild.id, session.user.id)
-        ) {
-          db.updateGuildSettings(guild.id, {
-            pauseOnEmpty: preferences.pauseOnEmpty,
-            pauseOnEmptySeconds: preferences.pauseOnEmptySeconds,
-          });
-          bot.music.onGuildSettingsUpdated(guild.id);
-        }
-      }
-    }
     writePrefsCookie(c, preferences);
     return c.json({ preferences });
   });
@@ -699,6 +685,7 @@ export function createWebApp(
 
     return {
       appVersion: pkg.version || "1.0.0",
+      trackStuckTimeoutMs: config.trackStuckTimeoutMs,
       domain: {
         dashboardUrl: config.dashboardUrl,
         redirectUri: config.discordRedirectUri,
@@ -774,6 +761,38 @@ export function createWebApp(
     const saved = db.updateDashboardUrl(normalized);
     applyStoredConfig(saved);
     wsHub.broadcastMeta();
+
+    return c.json({
+      ok: true,
+      info: buildSystemInfo(),
+    });
+  });
+
+  app.post("/api/system/timeout", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!bot.isBotOwner(session.user.id) && !bot.isAnyGuildOwner(session.user.id)) {
+      return c.json({ error: "Server owner or bot owner access required." }, 403);
+    }
+
+    let timeoutMs: number | null = null;
+    try {
+      const body = (await c.req.json()) as { trackStuckTimeoutMs?: unknown };
+      if (typeof body?.trackStuckTimeoutMs === "number" && Number.isFinite(body.trackStuckTimeoutMs)) {
+        timeoutMs = Math.round(body.trackStuckTimeoutMs);
+      }
+    } catch {
+      return c.json({ error: "Invalid JSON payload." }, 400);
+    }
+
+    if (timeoutMs === null || timeoutMs < 5000 || timeoutMs > 60000) {
+      return c.json({ error: "Timeout must be between 5000 ms (5s) and 60000 ms (60s)." }, 400);
+    }
+
+    const saved = db.updateTrackStuckTimeoutMs(timeoutMs);
+    applyStoredConfig(saved);
 
     return c.json({
       ok: true,

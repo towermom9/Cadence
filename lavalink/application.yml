@@ -107,11 +107,11 @@ lavalink:
             channelMix: true
             lowPass: true
         nonAllocatingFrameBuffer: false
-        bufferDurationMs: 100
-        frameBufferDurationMs: 250
+        bufferDurationMs: 400
+        frameBufferDurationMs: 1000
         opusEncodingQuality: 10
         resamplingQuality: LOW
-        trackStuckThresholdMs: 10000
+        trackStuckThresholdMs: ${TRACK_STUCK_THRESHOLD_MS:20000}
         useSeekGhosting: true
         youtubePlaylistLoadLimit: 6
         playerUpdateInterval: 5
