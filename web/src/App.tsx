@@ -32,7 +32,7 @@ import { TopBar } from "./components/TopBar";
 import { useCadenceSocket } from "./hooks/useCadenceSocket";
 import { I18nProvider, useI18n } from "./i18n";
 import {
-  hasDismissibleBackTarget,
+  computeBackDepth,
   pushViewHistory,
   resolveBackAction,
   type BackStackSnapshot,
@@ -210,6 +210,14 @@ export function App() {
     });
   }, []);
 
+  const goBackView = useCallback(() => {
+    setViewHistory((hist) => {
+      const target = hist[hist.length - 1] ?? "home";
+      setActiveView(target);
+      return hist.slice(0, -1);
+    });
+  }, []);
+
   const handleSearch = useCallback(
     (query: string, source: SearchSource = socket.preferences.defaultSearchSource) => {
       navigateTo("search");
@@ -379,86 +387,107 @@ export function App() {
   );
   const backSnapshotRef = useRef<BackStackSnapshot>(backSnapshot);
   backSnapshotRef.current = backSnapshot;
-  const hasBackTarget = hasDismissibleBackTarget(backSnapshot);
-  const guardActiveRef = useRef(false);
-  const ignoringNextPopRef = useRef(false);
+  const targetDepth = computeBackDepth(backSnapshot);
+  const historyDepthRef = useRef(0);
+  const suppressPopDepthRef = useRef<number | null>(null);
+  const historyInitRef = useRef(false);
 
   useEffect(() => {
-    if (!user) return;
-    if (hasBackTarget && !guardActiveRef.current) {
-      window.history.pushState({ cadenceBackGuard: true }, "");
-      guardActiveRef.current = true;
-    } else if (!hasBackTarget && guardActiveRef.current) {
-      guardActiveRef.current = false;
-      const st = window.history.state as { cadenceBackGuard?: boolean } | null;
-      if (st?.cadenceBackGuard) {
-        ignoringNextPopRef.current = true;
-        window.history.back();
-      }
+    if (!user) {
+      historyInitRef.current = false;
+      historyDepthRef.current = 0;
+      suppressPopDepthRef.current = null;
+      return;
     }
-  }, [hasBackTarget, user]);
+    if (!historyInitRef.current) {
+      historyInitRef.current = true;
+      historyDepthRef.current = 0;
+      window.history.replaceState({ cadenceDepth: 0 }, "");
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    const onPopState = () => {
-      if (ignoringNextPopRef.current) {
-        ignoringNextPopRef.current = false;
-        return;
+    const currentDepth = historyDepthRef.current;
+    if (targetDepth > currentDepth) {
+      for (let d = currentDepth + 1; d <= targetDepth; d++) {
+        window.history.pushState({ cadenceDepth: d }, "");
       }
-      const snap = backSnapshotRef.current;
-      const action = resolveBackAction(snap);
-      if (action === "none") {
-        guardActiveRef.current = false;
-        return;
-      }
+      historyDepthRef.current = targetDepth;
+    } else if (targetDepth < currentDepth) {
+      const delta = targetDepth - currentDepth;
+      suppressPopDepthRef.current = targetDepth;
+      historyDepthRef.current = targetDepth;
+      window.history.go(delta);
+    }
+  }, [targetDepth, user]);
 
-      const nextSnap: BackStackSnapshot = { ...snap };
-      switch (action) {
-        case "close_context_menu":
-          setContextMenu(null);
-          nextSnap.contextMenuOpen = false;
-          break;
-        case "close_save_modal":
-          setSaveModalTracks(null);
-          nextSnap.saveModalOpen = false;
-          break;
-        case "close_shortcuts":
-          setShortcutsOpen(false);
-          nextSnap.shortcutsOpen = false;
-          break;
-        case "close_mobile_menu":
-          setMobileMenuOpen(false);
-          nextSnap.mobileMenuOpen = false;
-          break;
-        case "collapse_sheet_to_half":
-          setMobileSheetState("half");
-          nextSnap.mobileSheetState = "half";
-          break;
-        case "collapse_now_playing_sheet":
-          setMobileSheetState("collapsed");
-          nextSnap.mobileSheetState = "collapsed";
-          break;
-        case "close_now_playing":
-          setNowPlayingOpen(false);
-          setMobileSheetState("collapsed");
-          nextSnap.nowPlayingOpen = false;
-          nextSnap.mobileSheetState = "collapsed";
-          break;
-        case "pop_view": {
-          const target = snap.viewHistory[snap.viewHistory.length - 1] ?? "home";
-          setActiveView(target);
-          setViewHistory(snap.viewHistory.slice(0, -1));
-          nextSnap.activeView = target;
-          nextSnap.viewHistory = snap.viewHistory.slice(0, -1);
-          break;
+  useEffect(() => {
+    if (!user) return;
+    const onPopState = (e: PopStateEvent) => {
+      const rawState = e.state as { cadenceDepth?: unknown } | null;
+      const poppedDepth =
+        typeof rawState?.cadenceDepth === "number" && Number.isFinite(rawState.cadenceDepth)
+          ? Math.max(0, Math.round(rawState.cadenceDepth))
+          : 0;
+
+      if (suppressPopDepthRef.current !== null && poppedDepth === suppressPopDepthRef.current) {
+        suppressPopDepthRef.current = null;
+        return;
+      }
+      suppressPopDepthRef.current = null;
+
+      if (poppedDepth < historyDepthRef.current) {
+        let steps = historyDepthRef.current - poppedDepth;
+        historyDepthRef.current = poppedDepth;
+        const working: BackStackSnapshot = { ...backSnapshotRef.current };
+
+        while (steps > 0) {
+          steps -= 1;
+          const action = resolveBackAction(working);
+          if (action === "none") break;
+          switch (action) {
+            case "close_context_menu":
+              setContextMenu(null);
+              working.contextMenuOpen = false;
+              break;
+            case "close_save_modal":
+              setSaveModalTracks(null);
+              working.saveModalOpen = false;
+              break;
+            case "close_shortcuts":
+              setShortcutsOpen(false);
+              working.shortcutsOpen = false;
+              break;
+            case "close_mobile_menu":
+              setMobileMenuOpen(false);
+              working.mobileMenuOpen = false;
+              break;
+            case "collapse_sheet_to_half":
+              setMobileSheetState("half");
+              working.mobileSheetState = "half";
+              break;
+            case "collapse_now_playing_sheet":
+              setMobileSheetState("collapsed");
+              working.mobileSheetState = "collapsed";
+              break;
+            case "close_now_playing":
+              setNowPlayingOpen(false);
+              setMobileSheetState("collapsed");
+              working.nowPlayingOpen = false;
+              working.mobileSheetState = "collapsed";
+              break;
+            case "pop_view": {
+              const target = working.viewHistory[working.viewHistory.length - 1] ?? "home";
+              const nextHist = working.viewHistory.slice(0, -1);
+              setActiveView(target);
+              setViewHistory(nextHist);
+              working.activeView = target;
+              working.viewHistory = nextHist;
+              break;
+            }
+          }
         }
-      }
-
-      if (hasDismissibleBackTarget(nextSnap)) {
-        window.history.pushState({ cadenceBackGuard: true }, "");
-        guardActiveRef.current = true;
-      } else {
-        guardActiveRef.current = false;
       }
     };
 
@@ -916,7 +945,7 @@ export function App() {
                 {activeView === "playlist" && (
                   <PlaylistDetailView
                     playlist={activePlaylist}
-                    onBack={() => navigateTo("library")}
+                    onBack={goBackView}
                     onPlayPlaylist={handlePlayPlaylist}
                     onTogglePinPlaylist={socket.togglePinPlaylist}
                     onRenamePlaylist={socket.renamePlaylist}
@@ -944,7 +973,7 @@ export function App() {
                 {activeView === "artist" && (
                   <ArtistView
                     artistName={selectedArtist}
-                    onBack={() => navigateTo(prevViewRef.current || "home")}
+                    onBack={goBackView}
                     onEnqueue={handleEnqueue}
                     onStartMix={handleStartMix}
                     onOpenArtist={handleOpenArtist}
@@ -983,7 +1012,7 @@ export function App() {
             {nowPlayingMounted && (
               <div
                 aria-hidden={!nowPlayingVisible}
-                className={`fixed inset-0 z-40 flex flex-col overflow-hidden bg-[#030303] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform lg:absolute lg:inset-0 lg:z-30 lg:px-8 lg:py-6 ${
+                className={`fixed inset-0 z-[45] overscroll-none flex flex-col overflow-hidden bg-[#030303] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform lg:absolute lg:inset-0 lg:z-20 lg:px-8 lg:py-6 ${
                   nowPlayingVisible ? "translate-y-0" : "pointer-events-none translate-y-full"
                 }`}
               >

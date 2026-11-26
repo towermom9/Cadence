@@ -67,7 +67,15 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-2-4">v0.2.4 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-2-5">v0.2.5 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Measured mobile <strong>Now Playing</strong> compact hero height dynamically with <code>ResizeObserver</code> so the halfway Up Next / Lyrics / Related sheet never overlaps playback controls or text.</li>
+          <li>Rebuilt mobile sheet dragging around 60fps direct CSS-variable transforms with velocity flick thresholds, generous handle + tab bar touch zones, live cover art/hero drag follow, top-of-list pull-down handoff, and global <code>overscroll-behavior-y: none</code> to stop accidental pull-to-refresh.</li>
+          <li>Replaced the single-sentinel history listener with a depth-synchronized Back button stack so Android/browser Back cleanly steps down through context menus, modals, full/half sheet states, Now Playing, and subviews.</li>
+          <li>Fixed desktop TopBar search dropdowns overlapping Now Playing (header <code>z-30</code> vs desktop overlay <code>z-20</code>), prevented mobile virtual keyboard resize events from dismissing open bottom action sheets, and reduced Lavalink audio buffer &amp; volume RPC latency.</li>
+        </ul>
+
+        <h2 id="v0-2-4">v0.2.4 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Restored the v0.2.2 halfway-expanded mobile <strong>Now Playing</strong> queue, lyrics, and related sheet layout while adding 3-state vertical drag-to-full-screen (collapsed, halfway hero, and full-screen drawer) plus 3-step hardware Back button unwinding.</li>
           <li>Removed mini-player and artwork horizontal swipe gestures and fixed desktop grid column width containment (<code>min-w-0</code> / <code>max-lg:</code> mobile sheet scoping) so long track titles and mobile AMOLED backdrops never clip or bleed into the desktop Now Playing view.</li>

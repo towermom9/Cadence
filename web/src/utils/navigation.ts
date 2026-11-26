@@ -46,6 +46,26 @@ export function hasDismissibleBackTarget(snapshot: BackStackSnapshot): boolean {
   return resolveBackAction(snapshot) !== "none";
 }
 
+export function computeBackDepth(snapshot: BackStackSnapshot): number {
+  let depth = 0;
+  if (snapshot.activeView !== "home" || snapshot.viewHistory.length > 0) {
+    depth += Math.max(1, snapshot.viewHistory.length);
+  }
+  if (snapshot.nowPlayingOpen) {
+    depth += 1;
+    if (snapshot.mobileSheetState === "half") {
+      depth += 1;
+    } else if (snapshot.mobileSheetState === "full") {
+      depth += 2;
+    }
+  }
+  if (snapshot.mobileMenuOpen) depth += 1;
+  if (snapshot.shortcutsOpen) depth += 1;
+  if (snapshot.saveModalOpen) depth += 1;
+  if (snapshot.contextMenuOpen) depth += 1;
+  return depth;
+}
+
 export function pushViewHistory(
   history: MainView[],
   current: MainView,

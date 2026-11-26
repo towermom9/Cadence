@@ -265,7 +265,7 @@ export function TopBar({
   return (
     <header
       ref={containerRef}
-      className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-white/8 bg-[#030303]/85 px-4 backdrop-blur-xl lg:px-8"
+      className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-white/8 bg-[#030303]/85 px-4 backdrop-blur-xl lg:px-8"
     >
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <MobileMenuButton onClick={onOpenMobileMenu} />

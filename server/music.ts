@@ -1342,8 +1342,8 @@ export class MusicService {
     try {
       while (true) {
         const elapsed = Date.now() - (this.lastVolumeRpcAt.get(guildId) ?? 0);
-        if (elapsed < 180) {
-          await new Promise((resolve) => setTimeout(resolve, 180 - elapsed));
+        if (elapsed < 100) {
+          await new Promise((resolve) => setTimeout(resolve, 100 - elapsed));
         }
         const targetUi = entry.target;
         const lavalinkVol = uiVolumeToLavalink(targetUi);

@@ -174,9 +174,11 @@ export function ContextMenu({
       onClose();
     };
     const handleResize = () => {
-      if (typeof window !== "undefined" && window.innerWidth < 640 !== isMobileSheet) {
-        setIsMobileSheet(window.innerWidth < 640);
-      } else {
+      if (typeof window === "undefined") return;
+      const mobileNow = window.innerWidth < 640;
+      if (mobileNow !== isMobileSheet) {
+        setIsMobileSheet(mobileNow);
+      } else if (!mobileNow) {
         onClose();
       }
     };

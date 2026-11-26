@@ -27,6 +27,7 @@ export function useVolumeControl({
   const [draft, setDraft] = useState(String(safeServer));
   const [isEditing, setIsEditing] = useState(false);
 
+  const localVolumeRef = useRef(safeServer);
   const isDraggingRef = useRef(false);
   const lastNonZeroRef = useRef(safeServer > 0 ? safeServer : 100);
   const lastSentRef = useRef(safeServer);
@@ -56,6 +57,7 @@ export function useVolumeControl({
     }
     if (!isDraggingRef.current && !isEditing) {
       lastSentRef.current = safeServer;
+      localVolumeRef.current = safeServer;
       setLocalVolume(safeServer);
       setDraft(String(safeServer));
     }
@@ -95,11 +97,12 @@ export function useVolumeControl({
         lastSentRef.current = target;
         onCommitRef.current(target);
       }
-    } else if (wasDragging && localVolume !== lastSentRef.current) {
-      lastSentRef.current = localVolume;
-      onCommitRef.current(localVolume);
+    } else if (wasDragging && localVolumeRef.current !== lastSentRef.current) {
+      const target = localVolumeRef.current;
+      lastSentRef.current = target;
+      onCommitRef.current(target);
     }
-  }, [clearDebounce, detachWindowListeners, localVolume]);
+  }, [clearDebounce, detachWindowListeners]);
 
   const handleSliderPointerDown = useCallback(() => {
     if (disabled) return;
@@ -122,6 +125,7 @@ export function useVolumeControl({
     (rawValue: number) => {
       if (disabled) return;
       const clamped = clampVolume(rawValue);
+      localVolumeRef.current = clamped;
       setLocalVolume(clamped);
       setDraft(String(clamped));
       if (clamped > 0) {
@@ -129,7 +133,7 @@ export function useVolumeControl({
       }
       pendingRef.current = clamped;
       clearDebounce();
-      const delayMs = isDraggingRef.current ? 320 : 200;
+      const delayMs = isDraggingRef.current ? 140 : 120;
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null;
         if (pendingRef.current !== null) {
@@ -142,8 +146,8 @@ export function useVolumeControl({
 
   const startEditing = useCallback(() => {
     setIsEditing(true);
-    setDraft(String(localVolume));
-  }, [localVolume]);
+    setDraft(String(localVolumeRef.current));
+  }, []);
 
   const updateDraft = useCallback((rawText: string) => {
     setDraft(rawText.replace(/[^0-9]/g, "").slice(0, 3));
@@ -153,19 +157,20 @@ export function useVolumeControl({
     setIsEditing(false);
     const parsed = Number.parseInt(draft.replace(/[^0-9]/g, ""), 10);
     if (!Number.isFinite(parsed)) {
-      setDraft(String(localVolume));
+      setDraft(String(localVolumeRef.current));
       return;
     }
     const clamped = clampVolume(parsed);
+    localVolumeRef.current = clamped;
     setLocalVolume(clamped);
     setDraft(String(clamped));
     flushCommit(clamped);
-  }, [draft, flushCommit, localVolume]);
+  }, [draft, flushCommit]);
 
   const cancelEditing = useCallback(() => {
-    setDraft(String(localVolume));
+    setDraft(String(localVolumeRef.current));
     setIsEditing(false);
-  }, [localVolume]);
+  }, []);
 
   const handleDraftKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -182,11 +187,12 @@ export function useVolumeControl({
 
   const toggleMute = useCallback(() => {
     if (disabled) return;
-    const next = localVolume === 0 ? lastNonZeroRef.current || 100 : 0;
+    const next = localVolumeRef.current === 0 ? lastNonZeroRef.current || 100 : 0;
+    localVolumeRef.current = next;
     setLocalVolume(next);
     setDraft(String(next));
     flushCommit(next);
-  }, [disabled, flushCommit, localVolume]);
+  }, [disabled, flushCommit]);
 
   return {
     localVolume,

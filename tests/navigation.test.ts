@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  computeBackDepth,
   hasDismissibleBackTarget,
   pushViewHistory,
   resolveBackAction,
@@ -105,5 +106,40 @@ describe("web/src/utils/navigation back stack", () => {
 
     history = pushViewHistory(history, "artist", "home");
     expect(history).toEqual([]);
+  });
+
+  test("computes exact stack depth for multi-layer Back unwinding", () => {
+    expect(computeBackDepth(baseSnapshot)).toBe(0);
+    expect(
+      computeBackDepth({
+        ...baseSnapshot,
+        activeView: "explore",
+        viewHistory: ["home"],
+      })
+    ).toBe(1);
+    expect(
+      computeBackDepth({
+        ...baseSnapshot,
+        nowPlayingOpen: true,
+        mobileSheetState: "collapsed",
+      })
+    ).toBe(1);
+    expect(
+      computeBackDepth({
+        ...baseSnapshot,
+        nowPlayingOpen: true,
+        mobileSheetState: "half",
+      })
+    ).toBe(2);
+    expect(
+      computeBackDepth({
+        ...baseSnapshot,
+        activeView: "artist",
+        viewHistory: ["home", "explore"],
+        nowPlayingOpen: true,
+        mobileSheetState: "full",
+        contextMenuOpen: true,
+      })
+    ).toBe(6);
   });
 });

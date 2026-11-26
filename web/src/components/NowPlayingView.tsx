@@ -202,10 +202,31 @@ export function NowPlayingView({
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
-  const [sheetDragOffsetY, setSheetDragOffsetY] = useState<number | null>(null);
-  const sheetSwipeStartYRef = useRef<number | null>(null);
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+  const [measuredHeroHeight, setMeasuredHeroHeight] = useState(228);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const mobileHeroRef = useRef<HTMLDivElement>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetDraggedRef = useRef(false);
+  const dragOffsetRef = useRef<number | null>(null);
+  const sheetDragStartRef = useRef<{
+    startY: number;
+    lastY: number;
+    lastTime: number;
+    vy: number;
+    baseOffset: number;
+  } | null>(null);
+  const listPullRef = useRef<{
+    startX: number;
+    startY: number;
+    engaged: boolean;
+  } | null>(null);
+  const topBarDismissRef = useRef<{
+    startY: number;
+    lastY: number;
+    lastTime: number;
+    vy: number;
+  } | null>(null);
   const justDraggedRef = useRef(false);
   const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -691,88 +712,245 @@ export function NowPlayingView({
     [onTrackContextMenu]
   );
 
-  const HALF_OFFSET_Y = 210;
+  const halfOffsetY = Math.max(204, Math.min(364, measuredHeroHeight + 4));
 
-  const handleSheetHandleTouchStart = useCallback((e: ReactTouchEvent<HTMLElement>) => {
-    sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
-    sheetDraggedRef.current = false;
-  }, []);
-
-  const handleSheetHandleTouchMove = useCallback(
-    (e: ReactTouchEvent<HTMLElement>) => {
-      const startY = sheetSwipeStartYRef.current;
-      const curY = e.touches[0]?.clientY;
-      if (startY === null || typeof curY !== "number") return;
-      const sheetH = sheetContainerRef.current?.offsetHeight || 720;
-      const collapsedY = Math.max(HALF_OFFSET_Y + 120, sheetH - 56);
-      const dy = curY - startY;
-      if (Math.abs(dy) > 6) {
-        sheetDraggedRef.current = true;
+  useEffect(() => {
+    if (!isSheetOpen) return;
+    const el = mobileHeroRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      if (h > 0) {
+        const clamped = Math.max(200, Math.min(360, h));
+        setMeasuredHeroHeight((prev) => (prev === clamped ? prev : clamped));
       }
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isSheetOpen, mobileVolumeOpen, current?.identifier]);
+
+  const getCollapsedY = useCallback(
+    () => Math.max(halfOffsetY + 120, (sheetContainerRef.current?.offsetHeight || 720) - 60),
+    [halfOffsetY]
+  );
+
+  const applyLiveSheetOffset = useCallback(
+    (y: number, collapsedY: number) => {
+      dragOffsetRef.current = y;
+      if (sheetContainerRef.current) {
+        sheetContainerRef.current.style.setProperty("--mobile-sheet-y", `${y}px`);
+      }
+      if (rootRef.current) {
+        const pHalf = Math.max(
+          0,
+          Math.min(1, (collapsedY - y) / Math.max(1, collapsedY - halfOffsetY))
+        );
+        const pFull = Math.max(0, Math.min(1, (halfOffsetY - y) / Math.max(1, halfOffsetY)));
+        rootRef.current.style.setProperty("--np-drag-half", String(pHalf));
+        rootRef.current.style.setProperty("--np-drag-full", String(pFull));
+      }
+    },
+    [halfOffsetY]
+  );
+
+  const clearLiveSheetDrag = useCallback(
+    (targetState: MobileSheetState) => {
+      dragOffsetRef.current = null;
+      if (rootRef.current) {
+        rootRef.current.style.removeProperty("--np-drag-half");
+        rootRef.current.style.removeProperty("--np-drag-full");
+      }
+      if (sheetContainerRef.current) {
+        const targetY =
+          targetState === "full"
+            ? "0px"
+            : targetState === "half"
+              ? `${halfOffsetY}px`
+              : "calc(100% - 60px)";
+        sheetContainerRef.current.style.setProperty("--mobile-sheet-y", targetY);
+      }
+      setIsDraggingSheet(false);
+    },
+    [halfOffsetY]
+  );
+
+  const beginSheetDrag = useCallback(
+    (clientY: number) => {
+      const collapsedY = getCollapsedY();
       const baseOffset =
         mobileSheetState === "full"
           ? 0
           : mobileSheetState === "half"
-            ? HALF_OFFSET_Y
+            ? halfOffsetY
             : collapsedY;
-      const nextOffset = Math.max(0, Math.min(collapsedY, baseOffset + dy));
-      setSheetDragOffsetY(nextOffset);
+      sheetDragStartRef.current = {
+        startY: clientY,
+        lastY: clientY,
+        lastTime: performance.now(),
+        vy: 0,
+        baseOffset,
+      };
     },
-    [mobileSheetState]
+    [getCollapsedY, halfOffsetY, mobileSheetState]
+  );
+
+  const updateSheetDrag = useCallback(
+    (clientY: number) => {
+      const start = sheetDragStartRef.current;
+      if (!start) return;
+      const now = performance.now();
+      const dt = Math.max(1, now - start.lastTime);
+      start.vy = (clientY - start.lastY) / dt;
+      start.lastY = clientY;
+      start.lastTime = now;
+
+      const dy = clientY - start.startY;
+      if (Math.abs(dy) > 6 && !sheetDraggedRef.current) {
+        sheetDraggedRef.current = true;
+        setIsDraggingSheet(true);
+      }
+      if (sheetDraggedRef.current) {
+        const collapsedY = getCollapsedY();
+        const nextOffset = Math.max(0, Math.min(collapsedY, start.baseOffset + dy));
+        applyLiveSheetOffset(nextOffset, collapsedY);
+      }
+    },
+    [applyLiveSheetOffset, getCollapsedY]
+  );
+
+  const endSheetDrag = useCallback(
+    (clientY: number | undefined) => {
+      const start = sheetDragStartRef.current;
+      sheetDragStartRef.current = null;
+      if (!start || typeof clientY !== "number") {
+        clearLiveSheetDrag(mobileSheetState);
+        return;
+      }
+
+      const collapsedY = getCollapsedY();
+      const dy = clientY - start.startY;
+      const vy = start.vy;
+      const endOffset = Math.max(0, Math.min(collapsedY, start.baseOffset + dy));
+      const DIST_THRESHOLD = 28;
+      const VEL_THRESHOLD = 0.32;
+      const flickUp = vy < -VEL_THRESHOLD && dy < -12;
+      const flickDown = vy > VEL_THRESHOLD && dy > 12;
+
+      let nextState: MobileSheetState = mobileSheetState;
+      if (mobileSheetState === "collapsed") {
+        if (endOffset < halfOffsetY * 0.55 || (vy < -0.9 && dy < -60)) {
+          nextState = "full";
+        } else if (dy < -DIST_THRESHOLD || flickUp) {
+          nextState = "half";
+        }
+      } else if (mobileSheetState === "half") {
+        if (dy < -DIST_THRESHOLD || flickUp) {
+          nextState = "full";
+        } else if (dy > DIST_THRESHOLD || flickDown) {
+          nextState = "collapsed";
+        }
+      } else {
+        if (endOffset > (halfOffsetY + collapsedY) * 0.55 || (vy > 0.9 && dy > 60)) {
+          nextState = "collapsed";
+        } else if (dy > DIST_THRESHOLD || flickDown) {
+          nextState = "half";
+        }
+      }
+
+      clearLiveSheetDrag(nextState);
+      if (nextState !== mobileSheetState) {
+        setMobileSheetState(nextState);
+      }
+    },
+    [clearLiveSheetDrag, getCollapsedY, halfOffsetY, mobileSheetState, setMobileSheetState]
+  );
+
+  const handleSheetHandleTouchStart = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const y = e.touches[0]?.clientY;
+      if (typeof y !== "number") return;
+      sheetDraggedRef.current = false;
+      beginSheetDrag(y);
+    },
+    [beginSheetDrag]
+  );
+
+  const handleSheetHandleTouchMove = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const curY = e.touches[0]?.clientY;
+      if (typeof curY !== "number") return;
+      updateSheetDrag(curY);
+    },
+    [updateSheetDrag]
   );
 
   const handleSheetHandleTouchEnd = useCallback(
     (e: ReactTouchEvent<HTMLElement>) => {
-      const startY = sheetSwipeStartYRef.current;
       const endY = e.changedTouches[0]?.clientY;
-      sheetSwipeStartYRef.current = null;
-      setSheetDragOffsetY(null);
-      if (startY === null || typeof endY !== "number") return;
-      const sheetH = sheetContainerRef.current?.offsetHeight || 720;
-      const collapsedY = Math.max(HALF_OFFSET_Y + 120, sheetH - 56);
-      const baseOffset =
-        mobileSheetState === "full"
-          ? 0
-          : mobileSheetState === "half"
-            ? HALF_OFFSET_Y
-            : collapsedY;
-      const dy = endY - startY;
-      const endOffset = Math.max(0, Math.min(collapsedY, baseOffset + dy));
-
-      if (mobileSheetState === "collapsed") {
-        if (endOffset < HALF_OFFSET_Y * 0.55) {
-          setMobileSheetState("full");
-        } else if (dy < -45) {
-          setMobileSheetState("half");
-        }
-      } else if (mobileSheetState === "half") {
-        if (dy < -45) {
-          setMobileSheetState("full");
-        } else if (dy > 45) {
-          setMobileSheetState("collapsed");
-        }
-      } else {
-        if (endOffset > (HALF_OFFSET_Y + collapsedY) / 2) {
-          setMobileSheetState("collapsed");
-        } else if (dy > 45) {
-          setMobileSheetState("half");
-        }
-      }
+      endSheetDrag(endY);
     },
-    [mobileSheetState, setMobileSheetState]
+    [endSheetDrag]
   );
 
-  const mobileSheetY =
-    sheetDragOffsetY !== null
-      ? `${sheetDragOffsetY}px`
-      : mobileSheetState === "full"
-        ? "0px"
-        : mobileSheetState === "half"
-          ? "210px"
-          : "calc(100% - 56px)";
+  const handleListTouchStart = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      if (!isSheetOpen || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      listPullRef.current = { startX: t.clientX, startY: t.clientY, engaged: false };
+    },
+    [isSheetOpen]
+  );
+
+  const handleListTouchMove = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const pull = listPullRef.current;
+      if (!pull || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (!pull.engaged) {
+        const dx = t.clientX - pull.startX;
+        const dy = t.clientY - pull.startY;
+        if (e.currentTarget.scrollTop <= 0 && dy > 10 && Math.abs(dy) > Math.abs(dx) * 1.25) {
+          pull.engaged = true;
+          sheetDraggedRef.current = true;
+          beginSheetDrag(t.clientY);
+          setIsDraggingSheet(true);
+        } else if (e.currentTarget.scrollTop > 0 || dy < -8 || Math.abs(dx) > 12) {
+          listPullRef.current = null;
+        }
+        return;
+      }
+      updateSheetDrag(t.clientY);
+    },
+    [beginSheetDrag, updateSheetDrag]
+  );
+
+  const handleListTouchEnd = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const pull = listPullRef.current;
+      listPullRef.current = null;
+      if (pull?.engaged) {
+        endSheetDrag(e.changedTouches[0]?.clientY);
+      }
+    },
+    [endSheetDrag]
+  );
+
+  const restMobileSheetY =
+    mobileSheetState === "full"
+      ? "0px"
+      : mobileSheetState === "half"
+        ? `${halfOffsetY}px`
+        : "calc(100% - 60px)";
 
   return (
-    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10">
+    <div
+      ref={rootRef}
+      data-dragging={isDraggingSheet ? "true" : "false"}
+      className="mobile-np-root relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10"
+    >
       {ambienceMode && current && !isSheetOpen && (
         <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
           <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
@@ -784,9 +962,10 @@ export function NowPlayingView({
         </div>
       )}
 
-      {/* Left Clean Artwork Column (Desktop) + v0.2.2 Mobile Player / Compact Halfway Hero (< lg) */}
+      {/* Left Clean Artwork Column (Desktop) + v0.2.2 Mobile Player / Measured Hero (< lg) */}
       <div
-        className={`relative z-10 flex min-h-0 min-w-0 flex-col lg:col-span-7 lg:flex-initial lg:justify-center ${
+        ref={mobileHeroRef}
+        className={`mobile-np-hero relative z-10 flex min-h-0 min-w-0 flex-col lg:col-span-7 lg:flex-initial lg:justify-center ${
           isSheetOpen ? "shrink-0 overflow-hidden" : "flex-1 justify-between"
         }`}
       >
@@ -805,20 +984,57 @@ export function NowPlayingView({
         {/* Mobile Top Bar (< lg) */}
         <div
           onTouchStart={(e) => {
-            if (!isSheetOpen) {
-              sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
+            const y = e.touches[0]?.clientY;
+            if (typeof y !== "number") return;
+            topBarDismissRef.current = {
+              startY: y,
+              lastY: y,
+              lastTime: performance.now(),
+              vy: 0,
+            };
+          }}
+          onTouchMove={(e) => {
+            const st = topBarDismissRef.current;
+            const y = e.touches[0]?.clientY;
+            if (!st || typeof y !== "number") return;
+            const now = performance.now();
+            st.vy = (y - st.lastY) / Math.max(1, now - st.lastTime);
+            st.lastY = y;
+            st.lastTime = now;
+            if (!isSheetOpen && rootRef.current) {
+              const dy = Math.max(0, y - st.startY);
+              rootRef.current.style.transition = "none";
+              rootRef.current.style.setProperty("--np-dismiss-y", `${dy}px`);
             }
           }}
           onTouchEnd={(e) => {
-            if (isSheetOpen) return;
-            const startY = sheetSwipeStartYRef.current;
-            sheetSwipeStartYRef.current = null;
+            const st = topBarDismissRef.current;
+            topBarDismissRef.current = null;
+            if (rootRef.current) {
+              rootRef.current.style.removeProperty("transition");
+              rootRef.current.style.removeProperty("--np-dismiss-y");
+            }
             const endY = e.changedTouches[0]?.clientY;
-            if (startY !== null && typeof endY === "number" && endY - startY > 45) {
-              onCloseMobile?.();
+            if (!st || typeof endY !== "number") return;
+            const dy = endY - st.startY;
+            if (dy > 36 || st.vy > 0.35) {
+              if (mobileSheetState === "full") {
+                setMobileSheetState("half");
+              } else if (mobileSheetState === "half") {
+                setMobileSheetState("collapsed");
+              } else {
+                onCloseMobile?.();
+              }
             }
           }}
-          className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden"
+          onTouchCancel={() => {
+            topBarDismissRef.current = null;
+            if (rootRef.current) {
+              rootRef.current.style.removeProperty("transition");
+              rootRef.current.style.removeProperty("--np-dismiss-y");
+            }
+          }}
+          className="relative z-10 flex shrink-0 touch-none items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden"
         >
           <button
             type="button"
@@ -873,7 +1089,7 @@ export function NowPlayingView({
               : "flex-1 justify-between px-5 pb-16 pt-2 lg:flex-initial lg:justify-center lg:p-0"
           }`}
         >
-          {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean art without tap-to-pause, ±10s, or darkening) */}
+          {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean responsive art) */}
           <div
             role={current ? "button" : undefined}
             tabIndex={current ? 0 : undefined}
@@ -905,7 +1121,7 @@ export function NowPlayingView({
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            className={`group relative aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
+            className={`mobile-np-artwork group relative aspect-square w-full max-w-[min(340px,37dvh)] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
               current ? "lg:cursor-pointer" : ""
             } ${isSheetOpen ? "hidden lg:block" : "my-auto block"}`}
           >
@@ -1000,7 +1216,7 @@ export function NowPlayingView({
 
                 {/* Horizontal Pill Actions Strip (shown when collapsed) */}
                 {!isSheetOpen && (
-                  <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
+                  <div className="mobile-np-pills no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
                     <button
                       type="button"
                       disabled={current.isStream}
@@ -1240,76 +1456,93 @@ export function NowPlayingView({
       {/* Right Queue / Lyrics / Related Column (Desktop sidebar + 3-state Sliding Mobile Sheet: collapsed <-> half <-> full) */}
       <div
         ref={sheetContainerRef}
-        style={{ "--mobile-sheet-y": mobileSheetY } as CSSProperties}
+        style={
+          {
+            "--mobile-sheet-y": restMobileSheetY,
+            "--mobile-half-y": `${halfOffsetY}px`,
+          } as CSSProperties
+        }
         className={`mobile-queue-sheet flex min-h-0 min-w-0 flex-col max-lg:absolute max-lg:inset-0 max-lg:z-20 max-lg:border-t max-lg:border-white/10 max-lg:bg-[#121212]/95 max-lg:px-4 max-lg:pt-1 max-lg:backdrop-blur-md max-lg:will-change-transform lg:static lg:z-10 lg:col-span-5 ${
-          mobileSheetState === "half" && sheetDragOffsetY === null ? "max-lg:pb-[210px]" : ""
+          mobileSheetState === "half" && !isDraggingSheet
+            ? "max-lg:pb-[var(--mobile-half-y,232px)]"
+            : ""
         } ${
-          mobileSheetState === "full" && sheetDragOffsetY === null
+          mobileSheetState === "full" && !isDraggingSheet
             ? "max-lg:rounded-none"
             : "max-lg:rounded-t-2xl"
         } ${
-          sheetDragOffsetY === null
+          !isDraggingSheet
             ? "max-lg:transition-transform max-lg:duration-300 max-lg:ease-[cubic-bezier(0.22,1,0.36,1)]"
             : ""
         }`}
       >
-        {/* Mobile Sheet Grab Handle + Collapsed Peek Label */}
-        <button
-          type="button"
-          data-inline-btn="true"
-          onClick={() => {
-            if (sheetDraggedRef.current) {
-              sheetDraggedRef.current = false;
-              return;
-            }
-            if (mobileSheetState === "collapsed") {
-              onTabChange("upnext");
-              setMobileSheetState("half");
-            } else if (mobileSheetState === "half") {
-              setMobileSheetState("collapsed");
-            } else {
-              setMobileSheetState("half");
-            }
-          }}
+        {/* Mobile Generous Header Drag Zone (Grab Handle + Tab Bar) */}
+        <div
           onTouchStart={handleSheetHandleTouchStart}
           onTouchMove={handleSheetHandleTouchMove}
           onTouchEnd={handleSheetHandleTouchEnd}
           onTouchCancel={handleSheetHandleTouchEnd}
-          aria-label={isSheetOpen ? "Collapse queue sheet" : "Expand queue sheet"}
-          className="touch-none mx-auto mb-1 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2 text-center lg:hidden"
+          className="shrink-0 max-lg:touch-none"
         >
-          <span className="h-1 w-10 rounded-full bg-white/30" />
-          {mobileSheetState === "collapsed" && (
-            <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
-              {resolvedQueueName}
-            </span>
-          )}
-        </button>
+          <button
+            type="button"
+            data-inline-btn="true"
+            onClick={() => {
+              if (sheetDraggedRef.current) {
+                sheetDraggedRef.current = false;
+                return;
+              }
+              if (mobileSheetState === "collapsed") {
+                onTabChange("upnext");
+                setMobileSheetState("half");
+              } else if (mobileSheetState === "half") {
+                setMobileSheetState("collapsed");
+              } else {
+                setMobileSheetState("half");
+              }
+            }}
+            aria-label={isSheetOpen ? "Collapse queue sheet" : "Expand queue sheet"}
+            className="mx-auto mb-0.5 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2.5 text-center lg:hidden"
+          >
+            <span className="h-1 w-12 rounded-full bg-white/35" />
+            {mobileSheetState === "collapsed" && (
+              <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
+                {resolvedQueueName}
+              </span>
+            )}
+          </button>
 
-        <div className="flex shrink-0 items-center border-b border-white/10">
-          {(
-            [
-              { id: "upnext", label: "Up next" },
-              { id: "lyrics", label: "Lyrics" },
-              { id: "related", label: "Related" },
-            ] as const
-          ).map((item) => {
-            const active = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onTabChange(item.id)}
-                className={`flex-1 border-b-2 py-3 text-xs font-semibold uppercase tracking-wider transition ${
-                  active
-                    ? "border-white text-white"
-                    : "border-transparent text-zinc-400 hover:text-zinc-200"
-                }`}
-              >
-                {item.label}
-              </button>
-            );
-          })}
+          <div className="flex shrink-0 items-center border-b border-white/10">
+            {(
+              [
+                { id: "upnext", label: "Up next" },
+                { id: "lyrics", label: "Lyrics" },
+                { id: "related", label: "Related" },
+              ] as const
+            ).map((item) => {
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (sheetDraggedRef.current) {
+                      sheetDraggedRef.current = false;
+                      return;
+                    }
+                    onTabChange(item.id);
+                  }}
+                  className={`flex-1 border-b-2 py-3 text-xs font-semibold uppercase tracking-wider transition ${
+                    active
+                      ? "border-white text-white"
+                      : "border-transparent text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* UP NEXT */}
@@ -1360,7 +1593,14 @@ export function NowPlayingView({
             </div>
 
             {/* Scrollable Queue Timeline */}
-            <div ref={queueScrollRef} className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+            <div
+              ref={queueScrollRef}
+              onTouchStart={handleListTouchStart}
+              onTouchMove={handleListTouchMove}
+              onTouchEnd={handleListTouchEnd}
+              onTouchCancel={handleListTouchEnd}
+              className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain pr-1"
+            >
               {!current && queue.length === 0 && previousEntries.length === 0 && (
                 <div className="mb-3 rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-zinc-400">
                   Nothing in the queue yet. Search or click a song to play.
@@ -2347,8 +2587,14 @@ export function NowPlayingView({
                   <div
                     ref={lyricsContainerRef}
                     onWheel={handleManualLyricsScroll}
-                    onTouchMove={handleManualLyricsScroll}
-                    className={`min-h-0 flex-1 overflow-y-auto pr-1 ${
+                    onTouchStart={handleListTouchStart}
+                    onTouchMove={(e) => {
+                      handleManualLyricsScroll();
+                      handleListTouchMove(e);
+                    }}
+                    onTouchEnd={handleListTouchEnd}
+                    onTouchCancel={handleListTouchEnd}
+                    className={`min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 ${
                       parsedSynced.length > 0 && userScrolledAway && lyricsAutoScroll
                         ? "pb-14"
                         : "pb-8"
@@ -2510,7 +2756,13 @@ export function NowPlayingView({
                   </div>
                 </div>
 
-                <div className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+                <div
+                  onTouchStart={handleListTouchStart}
+                  onTouchMove={handleListTouchMove}
+                  onTouchEnd={handleListTouchEnd}
+                  onTouchCancel={handleListTouchEnd}
+                  className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain pr-1"
+                >
                   {relatedLoading && relatedTracks.length === 0 ? (
                     <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-400">
                       <Loader2 className="h-4 w-4 animate-spin text-white" />
