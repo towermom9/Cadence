@@ -67,7 +67,16 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-2-5">v0.2.5 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-2-6">v0.2.6 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Centered toast notifications horizontally with even left/right gutters on mobile viewports while preserving top-right placement on desktop.</li>
+          <li>Updated mobile <strong>Now Playing</strong> sheet dragging so the title, progress bar, and playback transport controls translate smoothly up and down with the sheet between collapsed and halfway states.</li>
+          <li>Filled the played portion of the mobile <strong>Now Playing</strong> progress bar and volume slider with the active accent color across mobile WebKit/Chromium browsers.</li>
+          <li>Disabled native HTML5 row hold-to-drag on coarse touch pointers so holding anywhere on a queue track only opens the long-press action menu, keeping the right-side two-bar handle dedicated to reordering.</li>
+          <li>Made mobile swipe-to-remove trigger immediately with velocity flick support and constrained the red delete backdrop strictly to the exposed gap behind the sliding row.</li>
+        </ul>
+
+        <h2 id="v0-2-5">v0.2.5 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Measured mobile <strong>Now Playing</strong> compact hero height dynamically with <code>ResizeObserver</code> so the halfway Up Next / Lyrics / Related sheet never overlaps playback controls or text.</li>
           <li>Rebuilt mobile sheet dragging around 60fps direct CSS-variable transforms with velocity flick thresholds, generous handle + tab bar touch zones, live cover art/hero drag follow, top-of-list pull-down handoff, and global <code>overscroll-behavior-y: none</code> to stop accidental pull-to-refresh.</li>

@@ -19,11 +19,19 @@ export function SwipeableQueueRow({
   className = "",
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    time: number;
+    lastX: number;
+    lastTime: number;
+    vx: number;
+  } | null>(null);
   const modeRef = useRef<"idle" | "swipe" | "scroll" | "longpress">("idle");
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClickRef = useRef(false);
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offsetRef = useRef(0);
 
   const [offsetX, setOffsetX] = useState(0);
@@ -41,6 +49,7 @@ export function SwipeableQueueRow({
     return () => {
       clearTimers();
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     };
   }, []);
 
@@ -60,7 +69,15 @@ export function SwipeableQueueRow({
     }
 
     const touch = e.touches[0];
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    const now = performance.now();
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: now,
+      lastX: touch.clientX,
+      lastTime: now,
+      vx: 0,
+    };
     modeRef.current = "idle";
     offsetRef.current = 0;
     setOffsetX(0);
@@ -90,6 +107,11 @@ export function SwipeableQueueRow({
     const start = touchStartRef.current;
     if (!start || e.touches.length !== 1 || removing) return;
     const touch = e.touches[0];
+    const now = performance.now();
+    start.vx = (touch.clientX - start.lastX) / Math.max(1, now - start.lastTime);
+    start.lastX = touch.clientX;
+    start.lastTime = now;
+
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
 
@@ -114,7 +136,7 @@ export function SwipeableQueueRow({
     }
 
     if (modeRef.current === "swipe") {
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       offsetRef.current = dx;
       setOffsetX(dx);
     }
@@ -133,20 +155,26 @@ export function SwipeableQueueRow({
 
     const dx = offsetRef.current;
     const width = containerRef.current?.offsetWidth || 320;
-    const threshold = Math.min(110, width * 0.3);
+    const threshold = Math.min(88, width * 0.25);
+    const fastFlick = Math.abs(start.vx) > 0.42 && Math.abs(dx) > 40;
 
     setDragging(false);
     modeRef.current = "idle";
 
-    if (Math.abs(dx) >= threshold && onSwipeRemove) {
+    if ((Math.abs(dx) >= threshold || fastFlick) && onSwipeRemove) {
       triggerSuppressClick();
       setRemoving(true);
       const exitX = dx > 0 ? width + 40 : -(width + 40);
       offsetRef.current = exitX;
       setOffsetX(exitX);
-      setTimeout(() => {
-        onSwipeRemove();
-      }, 180);
+      onSwipeRemove();
+      if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = setTimeout(() => {
+        resetTimerRef.current = null;
+        setRemoving(false);
+        offsetRef.current = 0;
+        setOffsetX(0);
+      }, 900);
     } else {
       if (Math.abs(dx) > 12) {
         triggerSuppressClick();
@@ -163,12 +191,14 @@ export function SwipeableQueueRow({
     }
   };
 
-  const showBackdrop = Math.abs(offsetX) > 4;
+  const absOffset = Math.abs(offsetX);
+  const showBackdrop = absOffset > 2;
   const swipeRight = offsetX > 0;
 
   return (
     <div
       ref={containerRef}
+      style={{ WebkitTouchCallout: "none" }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -179,11 +209,15 @@ export function SwipeableQueueRow({
       {showBackdrop && (
         <div
           aria-hidden="true"
-          className={`absolute inset-0 flex items-center bg-[#ef4444] px-5 ${
-            swipeRight ? "justify-start" : "justify-end"
-          }`}
+          style={{
+            width: `${absOffset}px`,
+            ...(swipeRight ? { left: 0 } : { right: 0 }),
+          }}
+          className={`pointer-events-none absolute inset-y-0 flex items-center overflow-hidden bg-[#ef4444] ${
+            dragging ? "" : "transition-[width] duration-150 ease-out"
+          } ${swipeRight ? "justify-start pl-4" : "justify-end pr-4"}`}
         >
-          <Trash2 className="h-5 w-5 text-white" />
+          {absOffset >= 32 && <Trash2 className="h-5 w-5 shrink-0 text-white" />}
         </div>
       )}
       <div
@@ -191,7 +225,7 @@ export function SwipeableQueueRow({
           transform: offsetX !== 0 ? `translateX(${offsetX}px)` : undefined,
         }}
         className={`relative w-full min-w-0 ${
-          dragging ? "" : "transition-transform duration-200 ease-out"
+          dragging ? "" : "transition-transform duration-150 ease-out"
         }`}
       >
         {children}

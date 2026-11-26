@@ -153,9 +153,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.2.5)",
-      path: "docs/reference/changelog/#v0-2-5",
-      content: "v0.2.5 v0.2.4 v0.2.3 mobile overlap ResizeObserver 60fps sheet drag overscroll pull to refresh back depth stack desktop topbar z-index lavalink volume latency.",
+      title: "Release Changelogs (v0.0.0 to v0.2.6)",
+      path: "docs/reference/changelog/#v0-2-6",
+      content: "v0.2.6 v0.2.5 v0.2.4 v0.2.3 centered mobile toast mobile controls drag follow progress bar accent fill swipe remove gap long press queue reorder handle.",
     },
   ];
 

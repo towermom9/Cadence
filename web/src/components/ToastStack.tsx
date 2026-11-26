@@ -10,7 +10,12 @@ export function ToastStack({ toasts, onDismiss }: Props) {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-full max-w-sm flex-col gap-2">
+    <div
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+      className="pointer-events-none fixed inset-x-4 top-4 z-50 mx-auto flex max-w-sm flex-col gap-2 sm:inset-x-auto sm:right-4 sm:mx-0 sm:w-full"
+    >
       {toasts.map((toast) => {
         const icon =
           toast.level === "success" ? (
@@ -31,7 +36,8 @@ export function ToastStack({ toasts, onDismiss }: Props) {
         return (
           <div
             key={toast.id}
-            className={`pointer-events-auto flex items-start gap-3 rounded-xl border px-3.5 py-2.5 text-sm text-zinc-100 shadow-xl backdrop-blur-md ${borderClass}`}
+            role={toast.level === "error" ? "alert" : "status"}
+            className={`pointer-events-auto flex w-full items-start gap-3 rounded-xl border px-3.5 py-2.5 text-sm text-zinc-100 shadow-xl backdrop-blur-md ${borderClass}`}
           >
             <div className="mt-0.5">{icon}</div>
             <p className="flex-1 leading-snug">{toast.message}</p>

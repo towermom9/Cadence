@@ -214,6 +214,34 @@ body,
   min-height: 44px;
 }
 
+.cadence-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.cadence-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--cadence-accent);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.cadence-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--cadence-accent);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
 :root[data-touch="large"] input[type="range"]::-webkit-slider-thumb {
   width: 20px;
   height: 20px;
@@ -258,20 +286,39 @@ body,
   }
 
   .mobile-np-root[data-dragging="true"] .mobile-np-artwork {
-    transform: scale(calc(1 - var(--np-drag-half, 0) * 0.16))
-      translateY(calc(var(--np-drag-half, 0) * -28px));
-    opacity: calc(1 - var(--np-drag-half, 0));
+    transform: scale(calc(1 - var(--np-drag-half, 0) * 0.18))
+      translateY(calc(var(--np-drag-half, 0) * -40px));
+    opacity: calc(1 - var(--np-drag-half, 0) * 1.25);
+    transition: none !important;
+  }
+
+  .mobile-np-root[data-dragging="true"] .mobile-np-controls {
+    transform: translateY(var(--np-controls-y, 0px));
+    will-change: transform;
+    transition: none !important;
+  }
+
+  .mobile-np-root[data-dragging="true"] .mobile-np-transport-group {
+    transform: translateY(var(--np-transport-y, 0px));
+    will-change: transform;
     transition: none !important;
   }
 
   .mobile-np-root[data-dragging="true"] .mobile-np-pills {
-    opacity: calc(1 - var(--np-drag-half, 0) * 1.6);
+    opacity: var(--np-pills-opacity, 1);
+    transform: scaleY(calc(1 - var(--np-drag-half, 0) * 0.5));
+    transform-origin: top center;
+    transition: none !important;
+  }
+
+  .mobile-np-root[data-dragging="true"] .mobile-np-hero-backdrop {
+    opacity: var(--np-drag-half, 1);
     transition: none !important;
   }
 
   .mobile-np-root[data-dragging="true"] .mobile-np-hero {
     opacity: calc(1 - var(--np-drag-full, 0));
-    transform: scale(calc(1 - var(--np-drag-full, 0) * 0.05));
+    transform: translateY(calc(var(--np-drag-full, 0) * -24px));
     transition: none !important;
   }
 

@@ -204,8 +204,16 @@ export function NowPlayingView({
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
   const [measuredHeroHeight, setMeasuredHeroHeight] = useState(228);
+  const [canHtmlDrag, setCanHtmlDrag] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
+      : true
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const mobileHeroRef = useRef<HTMLDivElement>(null);
+  const mobileTopBarRef = useRef<HTMLDivElement>(null);
+  const mobileControlsRef = useRef<HTMLDivElement>(null);
+  const mobilePillsRef = useRef<HTMLDivElement>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetDraggedRef = useRef(false);
   const dragOffsetRef = useRef<number | null>(null);
@@ -215,7 +223,19 @@ export function NowPlayingView({
     lastTime: number;
     vy: number;
     baseOffset: number;
+    startState: MobileSheetState;
+    controlsTravelUp: number;
+    extraGap: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setCanHtmlDrag(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
   const listPullRef = useRef<{
     startX: number;
     startY: number;
@@ -683,6 +703,9 @@ export function NowPlayingView({
       : duration > 0
         ? Math.min(duration, Math.max(0, displayPosition))
         : 0;
+  const mobileProgressPct =
+    duration > 0 ? Math.min(100, Math.max(0, (clampedMobilePos / duration) * 100)) : 0;
+  const mobileVolumePct = Math.min(100, Math.max(0, mobileVol.localVolume));
   const commitMobileSeek = () => {
     if (mobileScrub === null) return;
     const target = Math.round(mobileScrub);
@@ -749,8 +772,24 @@ export function NowPlayingView({
           Math.min(1, (collapsedY - y) / Math.max(1, collapsedY - halfOffsetY))
         );
         const pFull = Math.max(0, Math.min(1, (halfOffsetY - y) / Math.max(1, halfOffsetY)));
+        const start = sheetDragStartRef.current;
+        let controlsY = 0;
+        let transportY = 0;
+        let pillsOpacity = 0;
+        if (start?.startState === "collapsed") {
+          controlsY = -pHalf * start.controlsTravelUp;
+          transportY = -pHalf * start.extraGap;
+          pillsOpacity = Math.max(0, 1 - pHalf * 2.2);
+        } else {
+          controlsY = Math.max(0, y - halfOffsetY);
+          transportY = 0;
+          pillsOpacity = 0;
+        }
         rootRef.current.style.setProperty("--np-drag-half", String(pHalf));
         rootRef.current.style.setProperty("--np-drag-full", String(pFull));
+        rootRef.current.style.setProperty("--np-controls-y", `${controlsY}px`);
+        rootRef.current.style.setProperty("--np-transport-y", `${transportY}px`);
+        rootRef.current.style.setProperty("--np-pills-opacity", String(pillsOpacity));
       }
     },
     [halfOffsetY]
@@ -762,6 +801,9 @@ export function NowPlayingView({
       if (rootRef.current) {
         rootRef.current.style.removeProperty("--np-drag-half");
         rootRef.current.style.removeProperty("--np-drag-full");
+        rootRef.current.style.removeProperty("--np-controls-y");
+        rootRef.current.style.removeProperty("--np-transport-y");
+        rootRef.current.style.removeProperty("--np-pills-opacity");
       }
       if (sheetContainerRef.current) {
         const targetY =
@@ -786,12 +828,30 @@ export function NowPlayingView({
           : mobileSheetState === "half"
             ? halfOffsetY
             : collapsedY;
+      let controlsTravelUp = 0;
+      let extraGap = 0;
+      if (mobileSheetState === "collapsed" && rootRef.current && mobileControlsRef.current) {
+        const rootRect = rootRef.current.getBoundingClientRect();
+        const topBarBottom = mobileTopBarRef.current
+          ? mobileTopBarRef.current.getBoundingClientRect().bottom - rootRect.top
+          : 52;
+        const controlsRect = mobileControlsRef.current.getBoundingClientRect();
+        const controlsTop = controlsRect.top - rootRect.top;
+        const controlsBottom = controlsRect.bottom - rootRect.top;
+        controlsTravelUp = Math.max(0, controlsTop - (topBarBottom + 2));
+        const pillsH = mobilePillsRef.current?.getBoundingClientRect().height ?? 36;
+        const rawExtra = Math.max(0, controlsBottom - halfOffsetY - controlsTravelUp);
+        extraGap = Math.min(rawExtra, pillsH + 28);
+      }
       sheetDragStartRef.current = {
         startY: clientY,
         lastY: clientY,
         lastTime: performance.now(),
         vy: 0,
         baseOffset,
+        startState: mobileSheetState,
+        controlsTravelUp,
+        extraGap,
       };
     },
     [getCollapsedY, halfOffsetY, mobileSheetState]
@@ -966,12 +1026,16 @@ export function NowPlayingView({
       <div
         ref={mobileHeroRef}
         className={`mobile-np-hero relative z-10 flex min-h-0 min-w-0 flex-col lg:col-span-7 lg:flex-initial lg:justify-center ${
-          isSheetOpen ? "shrink-0 overflow-hidden" : "flex-1 justify-between"
+          isSheetOpen
+            ? isDraggingSheet
+              ? "shrink-0 overflow-visible"
+              : "shrink-0 overflow-hidden"
+            : "flex-1 justify-between"
         }`}
       >
         {/* Mobile Expanded Top Hero Artwork Backdrop */}
         {isSheetOpen && current && (
-          <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
+          <div className="mobile-np-hero-backdrop pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
             <TrackArtwork
               track={current}
               className="h-full w-full scale-105 opacity-45"
@@ -983,6 +1047,7 @@ export function NowPlayingView({
 
         {/* Mobile Top Bar (< lg) */}
         <div
+          ref={mobileTopBarRef}
           onTouchStart={(e) => {
             const y = e.touches[0]?.clientY;
             if (typeof y !== "number") return;
@@ -1188,7 +1253,10 @@ export function NowPlayingView({
           </div>
 
           {/* Mobile Controls (< lg) */}
-          <div className={`w-full lg:hidden ${isSheetOpen ? "space-y-1.5" : "mt-4 space-y-3.5"}`}>
+          <div
+            ref={mobileControlsRef}
+            className={`mobile-np-controls w-full lg:hidden ${isSheetOpen ? "space-y-1.5" : "mt-4 space-y-3.5"}`}
+          >
             {current ? (
               <>
                 {/* Title & Artist */}
@@ -1216,7 +1284,10 @@ export function NowPlayingView({
 
                 {/* Horizontal Pill Actions Strip (shown when collapsed) */}
                 {!isSheetOpen && (
-                  <div className="mobile-np-pills no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
+                  <div
+                    ref={mobilePillsRef}
+                    className="mobile-np-pills no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5"
+                  >
                     <button
                       type="button"
                       disabled={current.isStream}
@@ -1307,6 +1378,7 @@ export function NowPlayingView({
                   </div>
                 )}
 
+                <div className={`mobile-np-transport-group ${isSheetOpen ? "space-y-1.5" : "space-y-3.5"}`}>
                 {/* Collapsible Inline Mobile Volume Control */}
                 {mobileVolumeOpen && (
                   <div className="flex items-center gap-2.5 rounded-xl border border-white/12 bg-black/45 px-3 py-2 backdrop-blur-sm">
@@ -1334,9 +1406,12 @@ export function NowPlayingView({
                       onPointerCancel={mobileVol.handleSliderCommit}
                       onBlur={mobileVol.handleSliderCommit}
                       onChange={(e) => mobileVol.handleSliderChange(Number(e.target.value))}
-                      style={{ accentColor: "var(--cadence-accent)" }}
+                      style={{
+                        accentColor: "var(--cadence-accent)",
+                        background: `linear-gradient(to right, var(--cadence-accent) ${mobileVolumePct}%, rgba(255,255,255,0.25) ${mobileVolumePct}%)`,
+                      }}
                       aria-label="Mobile volume slider"
-                      className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
+                      className="cadence-range h-1 flex-1 cursor-pointer rounded-full disabled:opacity-40"
                     />
                     <div className="flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 focus-within:border-white/35">
                       <input
@@ -1378,8 +1453,11 @@ export function NowPlayingView({
                       }
                     }}
                     aria-label="Seek track position"
-                    style={{ accentColor: "var(--cadence-accent)" }}
-                    className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
+                    style={{
+                      accentColor: "var(--cadence-accent)",
+                      background: `linear-gradient(to right, var(--cadence-accent) ${mobileProgressPct}%, rgba(255,255,255,0.25) ${mobileProgressPct}%)`,
+                    }}
+                    className="cadence-range h-1 w-full cursor-pointer rounded-full disabled:opacity-40"
                   />
                   <div className="flex items-center justify-between text-[11px] tabular-nums text-zinc-300">
                     <span>{current.isStream ? "LIVE" : formatMs(clampedMobilePos)}</span>
@@ -1442,6 +1520,7 @@ export function NowPlayingView({
                       <Repeat className="h-5 w-5" />
                     )}
                   </button>
+                </div>
                 </div>
               </>
             ) : (
@@ -1630,9 +1709,9 @@ export function NowPlayingView({
                     data-timeline-section="previous"
                     data-timeline-index={prevIndex}
                     data-timeline-display-idx={displayIdx}
-                    draggable={privileged}
+                    draggable={privileged && canHtmlDrag}
                     onDragStart={(e) => {
-                      if (!privileged) return;
+                      if (!privileged || !canHtmlDrag) return;
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", `prev:${prevIndex}`);
                       setDragSource({ section: "previous", prevIndex, displayIdx });
@@ -1827,9 +1906,9 @@ export function NowPlayingView({
                   <div
                     data-timeline-row="true"
                     data-timeline-section="current"
-                    draggable={privileged}
+                    draggable={privileged && canHtmlDrag}
                     onDragStart={(e) => {
-                      if (!privileged) return;
+                      if (!privileged || !canHtmlDrag) return;
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", "current");
                       setDragSource({ section: "current" });
@@ -2044,9 +2123,9 @@ export function NowPlayingView({
                     data-timeline-row="true"
                     data-timeline-section="manual"
                     data-timeline-index={queueIndex}
-                    draggable={privileged}
+                    draggable={privileged && canHtmlDrag}
                     onDragStart={(e) => {
-                      if (!privileged) return;
+                      if (!privileged || !canHtmlDrag) return;
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", `manual:${queueIndex}`);
                       setDragSource({ section: "manual", queueIndex });
@@ -2358,9 +2437,9 @@ export function NowPlayingView({
                         data-timeline-row="true"
                         data-timeline-section="autoplay"
                         data-timeline-index={queueIndex}
-                        draggable={privileged}
+                        draggable={privileged && canHtmlDrag}
                         onDragStart={(e) => {
-                          if (!privileged) return;
+                          if (!privileged || !canHtmlDrag) return;
                           e.dataTransfer.effectAllowed = "move";
                           e.dataTransfer.setData("text/plain", `autoplay:${queueIndex}`);
                           setDragSource({ section: "autoplay", queueIndex });
