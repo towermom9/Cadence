@@ -72,4 +72,12 @@ describe("server/db (isolated SQLite)", () => {
     expect(page1[0].playlistName).toBeNull();
     expect(page2[1].playlistName).toBe("Roadtrip Mix");
   });
+
+  test("updates stored dashboard domain cleanly", () => {
+    const updated = db.updateDashboardUrl("https://cadence.example.com/");
+    expect(updated.dashboardUrl).toBe("https://cadence.example.com");
+    expect(updated.setupCompleted).toBe(true);
+    const loaded = db.getAppConfig();
+    expect(loaded?.dashboardUrl).toBe("https://cadence.example.com");
+  });
 });

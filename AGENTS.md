@@ -21,7 +21,7 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
   - `web/` - React 19 + Tailwind CSS v4 frontend (`App.tsx`, `components/`, `hooks/useCadenceSocket.ts`, `utils/`).
   - `lavalink/` - Self-contained Lavalink v4 Docker image (`Dockerfile`), `entrypoint.sh` plugin version resolver, and `application.yml`.
   - `tests/` - Isolated `bun test` unit tests (`artists.test.ts`, `volume.test.ts`, `lrc.test.ts`, `db.test.ts`).
-  - `docs/` & `wiki/` - GitHub Pages landing site (`docs/index.html`) and GitHub Wiki documentation (`wiki/*.md`), deployed by `.github/workflows/pages.yml` and `.github/workflows/wiki-sync.yml`.
+  - `docs/` - GitHub Pages documentation site (`docs/index.html`, `docs/assets/`, `docs/docs/guides/*`, `docs/docs/reference/*`), deployed by `.github/workflows/pages.yml`.
 - **What NEVER to touch:**
   - **NEVER** delete, overwrite, or modify `data/` (`data/cadence.sqlite` stores live Discord credentials, OAuth2 sessions, user playlists, and guild settings).
   - Any unit or scratch test that instantiates `CadenceDatabase` **must** point `process.env.DATA_DIR` to an isolated temporary directory (`mkdtempSync(join(tmpdir(), "cadence-test-"))`) before importing `server/db.ts`, and clean it up on exit.
@@ -96,6 +96,6 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
 
 - Reuse shared helpers in `shared/` (`types.ts`, `volume.ts`, `artists.ts`) and `web/src/utils/` (`format.ts`, `theme.ts`, `playlists.ts`, `lrc.ts`) before writing new utilities.
 - Avoid literal em-dashes (`\u2014`) in UI copy, bot messages, and documentation; use standard hyphens (`-`) instead.
-- When adding/changing Discord commands, RBAC rules, settings, or deployment config, keep [README.md](README.md), `docs/index.html`, and `wiki/*.md` in sync.
+- When adding/changing Discord commands, RBAC rules, settings, or deployment config, keep [README.md](README.md) and `docs/` in sync.
 - Avoid obvious comments; only comment non-obvious "whys" (e.g., Lavalink async event races, Innertube client quirks, or timeline index math).
 - Do not over-engineer: keep changes focused on what was requested without adding speculative abstractions.

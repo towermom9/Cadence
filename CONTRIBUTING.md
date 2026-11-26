@@ -36,11 +36,11 @@ Cadence/
 │   └── pre-commit              # Enforces package.json version bump & runs typecheck
 ├── .github/workflows/
 │   ├── docker-publish.yml      # Builds & publishes cadence and cadence-lavalink to GHCR
-│   ├── pages.yml               # Deploys docs/ to GitHub Pages
-│   └── wiki-sync.yml           # Syncs wiki/*.md to the GitHub Wiki repository
+│   └── pages.yml               # Deploys docs/ to GitHub Pages
 ├── docs/
-│   └── index.html              # GitHub Pages landing & quick-reference site
-├── wiki/                       # Markdown documentation synced to GitHub Wiki
+│   ├── index.html              # GitHub Pages landing page
+│   ├── assets/                 # Documentation CSS/JS & Cadence brand assets
+│   └── docs/                   # Guides & reference pages (getting-started, playback, commands, FAQ)
 ├── lavalink/
 │   ├── Dockerfile              # Self-contained Lavalink v4 image with pre-bundled plugins
 │   ├── application.yml         # Lavalink v4, youtube-plugin, LavaSrc, and LavaLyrics config
@@ -174,7 +174,7 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 - `POST /api/preferences` - Persist user UI preferences in SQLite + `cadence_prefs` cookie
 - `GET /api/history?limit=&offset=` - Paginated play history
 - `GET /api/recommendations`, `GET /api/explore`, `GET /api/search/suggest`, `GET /api/artist`, `GET /api/related`, `GET /api/artwork`
-- `GET /api/system/info`, `GET /api/system/logs` - Tier 4 Owner diagnostics & redacted log report
+- `GET /api/system/info`, `POST /api/system/domain`, `GET /api/system/logs` - Tier 4 Owner domain configuration, diagnostics & redacted log report
 
 ### Real-Time WebSocket Hub (`server/ws.ts`, `shared/types.ts`)
 - Upgrade endpoint at `/ws` authenticates via session cookie and pushes `ready`, `meta`, `preferences`, `playerState`, `playlists`, `pinnedTracks`, `historyPage`, `settings`, `lyrics`, `searchResults`, and `toast`.
@@ -190,10 +190,9 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 
 ---
 
-## GitHub Pages & GitHub Wiki
+## GitHub Pages Documentation
 
-- **GitHub Pages (`docs/index.html`):** Static dark landing page deployed by `.github/workflows/pages.yml` on pushes to `main` touching `docs/**`. To enable in a fork/repo, open **Settings -> Pages** and set **Source** to **GitHub Actions**.
-- **GitHub Wiki (`wiki/*.md`):** Markdown documentation synced to the `<repo>.wiki.git` repository by `.github/workflows/wiki-sync.yml` on pushes to `main` touching `wiki/**`. GitHub requires creating one initial placeholder page in the repository's **Wiki** tab before the workflow can push commits to `<repo>.wiki.git`.
+- **Unified Documentation Site (`docs/`):** Static dark documentation site (landing page + Guides + Reference pages) deployed automatically by `.github/workflows/pages.yml` on pushes to `main` touching `docs/**`. To enable in a fork/repo, open **Settings -> Pages** and set **Source** to **GitHub Actions**.
 
 ---
 
@@ -245,7 +244,7 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 
 1. Fork the repository and create a feature branch from `main`.
 2. Implement your changes following the guardrails in [AGENTS.md](AGENTS.md).
-3. Update `README.md`, `docs/`, or `wiki/` if user-facing behavior or configuration changed.
+3. Update `README.md` and `docs/` if user-facing behavior or configuration changed.
 4. Bump `"version"` in `package.json`.
 5. Verify `bun run verify` passes cleanly with exit code `0`.
 6. Open a Pull Request with a clear summary and screenshots for any UI changes.

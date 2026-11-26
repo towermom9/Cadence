@@ -98,8 +98,10 @@ export class CadenceWsHub {
 
     // 1. Guild where user is currently inside a voice channel
     for (const guild of guilds) {
-      const member = guild.members.cache.get(userId);
-      if (member?.voice.channelId) {
+      const vcId =
+        guild.voiceStates.cache.get(userId)?.channelId ??
+        guild.members.cache.get(userId)?.voice.channelId;
+      if (vcId) {
         return guild.id;
       }
     }
@@ -246,6 +248,29 @@ export class CadenceWsHub {
     const meta = this.bot.getBotMeta();
     for (const [rawWs] of this.clients.entries()) {
       this.send(rawWs, { type: "meta", meta });
+    }
+  }
+
+  syncUserVoiceGuild(userId: string, guildId: string): void {
+    const guild = this.bot.client.guilds.cache.get(guildId);
+    if (!guild) return;
+    for (const [rawWs, meta] of this.clients.entries()) {
+      if (meta.session.user.id !== userId) continue;
+      if (meta.selectedGuildId === guildId) continue;
+      meta.selectedGuildId = guildId;
+      this.send(rawWs, { type: "ready", selectedGuildId: guildId });
+      this.send(rawWs, {
+        type: "playerState",
+        state: this.bot.music.serializePlayer(guildId, userId),
+      });
+      if (this.bot.isGuildAdmin(guildId, userId)) {
+        const settings = this.db.getGuildSettings(guildId);
+        this.send(rawWs, {
+          type: "settings",
+          settings: { ...settings, roles: this.bot.getGuildRoles(guildId) },
+        });
+      }
+      this.sendToast(rawWs, "info", `Switched server to ${guild.name} (voice channel)`);
     }
   }
 

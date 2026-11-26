@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Discord Bot Setup | Cadence Docs</title>
+    <link rel="icon" type="image/png" href="../../../assets/favicon.png" />
+    <link rel="stylesheet" href="../../../assets/site.css" />
+  </head>
+  <body data-root="../../..">
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-left">
+          <button type="button" class="menu-toggle" data-menu-toggle>Menu</button>
+          <a class="brand-link" href="../../../">
+            <span class="cadence-mark cadence-icon" aria-hidden="true">
+              <span class="layer layer-accent"></span>
+              <span class="layer layer-inner"></span>
+            </span>
+            <span>Cadence</span>
+          </a>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="search-trigger" data-open-search>
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <nav class="nav-links">
+            <a class="active" href="../getting-started/">Guides</a>
+            <a href="../../reference/commands/">Commands</a>
+            <a href="../../reference/troubleshooting/">FAQ</a>
+          </nav>
+          <a class="icon-btn" href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.08 11.08 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Guides</div>
+          <a class="sidebar-link" href="../getting-started/">Getting Started</a>
+          <a class="sidebar-link" href="../installation/">Installation &amp; Deployment</a>
+          <a class="sidebar-link active" href="../discord-setup/">Discord Bot Setup</a>
+          <a class="sidebar-link" href="../playback/">Playback &amp; Empty VC</a>
+          <a class="sidebar-link" href="../rbac/">Role-Based Access &amp; Domains</a>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Reference</div>
+          <a class="sidebar-link" href="../../reference/commands/">Commands &amp; Shortcuts</a>
+          <a class="sidebar-link" href="../../reference/troubleshooting/">Troubleshooting &amp; FAQ</a>
+        </div>
+      </aside>
+
+      <main class="docs-content">
+        <h1>Discord Bot Setup</h1>
+        <p class="docs-lead">Configure your Discord Developer Portal application, privileged Gateway intents, and OAuth2 redirect URLs.</p>
+
+        <h2 id="developer-portal">1. Create a Discord Application</h2>
+        <ol>
+          <li>Open the <a class="inline-link" href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">Discord Developer Portal</a> and create a new application.</li>
+          <li>Navigate to <strong>Bot</strong> and click <strong>Reset Token</strong> to obtain your Bot Token.</li>
+          <li>Under <strong>Privileged Gateway Intents</strong>, enable:
+            <ul>
+              <li><strong>Server Members Intent</strong> (required for role lookups and tier permissions)</li>
+              <li><strong>Message Content Intent</strong> (required for text prefix commands such as <code>?play</code> and <code>?playnext</code>)</li>
+            </ul>
+          </li>
+        </ol>
+
+        <h2 id="oauth2">2. Configure OAuth2 Redirects</h2>
+        <ol>
+          <li>Navigate to <strong>OAuth2 -&gt; General</strong>.</li>
+          <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong>.</li>
+          <li>Under <strong>Redirects</strong>, add your exact callback URL:
+            <ul>
+              <li>Local dev: <code>http://localhost:8000/api/auth/callback</code></li>
+              <li>Docker / custom domain: <code>https://your-domain.example/api/auth/callback</code></li>
+            </ul>
+          </li>
+        </ol>
+
+        <div class="callout warn">
+          <div class="callout-title">Exact Match Required</div>
+          Discord requires the redirect URL in Developer Portal to match your live Cadence Domain / Dashboard URL character-for-character (protocol, hostname, port, and <code>/api/auth/callback</code> path).
+        </div>
+
+        <h2 id="onboarding-wizard">3. Web Onboarding Wizard</h2>
+        <p>On first boot without <code>.env</code> credentials, Cadence serves a 4-step Web Onboarding Wizard that:</p>
+        <ol>
+          <li>Verifies Lavalink connectivity (and optional <code>SETUP_TOKEN</code>).</li>
+          <li>Tests your Discord Bot Token and confirms privileged intents are active.</li>
+          <li>Saves your OAuth2 credentials and public Dashboard URL.</li>
+          <li>Generates a bot invite link with voice and slash-command permissions.</li>
+        </ol>
+
+        <h2 id="slash-sync">4. Refreshing Slash Commands</h2>
+        <p>Cadence syncs all 23 global slash commands automatically on login. If you just updated Cadence and a new command like <code>/playnext</code> has not appeared yet in Discord, press <code>Ctrl + R</code> (<code>Cmd + R</code> on macOS) in your Discord client after restarting the bot container.</p>
+
+        <div class="pager">
+          <a class="pager-link prev" href="../installation/">
+            <span class="pager-label">Previous page</span>
+            <span class="pager-title">&larr; Installation &amp; Deployment</span>
+          </a>
+          <a class="pager-link next" href="../playback/">
+            <span class="pager-label">Next page</span>
+            <span class="pager-title">Playback &amp; Empty VC &rarr;</span>
+          </a>
+        </div>
+      </main>
+
+      <aside class="docs-toc">
+        <div class="toc-title">On this page</div>
+        <ul class="toc-list"></ul>
+      </aside>
+    </div>
+
+    <script src="../../../assets/site.js"></script>
+  </body>
+</html>

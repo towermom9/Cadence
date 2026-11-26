@@ -24,7 +24,7 @@ import type {
   UserPreferencesDTO,
 } from "@shared/types";
 import { cleanArtistTag } from "@shared/artists";
-import { config, VALID_SEARCH_SOURCES } from "./config";
+import { applyStoredConfig, config, VALID_SEARCH_SOURCES } from "./config";
 import type { CadenceDatabase } from "./db";
 import { formatLogsText, getLogCount, getRecentLogs } from "./logger";
 import { registerSetupRoutes } from "./setup";
@@ -699,6 +699,11 @@ export function createWebApp(
 
     return {
       appVersion: pkg.version || "1.0.0",
+      domain: {
+        dashboardUrl: config.dashboardUrl,
+        redirectUri: config.discordRedirectUri,
+        isHttps: config.isSecureCookie,
+      },
       runtime: {
         name: "Bun",
         version: typeof Bun !== "undefined" ? Bun.version : process.versions.node,
@@ -729,6 +734,51 @@ export function createWebApp(
       return c.json({ error: "Server owner or bot owner access required." }, 403);
     }
     return c.json(buildSystemInfo());
+  });
+
+  app.post("/api/system/domain", async (c) => {
+    const session = getSessionFromContext(c, db);
+    if (!session) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+    if (!bot.isBotOwner(session.user.id) && !bot.isAnyGuildOwner(session.user.id)) {
+      return c.json({ error: "Server owner or bot owner access required." }, 403);
+    }
+
+    let rawUrl = "";
+    try {
+      const body = (await c.req.json()) as { dashboardUrl?: unknown };
+      if (typeof body?.dashboardUrl === "string") {
+        rawUrl = body.dashboardUrl.trim();
+      }
+    } catch {
+      return c.json({ error: "Invalid JSON payload." }, 400);
+    }
+
+    if (!rawUrl) {
+      return c.json({ error: "Please enter a valid http:// or https:// domain URL." }, 400);
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return c.json({ error: "Invalid URL format. Include http:// or https://." }, 400);
+    }
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return c.json({ error: "Domain URL must start with http:// or https://." }, 400);
+    }
+
+    const normalized = parsed.origin + (parsed.pathname && parsed.pathname !== "/" ? parsed.pathname.replace(/\/+$/, "") : "");
+    const saved = db.updateDashboardUrl(normalized);
+    applyStoredConfig(saved);
+    wsHub.broadcastMeta();
+
+    return c.json({
+      ok: true,
+      info: buildSystemInfo(),
+    });
   });
 
   app.get("/api/system/logs", (c) => {

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commands &amp; Shortcuts | Cadence Docs</title>
+    <link rel="icon" type="image/png" href="../../../assets/favicon.png" />
+    <link rel="stylesheet" href="../../../assets/site.css" />
+  </head>
+  <body data-root="../../..">
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-left">
+          <button type="button" class="menu-toggle" data-menu-toggle>Menu</button>
+          <a class="brand-link" href="../../../">
+            <span class="cadence-mark cadence-icon" aria-hidden="true">
+              <span class="layer layer-accent"></span>
+              <span class="layer layer-inner"></span>
+            </span>
+            <span>Cadence</span>
+          </a>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="search-trigger" data-open-search>
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <nav class="nav-links">
+            <a href="../../guides/getting-started/">Guides</a>
+            <a class="active" href="../commands/">Commands</a>
+            <a href="../troubleshooting/">FAQ</a>
+          </nav>
+          <a class="icon-btn" href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.08 11.08 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Guides</div>
+          <a class="sidebar-link" href="../../guides/getting-started/">Getting Started</a>
+          <a class="sidebar-link" href="../../guides/installation/">Installation &amp; Deployment</a>
+          <a class="sidebar-link" href="../../guides/discord-setup/">Discord Bot Setup</a>
+          <a class="sidebar-link" href="../../guides/playback/">Playback &amp; Empty VC</a>
+          <a class="sidebar-link" href="../../guides/rbac/">Role-Based Access &amp; Domains</a>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Reference</div>
+          <a class="sidebar-link active" href="../commands/">Commands &amp; Shortcuts</a>
+          <a class="sidebar-link" href="../troubleshooting/">Troubleshooting &amp; FAQ</a>
+        </div>
+      </aside>
+
+      <main class="docs-content">
+        <h1>Commands &amp; Shortcuts</h1>
+        <p class="docs-lead">Complete reference for all 23 Discord slash commands, customizable prefix commands, and web dashboard keyboard shortcuts.</p>
+
+        <h2 id="slash-commands">Discord Slash Commands</h2>
+        <div class="docs-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Options</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/play</code></td>
+                <td><code>query</code>, <code>source</code></td>
+                <td>Queue a song or playlist with autocomplete (plays next if Default Play Next is enabled)</td>
+              </tr>
+              <tr>
+                <td><code>/playnext</code></td>
+                <td><code>query</code>, <code>source</code></td>
+                <td>Queue a song or playlist right after the currently playing track</td>
+              </tr>
+              <tr>
+                <td><code>/playnow</code></td>
+                <td><code>query</code>, <code>source</code></td>
+                <td>Insert track at the front of the queue and play immediately</td>
+              </tr>
+              <tr>
+                <td><code>/search</code></td>
+                <td><code>query</code>, <code>source</code></td>
+                <td>Pick from top 10 interactive search results</td>
+              </tr>
+              <tr>
+                <td><code>/pause</code>, <code>/resume</code>, <code>/skip</code>, <code>/back</code>, <code>/seek</code></td>
+                <td><code>amount</code>, <code>seconds</code></td>
+                <td>Standard playback transport controls</td>
+              </tr>
+              <tr>
+                <td><code>/stop</code>, <code>/volume</code>, <code>/loop</code>, <code>/shuffle</code></td>
+                <td><code>percent</code>, <code>mode</code></td>
+                <td>DJ playback, loop mode (<code>off | track | queue</code>), and disconnect controls</td>
+              </tr>
+              <tr>
+                <td><code>/autoplay</code>, <code>/filter</code></td>
+                <td><code>preset</code></td>
+                <td>Toggle Smart Autoplay or apply 9 DSP presets (<code>bassboost</code>, <code>nightcore</code>, <code>vaporwave</code>, <code>8d</code>, etc.)</td>
+              </tr>
+              <tr>
+                <td><code>/queue</code>, <code>/nowplaying</code>, <code>/lyrics</code></td>
+                <td>-</td>
+                <td>View queue, post Music Controller card, or fetch lyrics</td>
+              </tr>
+              <tr>
+                <td><code>/remove</code>, <code>/clear</code></td>
+                <td><code>position</code></td>
+                <td>Remove a queued track or clear upcoming manual queue</td>
+              </tr>
+              <tr>
+                <td><code>/playlist</code></td>
+                <td><code>list | create | add | play | delete</code></td>
+                <td>Manage and play your saved personal playlists</td>
+              </tr>
+              <tr>
+                <td><code>/settings</code></td>
+                <td><code>view | volume | 247 | dj | duplicates | prefix | emptyvc | playnext</code></td>
+                <td>Configure server settings (Tier 3 Admin)</td>
+              </tr>
+              <tr>
+                <td><code>/dashboard</code>, <code>/help</code>, <code>/ping</code></td>
+                <td>-</td>
+                <td>Open web dashboard, command help, and latency check</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="prefix-commands">Text Prefix Commands</h2>
+        <p>Using the configurable server prefix (default <code>?</code>):</p>
+        <ul>
+          <li><code>?play &lt;query&gt;</code> / <code>?p &lt;query&gt;</code></li>
+          <li><code>?playnext &lt;query&gt;</code> / <code>?pn &lt;query&gt;</code></li>
+          <li><code>?skip</code> / <code>?s</code>, <code>?pause</code>, <code>?resume</code>, <code>?stop</code> / <code>?leave</code></li>
+          <li><code>?queue</code> / <code>?q</code>, <code>?np</code> / <code>?nowplaying</code></li>
+        </ul>
+
+        <h2 id="web-shortcuts">Web Dashboard Keyboard Shortcuts</h2>
+        <p>Press <code>?</code> (<code>Shift + /</code>) anywhere outside input fields to open the shortcut overlay:</p>
+        <ul>
+          <li><code>Space</code> - Play / Pause</li>
+          <li><code>n</code> / <code>Shift + N</code> - Skip to next track</li>
+          <li><code>k</code> / <code>Shift + P</code> - Previous / restart track</li>
+          <li><code>Left</code> / <code>Right</code> (or <code>j</code> / <code>l</code>) - Seek backward / forward</li>
+          <li><code>=</code> / <code>-</code> / <code>m</code> - Volume up / down / Mute</li>
+          <li><code>s</code> / <code>r</code> / <code>+</code> - Shuffle / Repeat mode / Toggle Like</li>
+          <li><code>g h</code>, <code>g e</code>, <code>g l</code>, <code>g ,</code> - Jump to Home, Explore, Library, or Settings</li>
+        </ul>
+
+        <div class="pager">
+          <a class="pager-link prev" href="../../guides/rbac/">
+            <span class="pager-label">Previous page</span>
+            <span class="pager-title">&larr; Role-Based Access &amp; Domains</span>
+          </a>
+          <a class="pager-link next" href="../troubleshooting/">
+            <span class="pager-label">Next page</span>
+            <span class="pager-title">Troubleshooting &amp; FAQ &rarr;</span>
+          </a>
+        </div>
+      </main>
+
+      <aside class="docs-toc">
+        <div class="toc-title">On this page</div>
+        <ul class="toc-list"></ul>
+      </aside>
+    </div>
+
+    <script src="../../../assets/site.js"></script>
+  </body>
+</html>

@@ -157,6 +157,9 @@ export function useCadenceSocket(
         switch (msg.type) {
           case "ready":
             setSelectedGuildId(msg.selectedGuildId);
+            if (msg.selectedGuildId) {
+              saveUiPrefs({ selectedGuildId: msg.selectedGuildId });
+            }
             break;
           case "meta":
             setLiveMeta(msg.meta);
@@ -230,6 +233,9 @@ export function useCadenceSocket(
                 : { ...msg.state, volume: resolvedVolume }
             );
             setSelectedGuildId(msg.state.guildId);
+            if (msg.state.guildId) {
+              saveUiPrefs({ selectedGuildId: msg.state.guildId });
+            }
             setDisplayPosition(Math.round(resolvedPos));
             break;
           }

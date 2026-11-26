@@ -119,6 +119,7 @@ export class CadenceBot {
   private onGuildStateChange: (guildId: string) => void;
   private onGuildToast: (guildId: string, level: ToastLevel, message: string) => void;
   private onUserPlaylistsChange: (userId: string) => void = () => {};
+  private onUserVoiceGuildChange: (userId: string, guildId: string) => void = () => {};
 
   constructor(
     private db: CadenceDatabase,
@@ -208,6 +209,10 @@ export class CadenceBot {
 
   setUserPlaylistsChangeHandler(handler: (userId: string) => void): void {
     this.onUserPlaylistsChange = handler;
+  }
+
+  setUserVoiceGuildChangeHandler(handler: (userId: string, guildId: string) => void): void {
+    this.onUserVoiceGuildChange = handler;
   }
 
   setToastHandler(handler: (guildId: string, level: ToastLevel, message: string) => void): void {
@@ -592,6 +597,17 @@ export class CadenceBot {
       }
 
       this.onGuildStateChange(guildId);
+
+      // Automatically switch the user's active web server when they join a voice channel
+      if (
+        newState.id !== this.client.user?.id &&
+        !newState.member?.user.bot &&
+        newState.channelId &&
+        newState.channelId !== oldState.channelId &&
+        this.hasGuildAccess(guildId, newState.id)
+      ) {
+        this.onUserVoiceGuildChange(newState.id, guildId);
+      }
     });
 
     this.client.on(Events.InteractionCreate, async (interaction) => {

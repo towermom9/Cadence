@@ -28,6 +28,10 @@ async function main() {
     wsHub.notifyPlaylistsChanged(userId);
   });
 
+  bot.setUserVoiceGuildChangeHandler((userId, guildId) => {
+    wsHub.syncUserVoiceGuild(userId, guildId);
+  });
+
   bot.music.setLavalinkStatusChangeHandler(() => {
     wsHub.broadcastMeta();
   });

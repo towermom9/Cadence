@@ -274,6 +274,11 @@ export interface DebugLogEntryDTO {
 
 export interface SystemInfoDTO {
   appVersion: string;
+  domain: {
+    dashboardUrl: string;
+    redirectUri: string;
+    isHttps: boolean;
+  };
   runtime: {
     name: string;
     version: string;

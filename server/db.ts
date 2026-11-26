@@ -1429,6 +1429,21 @@ export class CadenceDatabase {
     return { ...cfg, updatedAt };
   }
 
+  updateDashboardUrl(dashboardUrl: string): StoredAppConfig {
+    const normalized = dashboardUrl.trim().replace(/\/+$/, "");
+    const existing = this.getAppConfig();
+    return this.saveAppConfig({
+      discordToken: existing?.discordToken ?? config.discordToken,
+      discordClientId: existing?.discordClientId ?? config.discordClientId,
+      discordClientSecret: existing?.discordClientSecret ?? config.discordClientSecret,
+      dashboardUrl: normalized,
+      botPrefix: existing?.botPrefix || config.botPrefix,
+      defaultSearchSource: existing?.defaultSearchSource || config.defaultSearchSource,
+      ownerUserId: existing?.ownerUserId ?? config.ownerUserId ?? null,
+      setupCompleted: existing?.setupCompleted ?? true,
+    });
+  }
+
   close(): void {
     this.db.close();
   }

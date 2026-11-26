@@ -111,12 +111,12 @@ export function AppFooter({
               •
             </span>
             <a
-              href="https://github.com/towermom9/Cadence/wiki"
+              href="https://towermom9.github.io/Cadence/docs/guides/getting-started/"
               target="_blank"
               rel="noopener noreferrer"
               className="text-zinc-400 transition hover:text-white"
             >
-              Wiki
+              Guides
             </a>
           </div>
           <span className="font-mono">Cadence v{version}</span>

@@ -1,428 +1,162 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cadence - Discord Music Bot &amp; Web Dashboard</title>
+    <title>Cadence | Discord Music Bot &amp; Web Dashboard</title>
     <meta
       name="description"
       content="All-in-one Discord music bot and real-time YouTube Music style web dashboard built with TypeScript, Bun, React 19, and Lavalink v4."
     />
-    <style>
-      :root {
-        --bg: #030303;
-        --surface: #121212;
-        --surface-2: #1a1a1a;
-        --border: rgba(255, 255, 255, 0.1);
-        --text: #f4f4f5;
-        --muted: #a1a1aa;
-        --accent: #ff0033;
-        --accent-hover: #ff2652;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      html {
-        scroll-behavior: smooth;
-      }
-      body {
-        margin: 0;
-        background: radial-gradient(circle at top center, rgba(255, 0, 51, 0.16), transparent 42%),
-          var(--bg);
-        color: var(--text);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
-        line-height: 1.6;
-      }
-      a {
-        color: inherit;
-        text-decoration: none;
-      }
-      code,
-      pre {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      }
-      .container {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 0 24px;
-      }
-      header {
-        position: sticky;
-        top: 0;
-        z-index: 20;
-        backdrop-filter: blur(14px);
-        background: rgba(3, 3, 3, 0.8);
-        border-bottom: 1px solid var(--border);
-      }
-      .nav {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        height: 64px;
-      }
-      .brand {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 700;
-        font-size: 1.1rem;
-        letter-spacing: -0.02em;
-      }
-      .brand-dot {
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        background: linear-gradient(135deg, var(--accent), #b80025);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 14px;
-        color: #fff;
-        font-weight: 800;
-      }
-      .nav-links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 20px;
-        font-size: 0.9rem;
-        color: var(--muted);
-      }
-      .nav-links a:hover {
-        color: #fff;
-      }
-      .hero {
-        padding: 84px 0 56px;
-        text-align: center;
-      }
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        border: 1px solid rgba(255, 0, 51, 0.35);
-        background: rgba(255, 0, 51, 0.12);
-        color: #ff99ad;
-        border-radius: 999px;
-        padding: 5px 14px;
-        font-size: 0.78rem;
-        font-weight: 600;
-      }
-      h1 {
-        margin: 18px auto 14px;
-        max-width: 780px;
-        font-size: clamp(2.1rem, 4.8vw, 3.5rem);
-        line-height: 1.08;
-        letter-spacing: -0.03em;
-      }
-      .lead {
-        margin: 0 auto 30px;
-        max-width: 680px;
-        color: var(--muted);
-        font-size: 1.08rem;
-      }
-      .cta-row {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 12px;
-      }
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        border-radius: 999px;
-        padding: 11px 22px;
-        font-size: 0.92rem;
-        font-weight: 600;
-        transition: 0.16s ease;
-        border: 1px solid var(--border);
-      }
-      .btn-primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
-      }
-      .btn-primary:hover {
-        background: var(--accent-hover);
-      }
-      .btn-secondary {
-        background: var(--surface);
-        color: #fff;
-      }
-      .btn-secondary:hover {
-        background: var(--surface-2);
-        border-color: rgba(255, 255, 255, 0.25);
-      }
-      section {
-        padding: 44px 0;
-      }
-      h2 {
-        margin: 0 0 8px;
-        font-size: 1.65rem;
-        letter-spacing: -0.02em;
-      }
-      .section-sub {
-        margin: 0 0 24px;
-        color: var(--muted);
-        font-size: 0.95rem;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-        gap: 16px;
-      }
-      .card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 20px;
-      }
-      .card h3 {
-        margin: 0 0 8px;
-        font-size: 1.02rem;
-      }
-      .card p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 0.9rem;
-      }
-      pre {
-        margin: 0;
-        padding: 18px 20px;
-        border-radius: 14px;
-        background: #0b0b0b;
-        border: 1px solid var(--border);
-        overflow-x: auto;
-        font-size: 0.85rem;
-        line-height: 1.55;
-        color: #e4e4e7;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        overflow: hidden;
-        font-size: 0.9rem;
-      }
-      th,
-      td {
-        text-align: left;
-        padding: 12px 16px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      }
-      th {
-        background: #181818;
-        color: #d4d4d8;
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      tr:last-child td {
-        border-bottom: none;
-      }
-      td code {
-        background: rgba(255, 255, 255, 0.08);
-        padding: 2px 6px;
-        border-radius: 6px;
-        font-size: 0.82rem;
-      }
-      footer {
-        border-top: 1px solid var(--border);
-        margin-top: 48px;
-        padding: 28px 0 42px;
-        color: var(--muted);
-        font-size: 0.86rem;
-      }
-      .footer-inner {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: 12px;
-      }
-      .footer-links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 18px;
-      }
-      .footer-links a:hover {
-        color: #fff;
-      }
-    </style>
+    <link rel="icon" type="image/png" href="./assets/favicon.png" />
+    <link rel="stylesheet" href="./assets/site.css" />
   </head>
-  <body>
-    <header>
-      <div class="container nav">
-        <a class="brand" href="#top">
-          <span class="brand-dot">C</span>
-          <span>Cadence</span>
-        </a>
-        <nav class="nav-links">
-          <a href="#features">Features</a>
-          <a href="#quickstart">Quick Start</a>
-          <a href="#commands">Commands</a>
-          <a href="https://github.com/towermom9/Cadence/wiki" target="_blank" rel="noopener noreferrer">Wiki</a>
-          <a href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer">GitHub</a>
-        </nav>
-      </div>
-    </header>
-
-    <main id="top" class="container">
-      <section class="hero">
-        <span class="badge">TypeScript &middot; Bun &middot; React 19 &middot; Lavalink v4</span>
-        <h1>All-in-One Discord Music Bot &amp; Live Web Dashboard</h1>
-        <p class="lead">
-          Cadence unifies a feature-rich Discord music bot, Discord OAuth2 WebSocket API,
-          YouTube Music style React 19 dashboard, and embedded SQLite database into a single lightweight process.
-        </p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="#quickstart">Quick Start with Docker</a>
-          <a
-            class="btn btn-secondary"
-            href="https://github.com/towermom9/Cadence/wiki"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read the Wiki
+  <body data-root=".">
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-left">
+          <a class="brand-link" href="./">
+            <span class="cadence-mark cadence-icon" aria-hidden="true">
+              <span class="layer layer-accent"></span>
+              <span class="layer layer-inner"></span>
+            </span>
+            <span>Cadence</span>
           </a>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="search-trigger" data-open-search>
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <nav class="nav-links">
+            <a href="./docs/guides/getting-started/">Guides</a>
+            <a href="./docs/reference/commands/">Commands</a>
+            <a href="./docs/reference/troubleshooting/">FAQ</a>
+          </nav>
           <a
-            class="btn btn-secondary"
+            class="icon-btn"
             href="https://github.com/towermom9/Cadence"
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="Cadence on GitHub"
           >
-            View on GitHub
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.08 11.08 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" />
+            </svg>
           </a>
         </div>
-      </section>
+      </div>
+    </header>
 
-      <section id="features">
-        <h2>Built for Real-Time Listening</h2>
-        <p class="section-sub">
-          Zero external database required - one container for Cadence, paired with pre-bundled Lavalink v4.
-        </p>
-        <div class="grid">
-          <article class="card">
-            <h3>YouTube Music Style Dashboard</h3>
-            <p>
-              60fps progress interpolation, AMOLED dark mode, 10 dynamic accent themes, Up Next / Lyrics / Related tabs,
-              right-click context menus, and mobile PWA navigation.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Timeline Queue &amp; Drag-and-Drop</h3>
-            <p>
-              Inspect past tracks, current track, manual queue, and Autoplay suggestions in one timeline.
-              Reorder the currently playing track without interrupting audio.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Smart Autoplay &amp; Synced Lyrics</h3>
-            <p>
-              7 Autoplay moods powered by listener history, liked music, and YouTube Music mixes, plus synced LRC/ELRC lyrics
-              with click-to-seek and auto-scroll.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Empty VC Auto-Pause &amp; Resume</h3>
-            <p>
-              Pause playback after a configurable delay (0s to 5m) when listeners leave, optionally ignoring deafened members,
-              and automatically resume when someone joins back.
-            </p>
-          </article>
-          <article class="card">
-            <h3>4-Tier Role-Based Access</h3>
-            <p>
-              Cascading Discord permissions across User, DJ, Admin, and Server/Bot Owner tiers with automatic system log redaction.
-            </p>
-          </article>
-          <article class="card">
-            <h3>Pre-Bundled Lavalink v4</h3>
-            <p>
-              Self-contained <code>ghcr.io/towermom9/cadence-lavalink</code> image with pre-bundled YouTube, LavaSrc, and LavaLyrics plugins
-              and automatic startup updates.
-            </p>
-          </article>
+    <main class="home-main">
+      <section class="hero-split">
+        <div>
+          <div class="hero-kicker">TypeScript &middot; Bun &middot; React 19 &middot; Lavalink v4</div>
+          <h1 class="hero-title">
+            <span class="gradient">Cadence</span><br />
+            Music Bot &amp; Dashboard
+          </h1>
+          <p class="hero-tagline">
+            Free, open-source Discord music bot and real-time YouTube Music style web dashboard unified into a single lightweight container.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-brand" href="./docs/guides/getting-started/">Get Started</a>
+            <a class="btn btn-alt" href="./docs/guides/installation/">Docker Compose</a>
+            <a class="btn btn-alt" href="./docs/reference/commands/">23 Commands</a>
+            <a
+              class="btn btn-alt"
+              href="https://github.com/towermom9/Cadence"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on GitHub
+            </a>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="hero-glow"></div>
+          <span class="cadence-mark cadence-icon-lg" aria-label="Cadence Logo">
+            <span class="layer layer-accent"></span>
+            <span class="layer layer-inner"></span>
+          </span>
         </div>
       </section>
 
-      <section id="quickstart">
-        <h2>Quick Start (Docker Compose)</h2>
-        <p class="section-sub">
-          Deploy the pre-built GHCR images and finish configuration in the 4-step Web Onboarding Wizard.
-        </p>
-        <pre><code>git clone https://github.com/towermom9/Cadence.git
-cd Cadence
-docker compose up -d</code></pre>
-        <p class="section-sub" style="margin-top: 14px">
-          Open <code>http://localhost:8000</code> (or port <code>8686</code> in the VPS Compose template), enter your Discord Bot Token and OAuth2 credentials in the wizard, and start playing.
-          See the <a href="https://github.com/towermom9/Cadence/wiki/Installation-and-Deployment" target="_blank" rel="noopener noreferrer" style="color: #fff; text-decoration: underline;">Installation Guide</a> in the Wiki for full reverse-proxy and VPS examples.
-        </p>
-      </section>
+      <section class="features-grid" aria-label="Core Features">
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+            </svg>
+          </div>
+          <h3>YouTube Music Dashboard</h3>
+          <p>60fps progress interpolation, AMOLED dark mode, 10 dynamic accent themes, Up Next / Lyrics / Related tabs, and mobile PWA navigation.</p>
+        </article>
 
-      <section id="commands">
-        <h2>Key Discord Commands</h2>
-        <p class="section-sub">23 global slash commands plus customizable text prefix commands (default <code>?</code>).</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Command</th>
-              <th>Prefix Alias</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><code>/play &lt;query&gt; [source]</code></td>
-              <td><code>?play</code>, <code>?p</code></td>
-              <td>Queue a track or playlist with autocomplete (respects Default Play Next setting).</td>
-            </tr>
-            <tr>
-              <td><code>/playnext &lt;query&gt; [source]</code></td>
-              <td><code>?playnext</code>, <code>?pn</code></td>
-              <td>Queue a track or playlist right after the currently playing song.</td>
-            </tr>
-            <tr>
-              <td><code>/playnow &lt;query&gt; [source]</code></td>
-              <td>-</td>
-              <td>Insert a track at the front of the queue and play it immediately.</td>
-            </tr>
-            <tr>
-              <td><code>/pause</code>, <code>/resume</code>, <code>/skip</code>, <code>/back</code></td>
-              <td><code>?pause</code>, <code>?resume</code>, <code>?s</code></td>
-              <td>Control playback in the active voice channel.</td>
-            </tr>
-            <tr>
-              <td><code>/volume</code>, <code>/loop</code>, <code>/shuffle</code>, <code>/filter</code></td>
-              <td>-</td>
-              <td>DJ / Admin audio and queue controls (9 DSP filter presets).</td>
-            </tr>
-            <tr>
-              <td><code>/settings &lt;subcommand&gt;</code></td>
-              <td>-</td>
-              <td>Configure volume, 24/7 mode, prefix, DJ role, empty VC pause/disconnect, and Play Next default.</td>
-            </tr>
-            <tr>
-              <td><code>/playlist</code>, <code>/queue</code>, <code>/lyrics</code>, <code>/dashboard</code></td>
-              <td><code>?q</code>, <code>?np</code></td>
-              <td>Manage personal playlists, inspect the queue, view lyrics, or open the web controller.</td>
-            </tr>
-          </tbody>
-        </table>
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M3 12h18M3 18h12" />
+            </svg>
+          </div>
+          <h3>Timeline Queue &amp; Drag-and-Drop</h3>
+          <p>Browse history, current song, manual queue, and Autoplay suggestions in one timeline. Move even the active track without stopping audio.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+          </div>
+          <h3>7-Mood Autoplay &amp; Synced Lyrics</h3>
+          <p>Radio recommendations from your history and liked tracks, plus synced LRC/ELRC lyrics with click-to-seek and auto-scroll.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+            </svg>
+          </div>
+          <h3>Smart Voice Channel Awareness</h3>
+          <p>Automatically switches your active dashboard server to the VC you join, pauses when VC empties, and resumes playback when someone returns.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+            </svg>
+          </div>
+          <h3>4-Tier Role Access Control</h3>
+          <p>Cascading Discord permissions across User, DJ, Admin, and Server/Bot Owner tiers, plus live public domain management under System Settings.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+            </svg>
+          </div>
+          <h3>Single-Process &amp; SQLite</h3>
+          <p>No MongoDB or extra config files needed. Pre-built GHCR images include bundled Lavalink v4 plugins with ~7-second cold starts.</p>
+        </article>
       </section>
     </main>
 
-    <footer>
-      <div class="container footer-inner">
-        <span>Cadence - Open-source under MIT License</span>
-        <div class="footer-links">
-          <a href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer">GitHub</a>
-          <a href="https://github.com/towermom9/Cadence/wiki" target="_blank" rel="noopener noreferrer">Wiki</a>
-          <a href="https://github.com/towermom9/Cadence/issues" target="_blank" rel="noopener noreferrer">Issues</a>
-          <a href="https://github.com/towermom9/Cadence/pkgs/container/cadence" target="_blank" rel="noopener noreferrer">GHCR Packages</a>
-        </div>
-      </div>
+    <footer class="site-footer">
+      <div>Released under the MIT License &middot; Copyright &copy; 2026 Cadence Contributors</div>
     </footer>
+
+    <script src="./assets/site.js"></script>
   </body>
 </html>

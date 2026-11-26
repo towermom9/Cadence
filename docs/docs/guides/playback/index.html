@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Playback &amp; Empty VC | Cadence Docs</title>
+    <link rel="icon" type="image/png" href="../../../assets/favicon.png" />
+    <link rel="stylesheet" href="../../../assets/site.css" />
+  </head>
+  <body data-root="../../..">
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-left">
+          <button type="button" class="menu-toggle" data-menu-toggle>Menu</button>
+          <a class="brand-link" href="../../../">
+            <span class="cadence-mark cadence-icon" aria-hidden="true">
+              <span class="layer layer-accent"></span>
+              <span class="layer layer-inner"></span>
+            </span>
+            <span>Cadence</span>
+          </a>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="search-trigger" data-open-search>
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <nav class="nav-links">
+            <a class="active" href="../getting-started/">Guides</a>
+            <a href="../../reference/commands/">Commands</a>
+            <a href="../../reference/troubleshooting/">FAQ</a>
+          </nav>
+          <a class="icon-btn" href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.08 11.08 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Guides</div>
+          <a class="sidebar-link" href="../getting-started/">Getting Started</a>
+          <a class="sidebar-link" href="../installation/">Installation &amp; Deployment</a>
+          <a class="sidebar-link" href="../discord-setup/">Discord Bot Setup</a>
+          <a class="sidebar-link active" href="../playback/">Playback &amp; Empty VC</a>
+          <a class="sidebar-link" href="../rbac/">Role-Based Access &amp; Domains</a>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Reference</div>
+          <a class="sidebar-link" href="../../reference/commands/">Commands &amp; Shortcuts</a>
+          <a class="sidebar-link" href="../../reference/troubleshooting/">Troubleshooting &amp; FAQ</a>
+        </div>
+      </aside>
+
+      <main class="docs-content">
+        <h1>Playback, Queue Timeline &amp; Empty VC</h1>
+        <p class="docs-lead">Understand Cadence's continuous queue timeline, automatic voice channel switching, Queue Loop deduplication, and empty VC automation.</p>
+
+        <h2 id="timeline-queue">Timeline Queue Model</h2>
+        <p>Every server queue is presented as a single continuous timeline with four sections:</p>
+        <ol>
+          <li><strong>Previous</strong> - Unlimited played track history above the current track.</li>
+          <li><strong>Current</strong> - The active track currently playing in Lavalink.</li>
+          <li><strong>Manual Queue</strong> - Tracks queued by users (<code>/play</code>, <code>/playnext</code>, <code>/playnow</code>, search, or playlists).</li>
+          <li><strong>Autoplay</strong> - Dynamic recommendations appended below the manual queue when Autoplay is active.</li>
+        </ol>
+        <p>Dragging the active song reorders the surrounding tracks cleanly without restarting or cutting audio. Manual/history tracks and Autoplay tracks stay separated across the Autoplay boundary.</p>
+
+        <h2 id="vc-auto-switch">Automatic Server Selection on Voice Join</h2>
+        <p>Whenever you join or hop into a voice channel on Discord while logged into the dashboard, Cadence automatically detects your active voice channel server and switches the dashboard's active <strong>Play on Server</strong> target to match - so hitting Play in the web UI starts music in the exact server you are sitting in.</p>
+
+        <h2 id="queue-loop">Queue Loop &amp; Smart Autoplay</h2>
+        <ul>
+          <li><strong>Queue Loop (<code>repeatMode = queue</code>):</strong> Loops strictly across your manual queue and played history while ignoring Autoplay suggestions. Wrapped tracks skip duplicate play-history entries so looped playlists never spam your History tab.</li>
+          <li><strong>7 Autoplay Moods:</strong> Choose between <code>All</code>, <code>Familiar</code>, <code>Discover</code>, <code>Popular</code>, <code>Deep Cuts</code>, <code>Chill</code>, and <code>Upbeat</code>, and customize what happens when you click an Autoplay song in <strong>Settings -&gt; Playback</strong>.</li>
+        </ul>
+
+        <h2 id="empty-vc">Empty Voice Channel Auto-Pause, Resume &amp; Disconnect</h2>
+        <p>Configure these per-server options under <strong>Settings -&gt; Server</strong> (auto-saved immediately) or <code>/settings emptyvc</code>:</p>
+        <ul>
+          <li><strong>Pause When Voice Channel is Empty:</strong> Pauses playback when no active listeners remain in the bot's voice channel and posts a styled Music Controller notice in Discord chat.</li>
+          <li><strong>Continue Playing Delay (<code>0s - 5m</code>):</strong> Wait before pausing so brief reconnects do not interrupt music.</li>
+          <li><strong>Auto-Disconnect After Extended Auto-Pause (<code>Never</code>, <code>5m - 2h</code>):</strong> Leaves voice if nobody joins back after extended auto-pause (automatically disabled while <strong>24/7 Mode</strong> is on).</li>
+          <li><strong>Ignore Deafened Listeners:</strong> Treat self-deafened or server-deafened members as not listening when checking if the channel is empty.</li>
+        </ul>
+
+        <div class="callout tip">
+          <div class="callout-title">Respects Manual Pauses</div>
+          If a DJ paused playback manually while listeners were present, someone joining later will not force-resume the manual pause.
+        </div>
+
+        <div class="pager">
+          <a class="pager-link prev" href="../discord-setup/">
+            <span class="pager-label">Previous page</span>
+            <span class="pager-title">&larr; Discord Bot Setup</span>
+          </a>
+          <a class="pager-link next" href="../rbac/">
+            <span class="pager-label">Next page</span>
+            <span class="pager-title">Role-Based Access &amp; Domains &rarr;</span>
+          </a>
+        </div>
+      </main>
+
+      <aside class="docs-toc">
+        <div class="toc-title">On this page</div>
+        <ul class="toc-list"></ul>
+      </aside>
+    </div>
+
+    <script src="../../../assets/site.js"></script>
+  </body>
+</html>

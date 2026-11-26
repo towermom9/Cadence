@@ -7,7 +7,10 @@
 <h1 align="center">Cadence</h1>
 
 <p align="center">
-  <strong>All-in-one Discord music bot &amp; real-time YouTube Music style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong>
+  <strong>All-in-one Discord music bot &amp; real-time YouTube Music style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong><br />
+  <a href="https://towermom9.github.io/Cadence/">Website</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/guides/getting-started/">Documentation &amp; Guides</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/reference/commands/">Commands</a>
 </p>
 
 | Docker Packages (GHCR) | Build & Release Status |

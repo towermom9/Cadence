@@ -3,6 +3,7 @@ import {
   Check,
   Copy,
   Download,
+  Globe,
   Loader2,
   Palette,
   Play,
@@ -214,6 +215,13 @@ export function SettingsView({
   const [sysLoading, setSysLoading] = useState(false);
   const [sysError, setSysError] = useState<string | null>(null);
   const [copiedLogs, setCopiedLogs] = useState(false);
+  const [domainInput, setDomainInput] = useState("");
+  const [domainSaving, setDomainSaving] = useState(false);
+  const [domainStatus, setDomainStatus] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -241,7 +249,12 @@ export function SettingsView({
         logs?: DebugLogEntryDTO[];
         text?: string;
       };
-      if (data.info) setSysInfo(data.info);
+      if (data.info) {
+        setSysInfo(data.info);
+        if (data.info.domain?.dashboardUrl) {
+          setDomainInput(data.info.domain.dashboardUrl);
+        }
+      }
       setSysLogs(data.logs ?? []);
       setSysText(data.text ?? "");
     } catch (error) {
@@ -256,6 +269,49 @@ export function SettingsView({
       void loadSystemLogs();
     }
   }, [canAccessSystemSettings, loadSystemLogs, tab]);
+
+  const handleSaveDomain = useCallback(async () => {
+    const clean = domainInput.trim().replace(/\/+$/, "");
+    if (!clean) {
+      setDomainStatus({
+        type: "error",
+        message: "Enter a valid URL starting with http:// or https://.",
+      });
+      return;
+    }
+    setDomainSaving(true);
+    setDomainStatus(null);
+    try {
+      const res = await fetch("/api/system/domain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dashboardUrl: clean }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        info?: SystemInfoDTO;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (data.info) {
+        setSysInfo(data.info);
+        setDomainInput(data.info.domain.dashboardUrl);
+      }
+      setDomainStatus({
+        type: "success",
+        message:
+          "Domain saved. Make sure the OAuth2 Redirect URI below is registered in Discord Developer Portal.",
+      });
+    } catch (error) {
+      setDomainStatus({
+        type: "error",
+        message: error instanceof Error ? error.message : "Failed to update domain.",
+      });
+    } finally {
+      setDomainSaving(false);
+    }
+  }, [domainInput]);
 
   useEffect(() => {
     if (guildId && canAccessServerSettings) {
@@ -1396,6 +1452,111 @@ export function SettingsView({
           ) : (
             sysInfo && (
               <>
+                <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <Globe className="h-4 w-4 text-zinc-400" />
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">
+                          Public Domain &amp; Dashboard URL
+                        </h3>
+                        <p className="text-xs text-zinc-400">
+                          Used for Discord OAuth2 callbacks, secure cookies, and embed links.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDomainInput(window.location.origin);
+                        setDomainStatus(null);
+                      }}
+                      className="rounded-full border border-white/12 bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      Use Current URL
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="url"
+                      value={domainInput}
+                      onChange={(e) => {
+                        setDomainInput(e.target.value);
+                        if (domainStatus) setDomainStatus(null);
+                      }}
+                      placeholder="https://music.example.com"
+                      aria-label="Public Domain or Dashboard URL"
+                      className="min-w-0 flex-1 rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2 font-mono text-xs text-white outline-none transition focus:border-white/40"
+                    />
+                    <button
+                      type="button"
+                      disabled={domainSaving}
+                      onClick={() => void handleSaveDomain()}
+                      style={{
+                        backgroundColor: "var(--cadence-accent)",
+                        color: "var(--cadence-accent-fg)",
+                      }}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold shadow-sm transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {domainSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {domainSaving ? "Saving..." : "Save Domain"}
+                    </button>
+                  </div>
+
+                  {domainStatus && (
+                    <div
+                      className={`rounded-xl border px-3.5 py-2 text-xs ${
+                        domainStatus.type === "success"
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                          : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+                      }`}
+                    >
+                      {domainStatus.message}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/8 bg-[#0b0b0b] px-3.5 py-2.5 text-xs">
+                    <div className="min-w-0">
+                      <span className="text-zinc-400">Discord OAuth2 Redirect URI: </span>
+                      <code className="break-all font-mono text-zinc-200">
+                        {(domainInput.trim().replace(/\/+$/, "") ||
+                          sysInfo.domain?.dashboardUrl ||
+                          window.location.origin) + "/api/auth/callback"}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const uri =
+                          (domainInput.trim().replace(/\/+$/, "") ||
+                            sysInfo.domain?.dashboardUrl ||
+                            window.location.origin) + "/api/auth/callback";
+                        try {
+                          await navigator.clipboard.writeText(uri);
+                          setCopiedRedirect(true);
+                          setTimeout(() => setCopiedRedirect(false), 1800);
+                        } catch {
+                          // Ignore clipboard denial
+                        }
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/12 bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                    >
+                      {copiedRedirect ? (
+                        <>
+                          <Check className="h-3 w-3 text-emerald-400" />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3 w-3" />
+                          Copy URI
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </section>
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <section className="space-y-3 rounded-2xl border border-white/10 bg-[#121212] p-5">
                     <h3 className="text-sm font-semibold text-white">Runtime</h3>

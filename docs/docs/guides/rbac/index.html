@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Role-Based Access &amp; Domains | Cadence Docs</title>
+    <link rel="icon" type="image/png" href="../../../assets/favicon.png" />
+    <link rel="stylesheet" href="../../../assets/site.css" />
+  </head>
+  <body data-root="../../..">
+    <header class="site-nav">
+      <div class="nav-inner">
+        <div class="nav-left">
+          <button type="button" class="menu-toggle" data-menu-toggle>Menu</button>
+          <a class="brand-link" href="../../../">
+            <span class="cadence-mark cadence-icon" aria-hidden="true">
+              <span class="layer layer-accent"></span>
+              <span class="layer layer-inner"></span>
+            </span>
+            <span>Cadence</span>
+          </a>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="search-trigger" data-open-search>
+            <span>Search</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+          <nav class="nav-links">
+            <a class="active" href="../getting-started/">Guides</a>
+            <a href="../../reference/commands/">Commands</a>
+            <a href="../../reference/troubleshooting/">FAQ</a>
+          </nav>
+          <a class="icon-btn" href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.08 11.08 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z" /></svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar">
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Guides</div>
+          <a class="sidebar-link" href="../getting-started/">Getting Started</a>
+          <a class="sidebar-link" href="../installation/">Installation &amp; Deployment</a>
+          <a class="sidebar-link" href="../discord-setup/">Discord Bot Setup</a>
+          <a class="sidebar-link" href="../playback/">Playback &amp; Empty VC</a>
+          <a class="sidebar-link active" href="../rbac/">Role-Based Access &amp; Domains</a>
+        </div>
+        <div class="sidebar-group">
+          <div class="sidebar-group-title">Reference</div>
+          <a class="sidebar-link" href="../../reference/commands/">Commands &amp; Shortcuts</a>
+          <a class="sidebar-link" href="../../reference/troubleshooting/">Troubleshooting &amp; FAQ</a>
+        </div>
+      </aside>
+
+      <main class="docs-content">
+        <h1>Role-Based Access &amp; Domains</h1>
+        <p class="docs-lead">Manage per-server role permissions across 4 cascading tiers and configure Cadence's public domain live under System Settings.</p>
+
+        <h2 id="permission-matrix">4-Tier Permission Matrix</h2>
+        <div class="docs-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>Who Qualifies</th>
+                <th>Capabilities</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Tier 1 &middot; User</strong></td>
+                <td>Everyone by default, or selected Basic Access Roles</td>
+                <td>Search, <code>/play</code>, <code>/playnext</code>, <code>/playnow</code>, view queue/lyrics/related, personal playlists/likes/pins, remove own tracks</td>
+              </tr>
+              <tr>
+                <td><strong>Tier 2 &middot; DJ</strong></td>
+                <td>Members with DJ Role, or alone in VC with bot</td>
+                <td>Skip, back, seek, volume, loop, shuffle, autoplay, DSP filters, queue reordering/clearing, stop/disconnect</td>
+              </tr>
+              <tr>
+                <td><strong>Tier 3 &middot; Admin</strong></td>
+                <td>Custom Admin Roles or Discord Manage Server / Admin</td>
+                <td>Live auto-saving <strong>Settings -&gt; Server</strong> tab and <code>/settings</code> commands</td>
+              </tr>
+              <tr>
+                <td><strong>Tier 4 &middot; Owner</strong></td>
+                <td>Server Owner or Bot Owner</td>
+                <td><strong>Settings -&gt; System</strong> tab: domain management, runtime &amp; Lavalink diagnostics, redacted debug logs</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="domain-settings">Changing Public Domain in System Settings</h2>
+        <p>Tier 4 Owners can change Cadence's public URL (for example when moving from <code>http://localhost:8000</code> to <code>https://music.example.com</code>) directly inside <strong>Settings -&gt; System -&gt; Public Domain &amp; Dashboard URL</strong> without restarting the container or editing SQLite manually.</p>
+        <ol>
+          <li>Enter your new base URL (or click <strong>Use Current URL</strong> to fill the browser's current origin).</li>
+          <li>Click <strong>Save Domain</strong> to persist to SQLite and apply it live across Discord OAuth2 redirects, session cookie security flags, and embed links.</li>
+          <li>Copy the updated OAuth2 Redirect URI (<code>&lt;domain&gt;/api/auth/callback</code>) and register it under <strong>Discord Developer Portal -&gt; OAuth2 -&gt; General -&gt; Redirects</strong>.</li>
+        </ol>
+
+        <div class="pager">
+          <a class="pager-link prev" href="../playback/">
+            <span class="pager-label">Previous page</span>
+            <span class="pager-title">&larr; Playback &amp; Empty VC</span>
+          </a>
+          <a class="pager-link next" href="../../reference/commands/">
+            <span class="pager-label">Next page</span>
+            <span class="pager-title">Commands &amp; Shortcuts &rarr;</span>
+          </a>
+        </div>
+      </main>
+
+      <aside class="docs-toc">
+        <div class="toc-title">On this page</div>
+        <ul class="toc-list"></ul>
+      </aside>
+    </div>
+
+    <script src="../../../assets/site.js"></script>
+  </body>
+</html>
