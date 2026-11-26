@@ -53,6 +53,12 @@ import type {
 import { useVolumeControl } from "../hooks/useVolumeControl";
 import { formatMs, sourceLabel } from "../utils/format";
 import { parseSyncedLyrics, stripInlineTags } from "../utils/lrc";
+import {
+  MOBILE_SHEET_FULL_Y,
+  computeMobileSheetBounds,
+  computeMobileSheetMetrics,
+  type MobileSheetMetrics,
+} from "../utils/mobileSheet";
 import type { MobileSheetState } from "../utils/navigation";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
@@ -203,29 +209,23 @@ export function NowPlayingView({
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const [isDraggingSheet, setIsDraggingSheet] = useState(false);
-  const [measuredHeroHeight, setMeasuredHeroHeight] = useState(228);
+  const [rootHeight, setRootHeight] = useState(() =>
+    typeof window !== "undefined" ? window.innerHeight || 780 : 780
+  );
   const [canHtmlDrag, setCanHtmlDrag] = useState(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia("(hover: hover) and (pointer: fine)").matches
       : true
   );
   const rootRef = useRef<HTMLDivElement>(null);
-  const mobileHeroRef = useRef<HTMLDivElement>(null);
-  const mobileTopBarRef = useRef<HTMLDivElement>(null);
-  const mobileControlsRef = useRef<HTMLDivElement>(null);
-  const mobilePillsRef = useRef<HTMLDivElement>(null);
-  const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetDraggedRef = useRef(false);
-  const dragOffsetRef = useRef<number | null>(null);
+  const dragLiveRef = useRef<MobileSheetMetrics | null>(null);
   const sheetDragStartRef = useRef<{
     startY: number;
     lastY: number;
     lastTime: number;
     vy: number;
     baseOffset: number;
-    startState: MobileSheetState;
-    controlsTravelUp: number;
-    extraGap: number;
   } | null>(null);
 
   useEffect(() => {
@@ -246,6 +246,7 @@ export function NowPlayingView({
     lastY: number;
     lastTime: number;
     vy: number;
+    mode: "pending" | "sheet" | "dismiss";
   } | null>(null);
   const justDraggedRef = useRef(false);
   const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -735,17 +736,18 @@ export function NowPlayingView({
     [onTrackContextMenu]
   );
 
-  const halfOffsetY = Math.max(204, Math.min(364, measuredHeroHeight + 4));
+  const sheetBounds = useMemo(
+    () => computeMobileSheetBounds(rootHeight, mobileVolumeOpen),
+    [rootHeight, mobileVolumeOpen]
+  );
 
   useEffect(() => {
-    if (!isSheetOpen) return;
-    const el = mobileHeroRef.current;
+    const el = rootRef.current;
     if (!el) return;
     const measure = () => {
-      const h = Math.ceil(el.getBoundingClientRect().height);
+      const h = Math.round(el.getBoundingClientRect().height);
       if (h > 0) {
-        const clamped = Math.max(200, Math.min(360, h));
-        setMeasuredHeroHeight((prev) => (prev === clamped ? prev : clamped));
+        setRootHeight((prev) => (prev === h ? prev : h));
       }
     };
     measure();
@@ -753,108 +755,69 @@ export function NowPlayingView({
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [isSheetOpen, mobileVolumeOpen, current?.identifier]);
+  }, []);
 
-  const getCollapsedY = useCallback(
-    () => Math.max(halfOffsetY + 120, (sheetContainerRef.current?.offsetHeight || 720) - 60),
-    [halfOffsetY]
+  const restSheetY =
+    mobileSheetState === "full"
+      ? sheetBounds.fullY
+      : mobileSheetState === "half"
+        ? sheetBounds.halfY
+        : sheetBounds.collapsedY;
+
+  const writeSheetCssVars = useCallback(
+    (metrics: MobileSheetMetrics) => {
+      const root = rootRef.current;
+      if (!root) return;
+      root.style.setProperty("--mobile-sheet-y", `${metrics.sheetY}px`);
+      root.style.setProperty("--np-controls-bottom-y", `${metrics.controlsBottomY}px`);
+      root.style.setProperty("--np-half-y", `${sheetBounds.halfY}px`);
+      root.style.setProperty("--np-p-half", String(metrics.pHalf));
+      root.style.setProperty("--np-p-full", String(metrics.pFull));
+    },
+    [sheetBounds.halfY]
   );
 
   const applyLiveSheetOffset = useCallback(
-    (y: number, collapsedY: number) => {
-      dragOffsetRef.current = y;
-      if (sheetContainerRef.current) {
-        sheetContainerRef.current.style.setProperty("--mobile-sheet-y", `${y}px`);
-      }
-      if (rootRef.current) {
-        const pHalf = Math.max(
-          0,
-          Math.min(1, (collapsedY - y) / Math.max(1, collapsedY - halfOffsetY))
-        );
-        const pFull = Math.max(0, Math.min(1, (halfOffsetY - y) / Math.max(1, halfOffsetY)));
-        const start = sheetDragStartRef.current;
-        let controlsY = 0;
-        let transportY = 0;
-        let pillsOpacity = 0;
-        if (start?.startState === "collapsed") {
-          controlsY = -pHalf * start.controlsTravelUp;
-          transportY = -pHalf * start.extraGap;
-          pillsOpacity = Math.max(0, 1 - pHalf * 2.2);
-        } else {
-          controlsY = Math.max(0, y - halfOffsetY);
-          transportY = 0;
-          pillsOpacity = 0;
-        }
-        rootRef.current.style.setProperty("--np-drag-half", String(pHalf));
-        rootRef.current.style.setProperty("--np-drag-full", String(pFull));
-        rootRef.current.style.setProperty("--np-controls-y", `${controlsY}px`);
-        rootRef.current.style.setProperty("--np-transport-y", `${transportY}px`);
-        rootRef.current.style.setProperty("--np-pills-opacity", String(pillsOpacity));
-      }
+    (y: number) => {
+      const metrics = computeMobileSheetMetrics(y, sheetBounds);
+      dragLiveRef.current = metrics;
+      writeSheetCssVars(metrics);
     },
-    [halfOffsetY]
+    [sheetBounds, writeSheetCssVars]
   );
 
   const clearLiveSheetDrag = useCallback(
     (targetState: MobileSheetState) => {
-      dragOffsetRef.current = null;
-      if (rootRef.current) {
-        rootRef.current.style.removeProperty("--np-drag-half");
-        rootRef.current.style.removeProperty("--np-drag-full");
-        rootRef.current.style.removeProperty("--np-controls-y");
-        rootRef.current.style.removeProperty("--np-transport-y");
-        rootRef.current.style.removeProperty("--np-pills-opacity");
-      }
-      if (sheetContainerRef.current) {
-        const targetY =
-          targetState === "full"
-            ? "0px"
-            : targetState === "half"
-              ? `${halfOffsetY}px`
-              : "calc(100% - 60px)";
-        sheetContainerRef.current.style.setProperty("--mobile-sheet-y", targetY);
-      }
+      dragLiveRef.current = null;
+      const targetY =
+        targetState === "full"
+          ? sheetBounds.fullY
+          : targetState === "half"
+            ? sheetBounds.halfY
+            : sheetBounds.collapsedY;
+      writeSheetCssVars(computeMobileSheetMetrics(targetY, sheetBounds));
       setIsDraggingSheet(false);
     },
-    [halfOffsetY]
+    [sheetBounds, writeSheetCssVars]
   );
 
   const beginSheetDrag = useCallback(
     (clientY: number) => {
-      const collapsedY = getCollapsedY();
       const baseOffset =
         mobileSheetState === "full"
-          ? 0
+          ? sheetBounds.fullY
           : mobileSheetState === "half"
-            ? halfOffsetY
-            : collapsedY;
-      let controlsTravelUp = 0;
-      let extraGap = 0;
-      if (mobileSheetState === "collapsed" && rootRef.current && mobileControlsRef.current) {
-        const rootRect = rootRef.current.getBoundingClientRect();
-        const topBarBottom = mobileTopBarRef.current
-          ? mobileTopBarRef.current.getBoundingClientRect().bottom - rootRect.top
-          : 52;
-        const controlsRect = mobileControlsRef.current.getBoundingClientRect();
-        const controlsTop = controlsRect.top - rootRect.top;
-        const controlsBottom = controlsRect.bottom - rootRect.top;
-        controlsTravelUp = Math.max(0, controlsTop - (topBarBottom + 2));
-        const pillsH = mobilePillsRef.current?.getBoundingClientRect().height ?? 36;
-        const rawExtra = Math.max(0, controlsBottom - halfOffsetY - controlsTravelUp);
-        extraGap = Math.min(rawExtra, pillsH + 28);
-      }
+            ? sheetBounds.halfY
+            : sheetBounds.collapsedY;
       sheetDragStartRef.current = {
         startY: clientY,
         lastY: clientY,
         lastTime: performance.now(),
         vy: 0,
         baseOffset,
-        startState: mobileSheetState,
-        controlsTravelUp,
-        extraGap,
       };
     },
-    [getCollapsedY, halfOffsetY, mobileSheetState]
+    [mobileSheetState, sheetBounds]
   );
 
   const updateSheetDrag = useCallback(
@@ -873,12 +836,10 @@ export function NowPlayingView({
         setIsDraggingSheet(true);
       }
       if (sheetDraggedRef.current) {
-        const collapsedY = getCollapsedY();
-        const nextOffset = Math.max(0, Math.min(collapsedY, start.baseOffset + dy));
-        applyLiveSheetOffset(nextOffset, collapsedY);
+        applyLiveSheetOffset(start.baseOffset + dy);
       }
     },
-    [applyLiveSheetOffset, getCollapsedY]
+    [applyLiveSheetOffset]
   );
 
   const endSheetDrag = useCallback(
@@ -890,10 +851,12 @@ export function NowPlayingView({
         return;
       }
 
-      const collapsedY = getCollapsedY();
       const dy = clientY - start.startY;
       const vy = start.vy;
-      const endOffset = Math.max(0, Math.min(collapsedY, start.baseOffset + dy));
+      const endOffset = Math.max(
+        sheetBounds.fullY,
+        Math.min(sheetBounds.collapsedY, start.baseOffset + dy)
+      );
       const DIST_THRESHOLD = 28;
       const VEL_THRESHOLD = 0.32;
       const flickUp = vy < -VEL_THRESHOLD && dy < -12;
@@ -901,7 +864,10 @@ export function NowPlayingView({
 
       let nextState: MobileSheetState = mobileSheetState;
       if (mobileSheetState === "collapsed") {
-        if (endOffset < halfOffsetY * 0.55 || (vy < -0.9 && dy < -60)) {
+        if (
+          endOffset < (sheetBounds.fullY + sheetBounds.halfY) * 0.55 ||
+          (vy < -0.85 && dy < -50)
+        ) {
           nextState = "full";
         } else if (dy < -DIST_THRESHOLD || flickUp) {
           nextState = "half";
@@ -913,7 +879,10 @@ export function NowPlayingView({
           nextState = "collapsed";
         }
       } else {
-        if (endOffset > (halfOffsetY + collapsedY) * 0.55 || (vy > 0.9 && dy > 60)) {
+        if (
+          endOffset > (sheetBounds.halfY + sheetBounds.collapsedY) * 0.55 ||
+          (vy > 0.85 && dy > 50)
+        ) {
           nextState = "collapsed";
         } else if (dy > DIST_THRESHOLD || flickDown) {
           nextState = "half";
@@ -925,7 +894,7 @@ export function NowPlayingView({
         setMobileSheetState(nextState);
       }
     },
-    [clearLiveSheetDrag, getCollapsedY, halfOffsetY, mobileSheetState, setMobileSheetState]
+    [clearLiveSheetDrag, mobileSheetState, setMobileSheetState, sheetBounds]
   );
 
   const handleSheetHandleTouchStart = useCallback(
@@ -998,16 +967,25 @@ export function NowPlayingView({
     [endSheetDrag]
   );
 
-  const restMobileSheetY =
-    mobileSheetState === "full"
-      ? "0px"
-      : mobileSheetState === "half"
-        ? `${halfOffsetY}px`
-        : "calc(100% - 60px)";
+  const restMetrics = useMemo(
+    () => computeMobileSheetMetrics(restSheetY, sheetBounds),
+    [restSheetY, sheetBounds]
+  );
+  const activeMetrics = isDraggingSheet && dragLiveRef.current ? dragLiveRef.current : restMetrics;
+  const mobileRootStyle = {
+    "--mobile-sheet-y": `${activeMetrics.sheetY}px`,
+    "--np-controls-bottom-y": `${activeMetrics.controlsBottomY}px`,
+    "--np-half-y": `${sheetBounds.halfY}px`,
+    "--np-p-half": String(activeMetrics.pHalf),
+    "--np-p-full": String(activeMetrics.pFull),
+    "--mobile-sheet-pad-b":
+      mobileSheetState === "full" ? `${MOBILE_SHEET_FULL_Y}px` : `${sheetBounds.halfY}px`,
+  } as CSSProperties;
 
   return (
     <div
       ref={rootRef}
+      style={mobileRootStyle}
       data-dragging={isDraggingSheet ? "true" : "false"}
       className="mobile-np-root relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10"
     >
@@ -1022,85 +1000,165 @@ export function NowPlayingView({
         </div>
       )}
 
-      {/* Left Clean Artwork Column (Desktop) + v0.2.2 Mobile Player / Measured Hero (< lg) */}
-      <div
-        ref={mobileHeroRef}
-        className={`mobile-np-hero relative z-10 flex min-h-0 min-w-0 flex-col lg:col-span-7 lg:flex-initial lg:justify-center ${
-          isSheetOpen
-            ? isDraggingSheet
-              ? "shrink-0 overflow-visible"
-              : "shrink-0 overflow-hidden"
-            : "flex-1 justify-between"
-        }`}
-      >
-        {/* Mobile Expanded Top Hero Artwork Backdrop */}
-        {isSheetOpen && current && (
-          <div className="mobile-np-hero-backdrop pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
+      {/* Fullscreen Compact Top Mini-Player Bar (mobileSheetState === "full") */}
+      {current && (
+        <div
+          onTouchStart={handleSheetHandleTouchStart}
+          onTouchMove={handleSheetHandleTouchMove}
+          onTouchEnd={handleSheetHandleTouchEnd}
+          onTouchCancel={handleSheetHandleTouchEnd}
+          className={`mobile-np-mini-bar absolute inset-x-0 top-0 z-30 flex h-[68px] touch-none items-center gap-3 border-b border-white/10 bg-[#111111]/95 px-4 backdrop-blur-md lg:hidden ${
+            mobileSheetState === "full" ? "pointer-events-auto" : "pointer-events-none"
+          }`}
+        >
+          <button
+            type="button"
+            data-inline-btn="true"
+            onClick={() => {
+              if (sheetDraggedRef.current) {
+                sheetDraggedRef.current = false;
+                return;
+              }
+              setMobileSheetState("collapsed");
+            }}
+            aria-label="Return to full artwork player"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
+          >
             <TrackArtwork
               track={current}
-              className="h-full w-full scale-105 opacity-45"
-              iconClassName="h-16 w-16"
+              className="h-11 w-11 shrink-0 rounded-lg"
+              iconClassName="h-5 w-5"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/75 to-[#111111]" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-white">{current.title}</p>
+              <p className="truncate text-xs text-zinc-400">
+                {splitArtists(current.author).join(", ")}
+              </p>
+            </div>
+          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              data-inline-btn="true"
+              onClick={onTogglePause}
+              aria-label={playerState?.paused ? "Play" : "Pause"}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white transition hover:bg-white/10"
+            >
+              {playerState?.paused ? (
+                <Play className="ml-0.5 h-5 w-5 fill-current" />
+              ) : (
+                <Pause className="h-5 w-5 fill-current" />
+              )}
+            </button>
+            <button
+              type="button"
+              data-inline-btn="true"
+              onClick={onSkip}
+              aria-label="Skip"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-white transition hover:bg-white/10"
+            >
+              <SkipForward className="h-5 w-5 fill-current" />
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Mobile Top Bar (< lg) */}
+      {/* Left Clean Artwork Column (Desktop) + Smooth 3-State Mobile Player (< lg) */}
+      <div className="mobile-np-hero relative z-10 min-h-0 min-w-0 flex-1 overflow-hidden lg:col-span-7 lg:flex lg:flex-initial lg:flex-col lg:justify-center lg:overflow-visible">
         <div
-          ref={mobileTopBarRef}
-          onTouchStart={(e) => {
-            const y = e.touches[0]?.clientY;
-            if (typeof y !== "number") return;
-            topBarDismissRef.current = {
-              startY: y,
-              lastY: y,
-              lastTime: performance.now(),
-              vy: 0,
-            };
-          }}
-          onTouchMove={(e) => {
-            const st = topBarDismissRef.current;
-            const y = e.touches[0]?.clientY;
-            if (!st || typeof y !== "number") return;
-            const now = performance.now();
-            st.vy = (y - st.lastY) / Math.max(1, now - st.lastTime);
-            st.lastY = y;
-            st.lastTime = now;
-            if (!isSheetOpen && rootRef.current) {
-              const dy = Math.max(0, y - st.startY);
-              rootRef.current.style.transition = "none";
-              rootRef.current.style.setProperty("--np-dismiss-y", `${dy}px`);
-            }
-          }}
-          onTouchEnd={(e) => {
-            const st = topBarDismissRef.current;
-            topBarDismissRef.current = null;
-            if (rootRef.current) {
-              rootRef.current.style.removeProperty("transition");
-              rootRef.current.style.removeProperty("--np-dismiss-y");
-            }
-            const endY = e.changedTouches[0]?.clientY;
-            if (!st || typeof endY !== "number") return;
-            const dy = endY - st.startY;
-            if (dy > 36 || st.vy > 0.35) {
-              if (mobileSheetState === "full") {
-                setMobileSheetState("half");
-              } else if (mobileSheetState === "half") {
-                setMobileSheetState("collapsed");
+          className={`mobile-np-hero-stage max-lg:absolute max-lg:inset-0 max-lg:z-10 max-lg:flex max-lg:flex-col lg:contents ${
+            mobileSheetState === "full" && !isDraggingSheet
+              ? "max-lg:pointer-events-none"
+              : ""
+          }`}
+        >
+          {/* Mobile Full-Bleed Top Hero Artwork Backdrop (fades in smoothly as pHalf -> 1) */}
+          {current && (
+            <div className="mobile-np-hero-art pointer-events-none absolute inset-x-0 top-0 z-0 overflow-hidden lg:hidden">
+              <TrackArtwork
+                track={current}
+                className="h-full w-full scale-105"
+                iconClassName="h-16 w-16"
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/45 to-[#111111]" />
+            </div>
+          )}
+
+          {/* Mobile Top Bar (< lg) */}
+          <div
+            onTouchStart={(e) => {
+              const y = e.touches[0]?.clientY;
+              if (typeof y !== "number") return;
+              if (isSheetOpen) {
+                sheetDraggedRef.current = false;
+                beginSheetDrag(y);
+                topBarDismissRef.current = {
+                  startY: y,
+                  lastY: y,
+                  lastTime: performance.now(),
+                  vy: 0,
+                  mode: "sheet",
+                };
               } else {
+                topBarDismissRef.current = {
+                  startY: y,
+                  lastY: y,
+                  lastTime: performance.now(),
+                  vy: 0,
+                  mode: "dismiss",
+                };
+              }
+            }}
+            onTouchMove={(e) => {
+              const st = topBarDismissRef.current;
+              const y = e.touches[0]?.clientY;
+              if (!st || typeof y !== "number") return;
+              if (st.mode === "sheet") {
+                updateSheetDrag(y);
+                return;
+              }
+              const now = performance.now();
+              st.vy = (y - st.lastY) / Math.max(1, now - st.lastTime);
+              st.lastY = y;
+              st.lastTime = now;
+              if (rootRef.current) {
+                const dy = Math.max(0, y - st.startY);
+                rootRef.current.style.transition = "none";
+                rootRef.current.style.setProperty("--np-dismiss-y", `${dy}px`);
+              }
+            }}
+            onTouchEnd={(e) => {
+              const st = topBarDismissRef.current;
+              topBarDismissRef.current = null;
+              if (st?.mode === "sheet") {
+                endSheetDrag(e.changedTouches[0]?.clientY);
+                return;
+              }
+              if (rootRef.current) {
+                rootRef.current.style.removeProperty("transition");
+                rootRef.current.style.removeProperty("--np-dismiss-y");
+              }
+              const endY = e.changedTouches[0]?.clientY;
+              if (!st || typeof endY !== "number") return;
+              const dy = endY - st.startY;
+              if (dy > 36 || st.vy > 0.35) {
                 onCloseMobile?.();
               }
-            }
-          }}
-          onTouchCancel={() => {
-            topBarDismissRef.current = null;
-            if (rootRef.current) {
-              rootRef.current.style.removeProperty("transition");
-              rootRef.current.style.removeProperty("--np-dismiss-y");
-            }
-          }}
-          className="relative z-10 flex shrink-0 touch-none items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden"
-        >
+            }}
+            onTouchCancel={() => {
+              const st = topBarDismissRef.current;
+              topBarDismissRef.current = null;
+              if (st?.mode === "sheet") {
+                endSheetDrag(undefined);
+                return;
+              }
+              if (rootRef.current) {
+                rootRef.current.style.removeProperty("transition");
+                rootRef.current.style.removeProperty("--np-dismiss-y");
+              }
+            }}
+            className="mobile-np-top-bar relative z-20 flex shrink-0 touch-none items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden"
+          >
           <button
             type="button"
             onClick={() => {
@@ -1148,11 +1206,80 @@ export function NowPlayingView({
         </div>
 
         <div
-          className={`mx-auto flex w-full flex-col items-center lg:max-w-[460px] ${
-            isSheetOpen
-              ? "px-4 pb-2 pt-0.5 lg:px-0 lg:pb-0 lg:pt-0"
-              : "flex-1 justify-between px-5 pb-16 pt-2 lg:flex-initial lg:justify-center lg:p-0"
-          }`}
+          onTouchStart={(e) => {
+            if (
+              typeof window !== "undefined" &&
+              window.matchMedia("(min-width: 1024px)").matches
+            ) {
+              return;
+            }
+            const y = e.touches[0]?.clientY;
+            if (typeof y !== "number" || isSheetOpen) return;
+            topBarDismissRef.current = {
+              startY: y,
+              lastY: y,
+              lastTime: performance.now(),
+              vy: 0,
+              mode: "pending",
+            };
+          }}
+          onTouchMove={(e) => {
+            const st = topBarDismissRef.current;
+            const y = e.touches[0]?.clientY;
+            if (!st || typeof y !== "number") return;
+            const now = performance.now();
+            st.vy = (y - st.lastY) / Math.max(1, now - st.lastTime);
+            st.lastY = y;
+            st.lastTime = now;
+            const dy = y - st.startY;
+            if (st.mode === "pending") {
+              if (dy < -10) {
+                st.mode = "sheet";
+                sheetDraggedRef.current = false;
+                beginSheetDrag(st.startY);
+                updateSheetDrag(y);
+              } else if (dy > 10) {
+                st.mode = "dismiss";
+              }
+              return;
+            }
+            if (st.mode === "sheet") {
+              updateSheetDrag(y);
+            } else if (rootRef.current) {
+              rootRef.current.style.transition = "none";
+              rootRef.current.style.setProperty("--np-dismiss-y", `${Math.max(0, dy)}px`);
+            }
+          }}
+          onTouchEnd={(e) => {
+            const st = topBarDismissRef.current;
+            topBarDismissRef.current = null;
+            if (!st) return;
+            if (st.mode === "sheet") {
+              endSheetDrag(e.changedTouches[0]?.clientY);
+              return;
+            }
+            if (rootRef.current) {
+              rootRef.current.style.removeProperty("transition");
+              rootRef.current.style.removeProperty("--np-dismiss-y");
+            }
+            const endY = e.changedTouches[0]?.clientY;
+            if (typeof endY === "number" && (endY - st.startY > 44 || st.vy > 0.38)) {
+              onCloseMobile?.();
+            }
+          }}
+          onTouchCancel={() => {
+            const st = topBarDismissRef.current;
+            topBarDismissRef.current = null;
+            if (st?.mode === "sheet") {
+              endSheetDrag(undefined);
+              return;
+            }
+            if (rootRef.current) {
+              rootRef.current.style.removeProperty("transition");
+              rootRef.current.style.removeProperty("--np-dismiss-y");
+            }
+          }}
+          className="mx-auto flex w-full flex-col items-center max-lg:min-h-0 max-lg:flex-1 max-lg:justify-center max-lg:touch-none max-lg:px-5 max-lg:pt-1 max-lg:pb-[268px] lg:max-w-[460px]"
         >
           {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean responsive art) */}
           <div
@@ -1186,9 +1313,9 @@ export function NowPlayingView({
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            className={`mobile-np-artwork group relative aspect-square w-full max-w-[min(340px,37dvh)] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
+            className={`mobile-np-artwork group relative aspect-square w-full max-w-[min(340px,36dvh)] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
               current ? "lg:cursor-pointer" : ""
-            } ${isSheetOpen ? "hidden lg:block" : "my-auto block"}`}
+            } ${isSheetOpen ? "max-lg:pointer-events-none" : ""}`}
           >
             <TrackArtwork
               track={current}
@@ -1251,12 +1378,10 @@ export function NowPlayingView({
               </div>
             )}
           </div>
+          </div>
 
-          {/* Mobile Controls (< lg) */}
-          <div
-            ref={mobileControlsRef}
-            className={`mobile-np-controls w-full lg:hidden ${isSheetOpen ? "space-y-1.5" : "mt-4 space-y-3.5"}`}
-          >
+          {/* Mobile Controls (< lg) anchored 4px above the sliding queue sheet between collapsed and half */}
+          <div className="mobile-np-controls max-lg:absolute max-lg:inset-x-0 max-lg:top-0 max-lg:z-20 max-lg:px-5 max-lg:pb-2 lg:hidden">
             {current ? (
               <>
                 {/* Title & Artist */}
@@ -1267,11 +1392,7 @@ export function NowPlayingView({
                     onClick={() => primaryArtist && onOpenArtist(primaryArtist)}
                     className="flex max-w-full items-center gap-1 text-left"
                   >
-                    <h2
-                      className={`truncate font-bold tracking-tight text-white ${
-                        isSheetOpen ? "text-lg" : "text-[22px] leading-tight"
-                      }`}
-                    >
+                    <h2 className="truncate text-[22px] font-bold leading-tight tracking-tight text-white">
                       {current.title}
                     </h2>
                     <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -1282,12 +1403,12 @@ export function NowPlayingView({
                   </p>
                 </div>
 
-                {/* Horizontal Pill Actions Strip (shown when collapsed) */}
-                {!isSheetOpen && (
-                  <div
-                    ref={mobilePillsRef}
-                    className="mobile-np-pills no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5"
-                  >
+                {/* Horizontal Pill Actions Strip (smoothly collapses & fades out as pHalf -> 1) */}
+                <div
+                  className={`mobile-np-pills no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5 ${
+                    isSheetOpen ? "pointer-events-none" : ""
+                  }`}
+                >
                     <button
                       type="button"
                       disabled={current.isStream}
@@ -1376,9 +1497,8 @@ export function NowPlayingView({
                       <span>Leave</span>
                     </button>
                   </div>
-                )}
 
-                <div className={`mobile-np-transport-group ${isSheetOpen ? "space-y-1.5" : "space-y-3.5"}`}>
+                <div className="mobile-np-transport-group mt-2.5 space-y-2.5">
                 {/* Collapsible Inline Mobile Volume Control */}
                 {mobileVolumeOpen && (
                   <div className="flex items-center gap-2.5 rounded-xl border border-white/12 bg-black/45 px-3 py-2 backdrop-blur-sm">
@@ -1488,14 +1608,12 @@ export function NowPlayingView({
                     type="button"
                     onClick={onTogglePause}
                     title={playerState?.paused ? "Play" : "Pause"}
-                    className={`flex items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95 ${
-                      isSheetOpen ? "h-12 w-12" : "h-16 w-16"
-                    }`}
+                    className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
                   >
                     {playerState?.paused ? (
-                      <Play className={`ml-0.5 fill-current ${isSheetOpen ? "h-5 w-5" : "h-7 w-7"}`} />
+                      <Play className="ml-0.5 h-6 w-6 fill-current" />
                     ) : (
-                      <Pause className={`fill-current ${isSheetOpen ? "h-5 w-5" : "h-7 w-7"}`} />
+                      <Pause className="h-6 w-6 fill-current" />
                     )}
                   </button>
                   <button
@@ -1534,25 +1652,10 @@ export function NowPlayingView({
 
       {/* Right Queue / Lyrics / Related Column (Desktop sidebar + 3-state Sliding Mobile Sheet: collapsed <-> half <-> full) */}
       <div
-        ref={sheetContainerRef}
-        style={
-          {
-            "--mobile-sheet-y": restMobileSheetY,
-            "--mobile-half-y": `${halfOffsetY}px`,
-          } as CSSProperties
-        }
         className={`mobile-queue-sheet flex min-h-0 min-w-0 flex-col max-lg:absolute max-lg:inset-0 max-lg:z-20 max-lg:border-t max-lg:border-white/10 max-lg:bg-[#121212]/95 max-lg:px-4 max-lg:pt-1 max-lg:backdrop-blur-md max-lg:will-change-transform lg:static lg:z-10 lg:col-span-5 ${
-          mobileSheetState === "half" && !isDraggingSheet
-            ? "max-lg:pb-[var(--mobile-half-y,232px)]"
-            : ""
-        } ${
           mobileSheetState === "full" && !isDraggingSheet
             ? "max-lg:rounded-none"
             : "max-lg:rounded-t-2xl"
-        } ${
-          !isDraggingSheet
-            ? "max-lg:transition-transform max-lg:duration-300 max-lg:ease-[cubic-bezier(0.22,1,0.36,1)]"
-            : ""
         }`}
       >
         {/* Mobile Generous Header Drag Zone (Grab Handle + Tab Bar) */}
@@ -1584,11 +1687,9 @@ export function NowPlayingView({
             className="mx-auto mb-0.5 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2.5 text-center lg:hidden"
           >
             <span className="h-1 w-12 rounded-full bg-white/35" />
-            {mobileSheetState === "collapsed" && (
-              <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
-                {resolvedQueueName}
-              </span>
-            )}
+            <span className="mobile-np-peek-label max-w-full truncate text-xs font-semibold text-zinc-200">
+              {resolvedQueueName}
+            </span>
           </button>
 
           <div className="flex shrink-0 items-center border-b border-white/10">

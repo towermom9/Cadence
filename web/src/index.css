@@ -277,52 +277,87 @@ body,
 }
 
 @media (max-width: 1023px) {
-  .mobile-queue-sheet {
-    transform: translateY(var(--mobile-sheet-y, 0px));
-  }
-
   .mobile-np-root {
     transform: translateY(var(--np-dismiss-y, 0px));
   }
 
-  .mobile-np-root[data-dragging="true"] .mobile-np-artwork {
-    transform: scale(calc(1 - var(--np-drag-half, 0) * 0.18))
-      translateY(calc(var(--np-drag-half, 0) * -40px));
-    opacity: calc(1 - var(--np-drag-half, 0) * 1.25);
-    transition: none !important;
+  .mobile-queue-sheet {
+    transform: translateY(var(--mobile-sheet-y, 0px));
+    padding-bottom: var(--mobile-sheet-pad-b, 0px);
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-radius 300ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .mobile-np-root[data-dragging="true"] .mobile-np-controls {
-    transform: translateY(var(--np-controls-y, 0px));
+  .mobile-np-hero-stage {
+    opacity: calc(1 - var(--np-p-full, 0));
+    transform: translateY(calc(var(--np-p-full, 0) * -24px));
+    will-change: transform, opacity;
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-hero-art {
+    height: var(--np-half-y, 390px);
+    opacity: var(--np-p-half, 0);
+    will-change: opacity;
+    transition: opacity 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      height 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-artwork {
+    opacity: calc(1 - var(--np-p-half, 0) * 1.35);
+    transform: translateY(calc(var(--np-p-half, 0) * -44px))
+      scale(calc(1 + var(--np-p-half, 0) * 0.1));
+    will-change: transform, opacity;
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-controls {
+    transform: translateY(calc(var(--np-controls-bottom-y, 640px) - 100%));
     will-change: transform;
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-pills {
+    opacity: calc(1 - var(--np-p-half, 0) * 1.85);
+    max-height: calc((1 - var(--np-p-half, 0)) * 44px);
+    margin-top: calc((1 - var(--np-p-half, 0)) * 12px);
+    overflow-y: hidden;
+    transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      max-height 300ms cubic-bezier(0.22, 1, 0.36, 1),
+      margin-top 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-mini-bar {
+    opacity: var(--np-p-full, 0);
+    transform: translateY(calc((1 - var(--np-p-full, 0)) * -10px));
+    will-change: transform, opacity;
+    transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-peek-label {
+    opacity: calc(1 - var(--np-p-half, 0) * 2.2);
+    max-height: calc((1 - var(--np-p-half, 0)) * 20px);
+    overflow: hidden;
+    transition: opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      max-height 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .mobile-np-root[data-dragging="true"] .mobile-queue-sheet,
+  .mobile-np-root[data-dragging="true"] .mobile-np-hero-stage,
+  .mobile-np-root[data-dragging="true"] .mobile-np-hero-art,
+  .mobile-np-root[data-dragging="true"] .mobile-np-artwork,
+  .mobile-np-root[data-dragging="true"] .mobile-np-controls,
+  .mobile-np-root[data-dragging="true"] .mobile-np-pills,
+  .mobile-np-root[data-dragging="true"] .mobile-np-mini-bar,
+  .mobile-np-root[data-dragging="true"] .mobile-np-peek-label {
     transition: none !important;
   }
 
-  .mobile-np-root[data-dragging="true"] .mobile-np-transport-group {
-    transform: translateY(var(--np-transport-y, 0px));
-    will-change: transform;
-    transition: none !important;
-  }
-
-  .mobile-np-root[data-dragging="true"] .mobile-np-pills {
-    opacity: var(--np-pills-opacity, 1);
-    transform: scaleY(calc(1 - var(--np-drag-half, 0) * 0.5));
-    transform-origin: top center;
-    transition: none !important;
-  }
-
-  .mobile-np-root[data-dragging="true"] .mobile-np-hero-backdrop {
-    opacity: var(--np-drag-half, 1);
-    transition: none !important;
-  }
-
-  .mobile-np-root[data-dragging="true"] .mobile-np-hero {
-    opacity: calc(1 - var(--np-drag-full, 0));
-    transform: translateY(calc(var(--np-drag-full, 0) * -24px));
-    transition: none !important;
-  }
-
-  :root[data-bg="amoled"] .mobile-queue-sheet {
+  :root[data-bg="amoled"] .mobile-queue-sheet,
+  :root[data-bg="amoled"] .mobile-np-mini-bar {
     background-color: rgba(0, 0, 0, 0.94) !important;
   }
 

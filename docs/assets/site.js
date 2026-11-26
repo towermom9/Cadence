@@ -153,9 +153,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.2.6)",
-      path: "docs/reference/changelog/#v0-2-6",
-      content: "v0.2.6 v0.2.5 v0.2.4 v0.2.3 centered mobile toast mobile controls drag follow progress bar accent fill swipe remove gap long press queue reorder handle.",
+      title: "Release Changelogs (v0.0.0 to v0.2.7)",
+      path: "docs/reference/changelog/#v0-2-7",
+      content: "v0.2.7 v0.2.6 v0.2.5 mobile Now Playing 3-state drag morph full bleed hero backdrop compact top mini player bar Up Next Lyrics Related tabs.",
     },
   ];
 
