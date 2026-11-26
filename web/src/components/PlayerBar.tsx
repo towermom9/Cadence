@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   ChevronDown,
@@ -34,6 +35,7 @@ import type {
   TrackDTO,
 } from "@shared/types";
 import type { PlaybackAnchor } from "../hooks/useCadenceSocket";
+import { useVolumeControl } from "../hooks/useVolumeControl";
 import { formatMs, sourceLabel } from "../utils/format";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
@@ -102,11 +104,8 @@ export function PlayerBar({
   const [scrubPosition, setScrubPosition] = useState(0);
   const [hoverInfo, setHoverInfo] = useState<{ pct: number; ms: number } | null>(null);
   const [effectsOpen, setEffectsOpen] = useState(false);
-  const serverVolume = Math.min(100, Math.max(0, playerState?.volume ?? 100));
-  const [localVolume, setLocalVolume] = useState(serverVolume);
-  const [volumeDraft, setVolumeDraft] = useState(String(serverVolume));
-  const [isEditingVolume, setIsEditingVolume] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [miniSwipeOffsetX, setMiniSwipeOffsetX] = useState(0);
 
   const barRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
@@ -114,11 +113,10 @@ export function PlayerBar({
   const scrubPosRef = useRef(0);
   const isSeekingRef = useRef(false);
   const effectsRef = useRef<HTMLDivElement>(null);
-  const isDraggingVolumeRef = useRef(false);
-  const volumeThrottleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastVolumeSentAtRef = useRef(0);
-  const pendingVolumeRef = useRef<number | null>(null);
-  const lastNonZeroVolumeRef = useRef(serverVolume > 0 ? serverVolume : 100);
+  const miniTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const miniGestureRef = useRef<"idle" | "swipe-x" | "swipe-y">("idle");
+  const miniSuppressClickRef = useRef(false);
+  const miniSuppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const track = playerState?.current ?? null;
   const duration = track?.duration || 0;
@@ -131,20 +129,16 @@ export function PlayerBar({
   const activeFilter = playerState?.activeFilter ?? "none";
   const privileged = Boolean(playerState?.isPrivileged);
 
-  useEffect(() => {
-    if (serverVolume > 0) {
-      lastNonZeroVolumeRef.current = serverVolume;
-    }
-    if (!isDraggingVolumeRef.current && !isEditingVolume) {
-      setLocalVolume(serverVolume);
-      setVolumeDraft(String(serverVolume));
-    }
-  }, [isEditingVolume, serverVolume]);
+  const volume = useVolumeControl({
+    serverVolume: playerState?.volume ?? 100,
+    disabled: !isConnected || !privileged,
+    onCommit: onVolume,
+  });
 
   useEffect(() => {
     return () => {
-      if (volumeThrottleTimerRef.current) {
-        clearTimeout(volumeThrottleTimerRef.current);
+      if (miniSuppressTimerRef.current) {
+        clearTimeout(miniSuppressTimerRef.current);
       }
     };
   }, []);
@@ -173,53 +167,66 @@ export function PlayerBar({
       ? `${Math.floor(emptyVcRemainingSec / 60)}:${String(emptyVcRemainingSec % 60).padStart(2, "0")}`
       : null;
 
-  const sendVolumeImmediate = useCallback(
-    (vol: number) => {
-      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
-      if (clamped > 0) lastNonZeroVolumeRef.current = clamped;
-      pendingVolumeRef.current = null;
-      if (volumeThrottleTimerRef.current) {
-        clearTimeout(volumeThrottleTimerRef.current);
-        volumeThrottleTimerRef.current = null;
-      }
-      lastVolumeSentAtRef.current = performance.now();
-      onVolume(clamped);
-    },
-    [onVolume]
-  );
+  const triggerMiniSuppressClick = () => {
+    miniSuppressClickRef.current = true;
+    if (miniSuppressTimerRef.current) clearTimeout(miniSuppressTimerRef.current);
+    miniSuppressTimerRef.current = setTimeout(() => {
+      miniSuppressClickRef.current = false;
+    }, 320);
+  };
 
-  const sendVolumeThrottled = useCallback(
-    (vol: number) => {
-      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
-      if (clamped > 0) lastNonZeroVolumeRef.current = clamped;
-      const now = performance.now();
-      const elapsed = now - lastVolumeSentAtRef.current;
-      if (elapsed >= 150) {
-        sendVolumeImmediate(clamped);
-        return;
-      }
-      pendingVolumeRef.current = clamped;
-      if (!volumeThrottleTimerRef.current) {
-        volumeThrottleTimerRef.current = setTimeout(() => {
-          volumeThrottleTimerRef.current = null;
-          if (pendingVolumeRef.current !== null) {
-            const next = pendingVolumeRef.current;
-            pendingVolumeRef.current = null;
-            lastVolumeSentAtRef.current = performance.now();
-            onVolume(next);
-          }
-        }, Math.max(16, 150 - elapsed));
-      }
-    },
-    [onVolume, sendVolumeImmediate]
-  );
+  const handleMiniTouchStart = (e: ReactTouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    miniTouchStartRef.current = { x: t.clientX, y: t.clientY };
+    miniGestureRef.current = "idle";
+  };
 
-  const finishVolumeDrag = useCallback(() => {
-    isDraggingVolumeRef.current = false;
-    if (pendingVolumeRef.current !== null) {
-      sendVolumeImmediate(pendingVolumeRef.current);
+  const handleMiniTouchMove = (e: ReactTouchEvent<HTMLDivElement>) => {
+    const start = miniTouchStartRef.current;
+    if (!start || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (miniGestureRef.current === "idle") {
+      if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.15) {
+        miniGestureRef.current = "swipe-y";
+      } else if (hasPlayer && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        miniGestureRef.current = "swipe-x";
+      }
     }
-  }, [sendVolumeImmediate]);
+    if (miniGestureRef.current === "swipe-x") {
+      setMiniSwipeOffsetX(Math.max(-96, Math.min(96, dx * 0.65)));
+    }
+  };
+
+  const handleMiniTouchEnd = (e: ReactTouchEvent<HTMLDivElement>) => {
+    const start = miniTouchStartRef.current;
+    const gesture = miniGestureRef.current;
+    miniTouchStartRef.current = null;
+    miniGestureRef.current = "idle";
+    setMiniSwipeOffsetX(0);
+    if (!start) return;
+    const endTouch = e.changedTouches[0];
+    if (!endTouch) return;
+    const dx = endTouch.clientX - start.x;
+    const dy = endTouch.clientY - start.y;
+
+    if (gesture === "swipe-y" && dy < -35) {
+      triggerMiniSuppressClick();
+      onToggleDrawer();
+    } else if (gesture === "swipe-x" && hasPlayer) {
+      if (dx < -55) {
+        triggerMiniSuppressClick();
+        onSkip();
+      } else if (dx > 55) {
+        triggerMiniSuppressClick();
+        onPrevious();
+      } else if (Math.abs(dx) > 16) {
+        triggerMiniSuppressClick();
+      }
+    }
+  };
 
   const applyBarVisualPct = useCallback((pct: number) => {
     const safe = Math.min(100, Math.max(0, pct));
@@ -352,39 +359,6 @@ export function PlayerBar({
     onRepeat(next);
   };
 
-  const commitVolumeDraft = () => {
-    setIsEditingVolume(false);
-    const parsed = Number.parseInt(volumeDraft.replace(/[^0-9]/g, ""), 10);
-    if (!Number.isFinite(parsed)) {
-      setVolumeDraft(String(localVolume));
-      return;
-    }
-    const clamped = Math.max(0, Math.min(100, parsed));
-    setLocalVolume(clamped);
-    setVolumeDraft(String(clamped));
-    if (clamped !== serverVolume) {
-      sendVolumeImmediate(clamped);
-    }
-  };
-
-  const handleVolumeKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.currentTarget.blur();
-    } else if (e.key === "Escape") {
-      setVolumeDraft(String(localVolume));
-      setIsEditingVolume(false);
-      e.currentTarget.blur();
-    }
-  };
-
-  const handleToggleMute = () => {
-    const next = localVolume === 0 ? (lastNonZeroVolumeRef.current || 100) : 0;
-    setLocalVolume(next);
-    setVolumeDraft(String(next));
-    sendVolumeImmediate(next);
-  };
-
   return (
     <footer className="relative z-40 bg-[#212121]">
       {/* Thin YouTube Music red seek bar across the top edge (pointer-captured 60fps scrub) */}
@@ -439,7 +413,24 @@ export function PlayerBar({
       </div>
 
       {/* Mobile Mini-Player (< md) */}
-      <div className="flex h-14 items-center justify-between gap-2 px-3 md:hidden">
+      <div
+        onTouchStart={handleMiniTouchStart}
+        onTouchMove={handleMiniTouchMove}
+        onTouchEnd={handleMiniTouchEnd}
+        onTouchCancel={handleMiniTouchEnd}
+        onClickCapture={(e) => {
+          if (miniSuppressClickRef.current) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        style={{
+          transform: miniSwipeOffsetX !== 0 ? `translateX(${miniSwipeOffsetX}px)` : undefined,
+        }}
+        className={`flex h-14 items-center justify-between gap-2 px-3 md:hidden ${
+          miniSwipeOffsetX === 0 ? "transition-transform duration-200 ease-out" : ""
+        }`}
+      >
         <button
           type="button"
           onClick={onToggleDrawer}
@@ -652,11 +643,11 @@ export function PlayerBar({
             <button
               type="button"
               disabled={!isConnected || !privileged}
-              onClick={handleToggleMute}
+              onClick={volume.toggleMute}
               title="Mute / Unmute"
               className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
             >
-              {localVolume === 0 ? (
+              {volume.localVolume === 0 ? (
                 <VolumeX className="h-4 w-4" />
               ) : (
                 <Volume2 className="h-4 w-4" />
@@ -666,22 +657,13 @@ export function PlayerBar({
               type="range"
               min={0}
               max={100}
-              value={localVolume}
+              value={volume.localVolume}
               disabled={!isConnected || !privileged}
-              onPointerDown={() => {
-                isDraggingVolumeRef.current = true;
-              }}
-              onPointerUp={finishVolumeDrag}
-              onPointerCancel={finishVolumeDrag}
-              onMouseUp={finishVolumeDrag}
-              onTouchEnd={finishVolumeDrag}
-              onBlur={finishVolumeDrag}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                setLocalVolume(v);
-                setVolumeDraft(String(v));
-                sendVolumeThrottled(v);
-              }}
+              onPointerDown={volume.handleSliderPointerDown}
+              onPointerUp={volume.handleSliderCommit}
+              onPointerCancel={volume.handleSliderCommit}
+              onBlur={volume.handleSliderCommit}
+              onChange={(e) => volume.handleSliderChange(Number(e.target.value))}
               aria-label="Volume slider"
               className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/25 accent-white disabled:opacity-40"
             />
@@ -691,14 +673,14 @@ export function PlayerBar({
                 inputMode="numeric"
                 aria-label="Volume percentage"
                 disabled={!isConnected || !privileged}
-                value={volumeDraft}
+                value={volume.draft}
                 onFocus={(e) => {
-                  setIsEditingVolume(true);
+                  volume.startEditing();
                   e.currentTarget.select();
                 }}
-                onChange={(e) => setVolumeDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-                onBlur={commitVolumeDraft}
-                onKeyDown={handleVolumeKeyDown}
+                onChange={(e) => volume.updateDraft(e.target.value)}
+                onBlur={volume.commitDraft}
+                onKeyDown={volume.handleDraftKeyDown}
                 className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
               />
               <span className="ml-0.5 text-[11px] text-zinc-400">%</span>

@@ -31,6 +31,12 @@ import { ToastStack } from "./components/ToastStack";
 import { TopBar } from "./components/TopBar";
 import { useCadenceSocket } from "./hooks/useCadenceSocket";
 import { I18nProvider, useI18n } from "./i18n";
+import {
+  hasDismissibleBackTarget,
+  pushViewHistory,
+  resolveBackAction,
+  type BackStackSnapshot,
+} from "./utils/navigation";
 import { sortPlaylists } from "./utils/playlists";
 
 function SkipToContentLink() {
@@ -100,11 +106,13 @@ export function App() {
   const [initialPreferences, setInitialPreferences] = useState<UserPreferencesDTO | null>(null);
 
   const [activeView, setActiveView] = useState<MainView>("home");
+  const [viewHistory, setViewHistory] = useState<MainView[]>([]);
   const prevViewRef = useRef<MainView>("home");
   const [libraryTab, setLibraryTab] = useState<"playlists" | "history">("playlists");
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
   const [nowPlayingMounted, setNowPlayingMounted] = useState(false);
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
@@ -124,6 +132,7 @@ export function App() {
       };
     }
 
+    setMobileSheetExpanded(false);
     setNowPlayingVisible(false);
     const timer = setTimeout(() => {
       setNowPlayingMounted(false);
@@ -190,10 +199,14 @@ export function App() {
 
   const navigateTo = useCallback((view: MainView) => {
     setNowPlayingOpen(false);
-    if (view !== "artist") {
-      prevViewRef.current = view;
-    }
-    setActiveView(view);
+    setMobileSheetExpanded(false);
+    setActiveView((current) => {
+      if (view !== "artist") {
+        prevViewRef.current = view;
+      }
+      setViewHistory((hist) => pushViewHistory(hist, current, view));
+      return view;
+    });
   }, []);
 
   const handleSearch = useCallback(
@@ -246,8 +259,10 @@ export function App() {
       if (activeView !== "artist") {
         prevViewRef.current = activeView;
       }
+      setViewHistory((hist) => pushViewHistory(hist, activeView, "artist"));
       setSelectedArtist(clean);
       setNowPlayingOpen(false);
+      setMobileSheetExpanded(false);
       setActiveView("artist");
     },
     [activeView]
@@ -264,6 +279,9 @@ export function App() {
       setLyricsSubjectTrack(isCurrent ? null : track);
       setNowPlayingTab("lyrics");
       setNowPlayingOpen(true);
+      if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
+        setMobileSheetExpanded(true);
+      }
       socket.requestLyrics(track.title, track.author, track.duration);
     },
     [socket]
@@ -275,6 +293,9 @@ export function App() {
       setRelatedSubjectTrack(isCurrent ? null : track);
       setNowPlayingTab("related");
       setNowPlayingOpen(true);
+      if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
+        setMobileSheetExpanded(true);
+      }
     },
     [socket.playerState?.current?.identifier]
   );
@@ -332,6 +353,113 @@ export function App() {
     Math.min(30, Math.round(socket.preferences.artworkSeekSeconds || 10))
   );
   const appVersion = effectiveMeta?.appVersion || __CADENCE_VERSION__;
+
+  const backSnapshot: BackStackSnapshot = useMemo(
+    () => ({
+      contextMenuOpen: Boolean(contextMenu),
+      saveModalOpen: Boolean(saveModalTracks),
+      shortcutsOpen,
+      mobileMenuOpen,
+      nowPlayingOpen,
+      mobileSheetExpanded,
+      activeView,
+      viewHistory,
+    }),
+    [
+      activeView,
+      contextMenu,
+      mobileMenuOpen,
+      mobileSheetExpanded,
+      nowPlayingOpen,
+      saveModalTracks,
+      shortcutsOpen,
+      viewHistory,
+    ]
+  );
+  const backSnapshotRef = useRef<BackStackSnapshot>(backSnapshot);
+  backSnapshotRef.current = backSnapshot;
+  const hasBackTarget = hasDismissibleBackTarget(backSnapshot);
+  const guardActiveRef = useRef(false);
+  const ignoringNextPopRef = useRef(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (hasBackTarget && !guardActiveRef.current) {
+      window.history.pushState({ cadenceBackGuard: true }, "");
+      guardActiveRef.current = true;
+    } else if (!hasBackTarget && guardActiveRef.current) {
+      guardActiveRef.current = false;
+      const st = window.history.state as { cadenceBackGuard?: boolean } | null;
+      if (st?.cadenceBackGuard) {
+        ignoringNextPopRef.current = true;
+        window.history.back();
+      }
+    }
+  }, [hasBackTarget, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onPopState = () => {
+      if (ignoringNextPopRef.current) {
+        ignoringNextPopRef.current = false;
+        return;
+      }
+      const snap = backSnapshotRef.current;
+      const action = resolveBackAction(snap);
+      if (action === "none") {
+        guardActiveRef.current = false;
+        return;
+      }
+
+      const nextSnap: BackStackSnapshot = { ...snap };
+      switch (action) {
+        case "close_context_menu":
+          setContextMenu(null);
+          nextSnap.contextMenuOpen = false;
+          break;
+        case "close_save_modal":
+          setSaveModalTracks(null);
+          nextSnap.saveModalOpen = false;
+          break;
+        case "close_shortcuts":
+          setShortcutsOpen(false);
+          nextSnap.shortcutsOpen = false;
+          break;
+        case "close_mobile_menu":
+          setMobileMenuOpen(false);
+          nextSnap.mobileMenuOpen = false;
+          break;
+        case "collapse_now_playing_sheet":
+          setMobileSheetExpanded(false);
+          nextSnap.mobileSheetExpanded = false;
+          break;
+        case "close_now_playing":
+          setNowPlayingOpen(false);
+          setMobileSheetExpanded(false);
+          nextSnap.nowPlayingOpen = false;
+          nextSnap.mobileSheetExpanded = false;
+          break;
+        case "pop_view": {
+          const target = snap.viewHistory[snap.viewHistory.length - 1] ?? "home";
+          setActiveView(target);
+          setViewHistory(snap.viewHistory.slice(0, -1));
+          nextSnap.activeView = target;
+          nextSnap.viewHistory = snap.viewHistory.slice(0, -1);
+          break;
+        }
+      }
+
+      if (hasDismissibleBackTarget(nextSnap)) {
+        window.history.pushState({ cadenceBackGuard: true }, "");
+        guardActiveRef.current = true;
+      } else {
+        guardActiveRef.current = false;
+      }
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -865,6 +993,9 @@ export function App() {
                   showArtworkSeekButtons={socket.preferences.artworkSeekButtons}
                   artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
                   lyricsAutoScroll={socket.preferences.lyricsAutoScroll}
+                  longPressMs={socket.preferences.longPressMs ?? 450}
+                  mobileSheetExpanded={mobileSheetExpanded}
+                  onMobileSheetExpandedChange={setMobileSheetExpanded}
                   likedTrackIds={likedTrackIds}
                   onTabChange={(tab) => {
                     setLyricsSubjectTrack(null);

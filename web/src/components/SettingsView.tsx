@@ -1137,6 +1137,7 @@ export function SettingsView({
                     textScale: 100,
                     enhancedFocusRings: false,
                     largerTouchTargets: false,
+                    longPressMs: 450,
                     screenReaderAnnouncements: true,
                   })
                 }
@@ -1214,6 +1215,27 @@ export function SettingsView({
                   checked={Boolean(preferences.largerTouchTargets)}
                   onChange={(val) => onUpdatePreferences({ largerTouchTargets: val })}
                   label={t("a11y.touchTargets.title")}
+                />
+              </div>
+
+              <div className="space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">{t("a11y.longPress.title")}</p>
+                    <p className="text-xs text-zinc-400">{t("a11y.longPress.desc")}</p>
+                  </div>
+                  <span className="shrink-0 rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-white">
+                    {preferences.longPressMs ?? 450}ms
+                  </span>
+                </div>
+                <NumericSlider
+                  value={preferences.longPressMs ?? 450}
+                  min={200}
+                  max={1200}
+                  step={50}
+                  suffix="ms"
+                  ariaLabel={t("a11y.longPress.title")}
+                  onChange={(next) => onUpdatePreferences({ longPressMs: next })}
                 />
               </div>
 

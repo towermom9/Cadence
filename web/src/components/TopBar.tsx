@@ -194,11 +194,11 @@ export function TopBar({
     if (!clean) return;
     setSuggestOpen(false);
     setActiveIndex(-1);
+    searchInputRef.current?.blur();
     onSearch(clean, source);
   };
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
+  const executeSearchOrSelected = () => {
     if (showDropdown && activeIndex >= 0) {
       if (activeIndex < suggestions.length) {
         const text = suggestions[activeIndex];
@@ -210,6 +210,7 @@ export function TopBar({
       if (track) {
         setSuggestOpen(false);
         setActiveIndex(-1);
+        searchInputRef.current?.blur();
         onPlayTrack(track);
         return;
       }
@@ -217,7 +218,18 @@ export function TopBar({
     runSearch(query);
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    executeSearchOrSelected();
+  };
+
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      executeSearchOrSelected();
+      return;
+    }
+
     if (!showDropdown || totalSuggestItems === 0) return;
 
     if (e.key === "ArrowDown") {
@@ -259,7 +271,7 @@ export function TopBar({
         <MobileMenuButton onClick={onOpenMobileMenu} />
 
         {/* YTM-style search pill + live autofill dropdown */}
-        <form onSubmit={handleSubmit} className="relative w-full max-w-xl">
+        <form action="#" role="search" onSubmit={handleSubmit} className="relative w-full max-w-xl">
           <div
             className={`flex items-center gap-2 border border-white/12 px-3 py-1.5 transition ${
               showDropdown
@@ -280,7 +292,12 @@ export function TopBar({
             </button>
             <input
               ref={searchInputRef}
-              type="text"
+              type="search"
+              inputMode="search"
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               value={query}
               onFocus={() => {
                 if (totalSuggestItems > 0) setSuggestOpen(true);
@@ -295,7 +312,7 @@ export function TopBar({
               }}
               onKeyDown={handleKeyDown}
               placeholder={t("search.placeholder")}
-              className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-zinc-400 outline-none"
+              className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder-zinc-400 outline-none [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
             />
             {query && (
               <button

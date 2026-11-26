@@ -273,7 +273,7 @@ export function HomeView({
   return (
     <div className="space-y-9">
       {/* Mood / Activity Chips */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
         {MOOD_CHIPS.map((chip) => (
           <button
             key={chip}

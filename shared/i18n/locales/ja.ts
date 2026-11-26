@@ -38,6 +38,8 @@ export const ja: Record<I18nKey, string> = {
   "a11y.focusRings.desc": "キーボード操作時に明確な3pxのアクセント枠線を表示します。",
   "a11y.touchTargets.title": "大きめのタッチターゲット",
   "a11y.touchTargets.desc": "操作ボタンにMaterial 3推奨の44x44px以上のクリック領域を確保します。",
+  "a11y.longPress.title": "長押し検出の遅延時間",
+  "a11y.longPress.desc": "タッチ画面で曲を長押ししてから操作メニューが開くまでの時間を調整します (200ms - 1200ms)。",
   "a11y.srAnnounce.title": "スクリーンリーダー曲名通知",
   "a11y.srAnnounce.desc": "曲の切り替わりや再生状態の変化をARIAライブリージョンで通知します。",
   "server.maxHistory.title": "再生履歴の最大保持数",

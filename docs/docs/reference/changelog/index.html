@@ -67,7 +67,15 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-2-2">v0.2.2 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-2-3">v0.2.3 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Stabilized web and mobile volume sliders via shared debounced drag handling, optimistic client state locks, and initialized Lavalink volume tracking to eliminate stuttering and slider snap-backs.</li>
+          <li>Added a typeable <strong>Long-Press Detector Delay</strong> slider (<code>200ms - 1200ms</code>) under <strong>Settings -&gt; Accessibility</strong> controlling touch hold timing on queue tracks.</li>
+          <li>Refined mobile <strong>Now Playing</strong> ergonomics: removed the top lyric pill toggle, disabled tap-to-pause/darkening/seek overlay on mobile cover art, added horizontal swipe gestures on mini-player and cover art for track skipping, and enabled full-screen sliding expansion for the <strong>Up next</strong>, <strong>Lyrics</strong>, and <strong>Related</strong> drawer with a compact mini-player header.</li>
+          <li>Hid horizontal scrollbars beneath mobile mood and filter chips, enabled mobile virtual keyboard Search/Enter submission, and wired hardware Back button navigation across modals, sheets, Now Playing, and views.</li>
+        </ul>
+
+        <h2 id="v0-2-2">v0.2.2 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Added horizontal swipe-left or swipe-right gestures to remove tracks from Previous, Manual, and Autoplay queues on touch devices (revealing a coral-red delete backdrop).</li>
           <li>Added long-press (<code>450ms</code>) gesture support on queue tracks and upgraded the mobile context menu into a YouTube Music style bottom action sheet with quick-action tiles (<strong>Play next</strong>, <strong>Save to playlist</strong>, <strong>Share</strong>).</li>

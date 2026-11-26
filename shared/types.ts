@@ -60,6 +60,7 @@ export interface UserPreferencesDTO {
   textScale?: number;
   enhancedFocusRings?: boolean;
   largerTouchTargets?: boolean;
+  longPressMs?: number;
   screenReaderAnnouncements?: boolean;
   locale?: SupportedLocale;
 }

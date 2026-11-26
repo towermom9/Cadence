@@ -70,6 +70,7 @@ const DEFAULT_USER_PREFERENCES: UserPreferencesDTO = {
   textScale: 100,
   enhancedFocusRings: false,
   largerTouchTargets: false,
+  longPressMs: 450,
   screenReaderAnnouncements: true,
   locale: "auto",
 };
@@ -102,6 +103,11 @@ function normalizeTrackStuckTimeoutMs(value: unknown, fallback = 20000): number 
 function normalizeTextScale(value: unknown, fallback = 100): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.max(90, Math.min(130, Math.round(value)));
+}
+
+function normalizeLongPressMs(value: unknown, fallback = 450): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(200, Math.min(1200, Math.round(value)));
 }
 
 function normalizeHexPref(value: unknown, fallback: string | null = null): string | null {
@@ -1135,6 +1141,10 @@ export class CadenceDatabase {
         typeof parsed.largerTouchTargets === "boolean"
           ? parsed.largerTouchTargets
           : DEFAULT_USER_PREFERENCES.largerTouchTargets,
+      longPressMs: normalizeLongPressMs(
+        parsed.longPressMs,
+        DEFAULT_USER_PREFERENCES.longPressMs ?? 450
+      ),
       screenReaderAnnouncements:
         typeof parsed.screenReaderAnnouncements === "boolean"
           ? parsed.screenReaderAnnouncements
@@ -1212,6 +1222,7 @@ export class CadenceDatabase {
         typeof patch.largerTouchTargets === "boolean"
           ? patch.largerTouchTargets
           : current.largerTouchTargets,
+      longPressMs: normalizeLongPressMs(patch.longPressMs, current.longPressMs ?? 450),
       screenReaderAnnouncements:
         typeof patch.screenReaderAnnouncements === "boolean"
           ? patch.screenReaderAnnouncements

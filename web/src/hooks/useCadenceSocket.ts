@@ -59,6 +59,7 @@ export function useCadenceSocket(
     trackId: string | null;
   } | null>(null);
   const volumeLockRef = useRef<{
+    guildId: string;
     value: number;
     until: number;
   } | null>(null);
@@ -218,7 +219,11 @@ export function useCadenceSocket(
             let resolvedVolume = msg.state.volume;
             const volLock = volumeLockRef.current;
             if (volLock) {
-              if (now < volLock.until && msg.state.volume !== volLock.value) {
+              if (
+                volLock.guildId === msg.state.guildId &&
+                now < volLock.until &&
+                msg.state.volume !== volLock.value
+              ) {
                 resolvedVolume = volLock.value;
               } else {
                 volumeLockRef.current = null;
@@ -340,6 +345,7 @@ export function useCadenceSocket(
 
   const selectGuild = useCallback(
     (guildId: string) => {
+      volumeLockRef.current = null;
       setSelectedGuildId(guildId);
       setSettings(null);
       setLyricsState({ guildId, lyrics: null, loading: false });
@@ -537,7 +543,14 @@ export function useCadenceSocket(
     setVolume: (volume: number) => {
       if (!selectedGuildId) return;
       const clamped = Math.max(0, Math.min(100, Math.round(volume)));
-      volumeLockRef.current = { value: clamped, until: performance.now() + 1200 };
+      volumeLockRef.current = {
+        guildId: selectedGuildId,
+        value: clamped,
+        until: performance.now() + 2500,
+      };
+      setPlayerState((prev) =>
+        prev && prev.guildId === selectedGuildId ? { ...prev, volume: clamped } : prev
+      );
       send({ type: "volume", guildId: selectedGuildId, volume: clamped });
     },
     setRepeat: (mode: RepeatModeType) =>

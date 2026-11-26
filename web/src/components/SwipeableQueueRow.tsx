@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 
 interface Props {
   swipeEnabled: boolean;
+  longPressMs?: number;
   onSwipeRemove?: () => void;
   onLongPress?: (x: number, y: number) => void;
   children: ReactNode;
@@ -11,6 +12,7 @@ interface Props {
 
 export function SwipeableQueueRow({
   swipeEnabled,
+  longPressMs = 450,
   onSwipeRemove,
   onLongPress,
   children,
@@ -67,6 +69,7 @@ export function SwipeableQueueRow({
     if (onLongPress) {
       const startX = touch.clientX;
       const startY = touch.clientY;
+      const delayMs = Math.max(200, Math.min(1200, Math.round(longPressMs || 450)));
       longPressTimerRef.current = setTimeout(() => {
         longPressTimerRef.current = null;
         if (modeRef.current === "idle") {
@@ -79,7 +82,7 @@ export function SwipeableQueueRow({
           }
           onLongPress(startX, startY);
         }
-      }, 450);
+      }, delayMs);
     }
   };
 

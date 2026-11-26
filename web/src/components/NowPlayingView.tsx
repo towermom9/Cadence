@@ -16,7 +16,6 @@ import {
   ChevronRight,
   Equal,
   GripVertical,
-  Headphones,
   ListPlus,
   Loader2,
   MessageSquareText,
@@ -51,6 +50,7 @@ import type {
   TrackDTO,
   UserPreferencesDTO,
 } from "@shared/types";
+import { useVolumeControl } from "../hooks/useVolumeControl";
 import { formatMs, sourceLabel } from "../utils/format";
 import { parseSyncedLyrics, stripInlineTags } from "../utils/lrc";
 import { ArtistLinks } from "./ArtistLinks";
@@ -85,6 +85,9 @@ interface Props {
   showArtworkSeekButtons: boolean;
   artworkSeekSeconds: number;
   lyricsAutoScroll: boolean;
+  longPressMs?: number;
+  mobileSheetExpanded?: boolean;
+  onMobileSheetExpandedChange?: (expanded: boolean) => void;
   likedTrackIds: Set<string>;
   onTabChange: (tab: NowPlayingTab) => void;
   onCloseMobile?: () => void;
@@ -132,6 +135,9 @@ export function NowPlayingView({
   showArtworkSeekButtons,
   artworkSeekSeconds,
   lyricsAutoScroll,
+  longPressMs = 450,
+  mobileSheetExpanded: mobileSheetExpandedProp,
+  onMobileSheetExpandedChange,
   likedTrackIds,
   onTabChange,
   onCloseMobile,
@@ -176,69 +182,40 @@ export function NowPlayingView({
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
-  const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
+  const [internalSheetExpanded, setInternalSheetExpanded] = useState(false);
+  const isControlledSheet = typeof mobileSheetExpandedProp === "boolean";
+  const mobileSheetExpanded = isControlledSheet ? mobileSheetExpandedProp : internalSheetExpanded;
+  const setMobileSheetExpanded = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      const resolved = typeof next === "function" ? next(mobileSheetExpanded) : next;
+      if (!isControlledSheet) {
+        setInternalSheetExpanded(resolved);
+      }
+      onMobileSheetExpandedChange?.(resolved);
+    },
+    [isControlledSheet, mobileSheetExpanded, onMobileSheetExpandedChange]
+  );
   const [mobileVolumeOpen, setMobileVolumeOpen] = useState(false);
-  const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
-  const [mobileVolDraft, setMobileVolDraft] = useState(() => String(playerState?.volume ?? 100));
-  const [isEditingMobileVol, setIsEditingMobileVol] = useState(false);
   const [mobileScrub, setMobileScrub] = useState<number | null>(null);
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const [sheetDragOffsetY, setSheetDragOffsetY] = useState<number | null>(null);
+  const [artworkSwipeOffsetX, setArtworkSwipeOffsetX] = useState(0);
   const sheetSwipeStartYRef = useRef<number | null>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetDraggedRef = useRef(false);
-  const isDraggingMobileVolRef = useRef(false);
-  const lastMobileVolSentAtRef = useRef(0);
-  const pendingMobileVolRef = useRef<number | null>(null);
-  const mobileVolThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const artTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const artGestureRef = useRef<"idle" | "swipe-x" | "swipe-y">("idle");
   const justDraggedRef = useRef(false);
   const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const sendMobileVolumeThrottled = useCallback(
-    (vol: number) => {
-      const clamped = Math.max(0, Math.min(100, Math.round(vol)));
-      const now = performance.now();
-      const elapsed = now - lastMobileVolSentAtRef.current;
-      if (elapsed >= 150) {
-        if (mobileVolThrottleRef.current) {
-          clearTimeout(mobileVolThrottleRef.current);
-          mobileVolThrottleRef.current = null;
-        }
-        pendingMobileVolRef.current = null;
-        lastMobileVolSentAtRef.current = now;
-        onVolume(clamped);
-        return;
-      }
-      pendingMobileVolRef.current = clamped;
-      if (!mobileVolThrottleRef.current) {
-        mobileVolThrottleRef.current = setTimeout(() => {
-          mobileVolThrottleRef.current = null;
-          if (pendingMobileVolRef.current !== null) {
-            const next = pendingMobileVolRef.current;
-            pendingMobileVolRef.current = null;
-            lastMobileVolSentAtRef.current = performance.now();
-            onVolume(next);
-          }
-        }, Math.max(16, 150 - elapsed));
-      }
-    },
-    [onVolume]
-  );
-
-  const commitMobileVolDraft = useCallback(() => {
-    setIsEditingMobileVol(false);
-    const parsed = Number.parseInt(mobileVolDraft.trim(), 10);
-    if (!Number.isFinite(parsed)) {
-      setMobileVolDraft(String(mobileVolume));
-      return;
-    }
-    const clamped = Math.max(0, Math.min(100, parsed));
-    setMobileVolume(clamped);
-    setMobileVolDraft(String(clamped));
-    onVolume(clamped);
-  }, [mobileVolDraft, mobileVolume, onVolume]);
+  const privileged = Boolean(playerState?.isPrivileged);
+  const mobileVol = useVolumeControl({
+    serverVolume: playerState?.volume ?? 100,
+    disabled: !privileged,
+    onCommit: onVolume,
+  });
 
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const queueScrollRef = useRef<HTMLDivElement>(null);
@@ -252,7 +229,6 @@ export function NowPlayingView({
   const queue = playerState?.queue ?? [];
   const autoplayEnabled = Boolean(playerState?.autoplay);
   const autoplayMood = playerState?.autoplayMood ?? "all";
-  const privileged = Boolean(playerState?.isPrivileged);
   const stepSeconds = Math.max(5, Math.min(30, Math.round(artworkSeekSeconds || 10)));
   const resolvedQueueName =
     playerState?.queueName || current?.title || playerState?.guildName || "Queue";
@@ -523,12 +499,6 @@ export function NowPlayingView({
     [handleTimelineDrop, resetDragState]
   );
 
-  useEffect(() => {
-    if (!isDraggingMobileVolRef.current && typeof playerState?.volume === "number") {
-      setMobileVolume(playerState.volume);
-    }
-  }, [playerState?.volume]);
-
   const { manualEntries, autoplayEntries } = useMemo(() => {
     const manual: { track: TrackDTO; queueIndex: number }[] = [];
     const auto: { track: TrackDTO; queueIndex: number }[] = [];
@@ -732,8 +702,8 @@ export function NowPlayingView({
       const startY = sheetSwipeStartYRef.current;
       const curY = e.touches[0]?.clientY;
       if (startY === null || typeof curY !== "number") return;
-      const sheetH = sheetContainerRef.current?.offsetHeight || 520;
-      const maxOffset = Math.max(120, sheetH - 56);
+      const sheetH = sheetContainerRef.current?.offsetHeight || 640;
+      const maxOffset = Math.max(120, sheetH - 64);
       const dy = curY - startY;
       if (Math.abs(dy) > 6) {
         sheetDraggedRef.current = true;
@@ -760,7 +730,7 @@ export function NowPlayingView({
         setMobileSheetExpanded(false);
       }
     },
-    []
+    [setMobileSheetExpanded]
   );
 
   const mobileSheetY =
@@ -768,39 +738,21 @@ export function NowPlayingView({
       ? `${sheetDragOffsetY}px`
       : mobileSheetExpanded
         ? "0px"
-        : "calc(100% - 56px)";
+        : "calc(100% - 64px)";
+
+  const mobileProgressPct =
+    duration > 0 ? Math.min(100, Math.max(0, (clampedMobilePos / duration) * 100)) : 0;
 
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10">
-      {ambienceMode && current && !mobileSheetExpanded && (
+      {ambienceMode && current && (
         <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
           <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
         </div>
       )}
-      {ambienceMode && current && mobileSheetExpanded && (
-        <div className="pointer-events-none absolute inset-0 -z-0 hidden overflow-hidden opacity-25 blur-3xl lg:block">
-          <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
-        </div>
-      )}
 
-      {/* Left Clean Artwork Column (Desktop) + YT Music Mobile Full Player / Compact Sheet Hero (< lg) */}
-      <div
-        className={`relative z-10 flex min-h-0 flex-col lg:col-span-7 lg:justify-center ${
-          mobileSheetExpanded ? "shrink-0 overflow-hidden" : "flex-1 justify-between lg:flex-initial"
-        }`}
-      >
-        {/* Mobile Expanded Top Hero Artwork Backdrop */}
-        {mobileSheetExpanded && current && (
-          <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
-            <TrackArtwork
-              track={current}
-              className="h-full w-full scale-105 opacity-45"
-              iconClassName="h-16 w-16"
-            />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/75 to-[#111111]" />
-          </div>
-        )}
-
+      {/* Left Clean Artwork Column (Desktop) + Full Mobile Player (< lg) */}
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-between lg:col-span-7 lg:flex-initial lg:justify-center">
         {/* Mobile Top Bar (< lg) */}
         <div
           onTouchStart={(e) => {
@@ -821,49 +773,20 @@ export function NowPlayingView({
         >
           <button
             type="button"
-            onClick={() => {
-              if (mobileSheetExpanded) {
-                setMobileSheetExpanded(false);
-              } else {
-                onCloseMobile?.();
-              }
-            }}
-            aria-label={mobileSheetExpanded ? "Collapse queue sheet" : "Minimize Now Playing"}
+            onClick={() => onCloseMobile?.()}
+            aria-label="Minimize Now Playing"
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10"
           >
             <ChevronDown className="h-5 w-5" />
           </button>
 
-          <div className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 backdrop-blur-sm">
-            <button
-              type="button"
-              data-inline-btn="true"
-              onClick={() => setMobileSheetExpanded(false)}
-              aria-label="Song view"
-              className={`inline-flex h-7 w-10 items-center justify-center rounded-full transition ${
-                !mobileSheetExpanded
-                  ? "bg-white/20 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              <Headphones className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              data-inline-btn="true"
-              onClick={() => {
-                onTabChange("lyrics");
-                setMobileSheetExpanded(true);
-              }}
-              aria-label="Lyrics view"
-              className={`inline-flex h-7 w-10 items-center justify-center rounded-full transition ${
-                mobileSheetExpanded && activeTab === "lyrics"
-                  ? "bg-white/20 text-white"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              <MessageSquareText className="h-3.5 w-3.5" />
-            </button>
+          <div className="min-w-0 flex-1 text-center">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+              Playing from
+            </p>
+            <p className="truncate text-xs font-semibold text-zinc-100">
+              {resolvedQueueName}
+            </p>
           </div>
 
           <div className="flex items-center gap-0.5">
@@ -875,7 +798,11 @@ export function NowPlayingView({
               style={mobileVolumeOpen ? { color: "var(--cadence-accent)" } : undefined}
               className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10 disabled:opacity-35"
             >
-              {mobileVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              {mobileVol.localVolume === 0 ? (
+                <VolumeX className="h-4 w-4" />
+              ) : (
+                <Volume2 className="h-4 w-4" />
+              )}
             </button>
             <button
               type="button"
@@ -889,14 +816,8 @@ export function NowPlayingView({
           </div>
         </div>
 
-        <div
-          className={`mx-auto flex w-full flex-col items-center lg:max-w-[460px] ${
-            mobileSheetExpanded
-              ? "px-4 pb-2 pt-0.5 lg:px-0 lg:pb-0 lg:pt-0"
-              : "flex-1 justify-between px-5 pb-16 pt-2 lg:flex-initial lg:justify-center lg:p-0"
-          }`}
-        >
-          {/* Centered Artwork (Full on collapsed mobile + always on Desktop) */}
+        <div className="mx-auto flex w-full flex-1 flex-col items-center justify-between px-5 pb-20 pt-2 lg:max-w-[460px] lg:flex-initial lg:justify-center lg:p-0">
+          {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean art + swipe prev/next/close) */}
           <div
             role={current ? "button" : undefined}
             tabIndex={current ? 0 : undefined}
@@ -911,7 +832,63 @@ export function NowPlayingView({
               current ? (playerState?.paused ? "Click to play" : "Click to pause") : undefined
             }
             onClick={() => {
-              if (current) onTogglePause();
+              if (!current) return;
+              if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
+                return;
+              }
+              onTogglePause();
+            }}
+            onTouchStart={(e) => {
+              if (e.touches.length !== 1) return;
+              if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
+                return;
+              }
+              const t = e.touches[0];
+              artTouchStartRef.current = { x: t.clientX, y: t.clientY };
+              artGestureRef.current = "idle";
+            }}
+            onTouchMove={(e) => {
+              const start = artTouchStartRef.current;
+              if (!start || e.touches.length !== 1) return;
+              const t = e.touches[0];
+              const dx = t.clientX - start.x;
+              const dy = t.clientY - start.y;
+              if (artGestureRef.current === "idle") {
+                if (current && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+                  artGestureRef.current = "swipe-x";
+                } else if (dy > 14 && dy > Math.abs(dx) * 1.2) {
+                  artGestureRef.current = "swipe-y";
+                }
+              }
+              if (artGestureRef.current === "swipe-x") {
+                setArtworkSwipeOffsetX(Math.max(-96, Math.min(96, dx * 0.55)));
+              }
+            }}
+            onTouchEnd={(e) => {
+              const start = artTouchStartRef.current;
+              const gesture = artGestureRef.current;
+              artTouchStartRef.current = null;
+              artGestureRef.current = "idle";
+              setArtworkSwipeOffsetX(0);
+              if (!start) return;
+              const endTouch = e.changedTouches[0];
+              if (!endTouch) return;
+              const dx = endTouch.clientX - start.x;
+              const dy = endTouch.clientY - start.y;
+              if (gesture === "swipe-x" && current) {
+                if (dx < -55) {
+                  onSkip();
+                } else if (dx > 55) {
+                  onPrevious();
+                }
+              } else if (gesture === "swipe-y" && dy > 65) {
+                onCloseMobile?.();
+              }
+            }}
+            onTouchCancel={() => {
+              artTouchStartRef.current = null;
+              artGestureRef.current = "idle";
+              setArtworkSwipeOffsetX(0);
             }}
             onKeyDown={(e) => {
               if (!current) return;
@@ -924,18 +901,21 @@ export function NowPlayingView({
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            className={`group relative aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
-              current ? "cursor-pointer" : ""
-            } ${mobileSheetExpanded ? "hidden lg:block" : "my-auto block"}`}
+            style={{
+              transform: artworkSwipeOffsetX !== 0 ? `translateX(${artworkSwipeOffsetX}px)` : undefined,
+            }}
+            className={`group relative my-auto block aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
+              current ? "lg:cursor-pointer" : ""
+            } ${artworkSwipeOffsetX === 0 ? "transition-transform duration-200 ease-out" : ""}`}
           >
             <TrackArtwork
               track={current}
-              className="h-full w-full transition duration-200 group-hover:brightness-90"
+              className="h-full w-full transition duration-200 lg:group-hover:brightness-90"
               iconClassName="h-20 w-20"
             />
             {current && (
               <div
-                className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-4 transition-opacity duration-150 sm:gap-5 ${
+                className={`pointer-events-none absolute inset-0 hidden items-center justify-center gap-4 transition-opacity duration-150 sm:gap-5 lg:flex ${
                   playerState?.paused
                     ? "bg-black/35 opacity-100"
                     : "bg-black/25 opacity-0 group-hover:opacity-100"
@@ -991,7 +971,7 @@ export function NowPlayingView({
           </div>
 
           {/* Mobile Controls (< lg) */}
-          <div className={`w-full lg:hidden ${mobileSheetExpanded ? "space-y-1.5" : "mt-4 space-y-3.5"}`}>
+          <div className="mt-4 w-full space-y-3.5 lg:hidden">
             {current ? (
               <>
                 {/* Title & Artist */}
@@ -1002,11 +982,7 @@ export function NowPlayingView({
                     onClick={() => primaryArtist && onOpenArtist(primaryArtist)}
                     className="flex max-w-full items-center gap-1 text-left"
                   >
-                    <h2
-                      className={`truncate font-bold tracking-tight text-white ${
-                        mobileSheetExpanded ? "text-lg" : "text-[22px] leading-tight"
-                      }`}
-                    >
+                    <h2 className="truncate text-[22px] font-bold leading-tight tracking-tight text-white">
                       {current.title}
                     </h2>
                     <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -1017,98 +993,96 @@ export function NowPlayingView({
                   </p>
                 </div>
 
-                {/* Horizontal Pill Actions Strip (shown when collapsed) */}
-                {!mobileSheetExpanded && (
-                  <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
-                    <button
-                      type="button"
-                      disabled={current.isStream}
-                      onClick={() => onToggleLike(current)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
-                        likedTrackIds.has(current.identifier)
-                          ? "bg-white text-black"
-                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
+                {/* Horizontal Pill Actions Strip */}
+                <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
+                  <button
+                    type="button"
+                    disabled={current.isStream}
+                    onClick={() => onToggleLike(current)}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
+                      likedTrackIds.has(current.identifier)
+                        ? "bg-white text-black"
+                        : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
+                    }`}
+                  >
+                    <ThumbsUp
+                      className={`h-3.5 w-3.5 ${
+                        likedTrackIds.has(current.identifier) ? "fill-current" : ""
                       }`}
-                    >
-                      <ThumbsUp
-                        className={`h-3.5 w-3.5 ${
-                          likedTrackIds.has(current.identifier) ? "fill-current" : ""
-                        }`}
-                      />
-                      <span>{likedTrackIds.has(current.identifier) ? "Liked" : "Like"}</span>
-                    </button>
+                    />
+                    <span>{likedTrackIds.has(current.identifier) ? "Liked" : "Like"}</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTabChange("lyrics");
-                        setMobileSheetExpanded(true);
-                      }}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                    >
-                      <MessageSquareText className="h-3.5 w-3.5" />
-                      <span>Lyrics</span>
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onTabChange("lyrics");
+                      setMobileSheetExpanded(true);
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                  >
+                    <MessageSquareText className="h-3.5 w-3.5" />
+                    <span>Lyrics</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => onOpenSaveModal([current])}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                    >
-                      <ListPlus className="h-3.5 w-3.5" />
-                      <span>Save</span>
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenSaveModal([current])}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                  >
+                    <ListPlus className="h-3.5 w-3.5" />
+                    <span>Save</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      disabled={!privileged}
-                      onClick={() => setMobileVolumeOpen((v) => !v)}
-                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
-                        mobileVolumeOpen
-                          ? "bg-white text-black"
-                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
-                      }`}
-                    >
-                      {mobileVolume === 0 ? (
-                        <VolumeX className="h-3.5 w-3.5" />
-                      ) : (
-                        <Volume2 className="h-3.5 w-3.5" />
-                      )}
-                      <span>{mobileVolume}%</span>
-                    </button>
+                  <button
+                    type="button"
+                    disabled={!privileged}
+                    onClick={() => setMobileVolumeOpen((v) => !v)}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
+                      mobileVolumeOpen
+                        ? "bg-white text-black"
+                        : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
+                    }`}
+                  >
+                    {mobileVol.localVolume === 0 ? (
+                      <VolumeX className="h-3.5 w-3.5" />
+                    ) : (
+                      <Volume2 className="h-3.5 w-3.5" />
+                    )}
+                    <span>{mobileVol.localVolume}%</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => onStartMix(current)}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                    >
-                      <Radio className="h-3.5 w-3.5" />
-                      <span>Mix</span>
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => onStartMix(current)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                  >
+                    <Radio className="h-3.5 w-3.5" />
+                    <span>Mix</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onTabChange("related");
-                        setMobileSheetExpanded(true);
-                      }}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                    >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      <span>Related</span>
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onTabChange("related");
+                      setMobileSheetExpanded(true);
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>Related</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      disabled={!privileged}
-                      onClick={onStop}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40"
-                    >
-                      <PhoneOff className="h-3.5 w-3.5" />
-                      <span>Leave</span>
-                    </button>
-                  </div>
-                )}
+                  <button
+                    type="button"
+                    disabled={!privileged}
+                    onClick={onStop}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40"
+                  >
+                    <PhoneOff className="h-3.5 w-3.5" />
+                    <span>Leave</span>
+                  </button>
+                </div>
 
                 {/* Collapsible Inline Mobile Volume Control */}
                 {mobileVolumeOpen && (
@@ -1116,16 +1090,11 @@ export function NowPlayingView({
                     <button
                       type="button"
                       disabled={!privileged}
-                      onClick={() => {
-                        const next = mobileVolume === 0 ? 100 : 0;
-                        setMobileVolume(next);
-                        setMobileVolDraft(String(next));
-                        onVolume(next);
-                      }}
+                      onClick={mobileVol.toggleMute}
                       className="text-zinc-300 disabled:opacity-40"
                       aria-label="Toggle mute"
                     >
-                      {mobileVolume === 0 ? (
+                      {mobileVol.localVolume === 0 ? (
                         <VolumeX className="h-4 w-4" />
                       ) : (
                         <Volume2 className="h-4 w-4" />
@@ -1135,39 +1104,13 @@ export function NowPlayingView({
                       type="range"
                       min={0}
                       max={100}
-                      value={mobileVolume}
+                      value={mobileVol.localVolume}
                       disabled={!privileged}
-                      onPointerDown={() => {
-                        isDraggingMobileVolRef.current = true;
-                      }}
-                      onPointerUp={() => {
-                        isDraggingMobileVolRef.current = false;
-                        if (pendingMobileVolRef.current !== null) {
-                          const finalVol = pendingMobileVolRef.current;
-                          pendingMobileVolRef.current = null;
-                          if (mobileVolThrottleRef.current) {
-                            clearTimeout(mobileVolThrottleRef.current);
-                            mobileVolThrottleRef.current = null;
-                          }
-                          lastMobileVolSentAtRef.current = performance.now();
-                          onVolume(finalVol);
-                        }
-                      }}
-                      onTouchEnd={() => {
-                        isDraggingMobileVolRef.current = false;
-                        if (pendingMobileVolRef.current !== null) {
-                          const finalVol = pendingMobileVolRef.current;
-                          pendingMobileVolRef.current = null;
-                          lastMobileVolSentAtRef.current = performance.now();
-                          onVolume(finalVol);
-                        }
-                      }}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setMobileVolume(val);
-                        setMobileVolDraft(String(val));
-                        sendMobileVolumeThrottled(val);
-                      }}
+                      onPointerDown={mobileVol.handleSliderPointerDown}
+                      onPointerUp={mobileVol.handleSliderCommit}
+                      onPointerCancel={mobileVol.handleSliderCommit}
+                      onBlur={mobileVol.handleSliderCommit}
+                      onChange={(e) => mobileVol.handleSliderChange(Number(e.target.value))}
                       style={{ accentColor: "var(--cadence-accent)" }}
                       aria-label="Mobile volume slider"
                       className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
@@ -1178,23 +1121,14 @@ export function NowPlayingView({
                         inputMode="numeric"
                         aria-label="Mobile volume percentage"
                         disabled={!privileged}
-                        value={isEditingMobileVol ? mobileVolDraft : String(mobileVolume)}
+                        value={mobileVol.draft}
                         onFocus={(e) => {
-                          setIsEditingMobileVol(true);
-                          setMobileVolDraft(String(mobileVolume));
+                          mobileVol.startEditing();
                           e.currentTarget.select();
                         }}
-                        onChange={(e) => setMobileVolDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-                        onBlur={commitMobileVolDraft}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            setIsEditingMobileVol(false);
-                            setMobileVolDraft(String(mobileVolume));
-                            e.currentTarget.blur();
-                          }
-                        }}
+                        onChange={(e) => mobileVol.updateDraft(e.target.value)}
+                        onBlur={mobileVol.commitDraft}
+                        onKeyDown={mobileVol.handleDraftKeyDown}
                         className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
                       />
                       <span className="ml-0.5 text-[11px] text-zinc-400">%</span>
@@ -1253,14 +1187,12 @@ export function NowPlayingView({
                     type="button"
                     onClick={onTogglePause}
                     title={playerState?.paused ? "Play" : "Pause"}
-                    className={`flex items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95 ${
-                      mobileSheetExpanded ? "h-12 w-12" : "h-16 w-16"
-                    }`}
+                    className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
                   >
                     {playerState?.paused ? (
-                      <Play className={`ml-0.5 fill-current ${mobileSheetExpanded ? "h-5 w-5" : "h-7 w-7"}`} />
+                      <Play className="ml-0.5 h-7 w-7 fill-current" />
                     ) : (
-                      <Pause className={`fill-current ${mobileSheetExpanded ? "h-5 w-5" : "h-7 w-7"}`} />
+                      <Pause className="h-7 w-7 fill-current" />
                     )}
                   </button>
                   <button
@@ -1286,7 +1218,6 @@ export function NowPlayingView({
                     )}
                   </button>
                 </div>
-
               </>
             ) : (
               <div className="space-y-3 py-6 text-center">
@@ -1297,48 +1228,141 @@ export function NowPlayingView({
         </div>
       </div>
 
-      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Sliding Mobile Bottom Sheet) */}
+      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Full-Screen Sliding Mobile Sheet) */}
       <div
         ref={sheetContainerRef}
         style={{ "--mobile-sheet-y": mobileSheetY } as CSSProperties}
-        className={`mobile-queue-sheet absolute inset-x-0 bottom-0 top-[210px] z-20 flex min-h-0 flex-col rounded-t-2xl border-t border-white/10 bg-[#121212]/95 px-4 pt-1 backdrop-blur-md will-change-transform lg:static lg:inset-auto lg:top-auto lg:z-10 lg:col-span-5 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none ${
+        className={`mobile-queue-sheet absolute inset-0 z-20 flex min-h-0 flex-col border-t border-white/10 bg-[#121212]/95 px-4 pt-1 backdrop-blur-md will-change-transform lg:static lg:inset-auto lg:z-10 lg:col-span-5 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none ${
+          mobileSheetExpanded && sheetDragOffsetY === null ? "rounded-none" : "rounded-t-2xl"
+        } ${
           sheetDragOffsetY === null
             ? "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
             : ""
         }`}
       >
-        {/* Mobile Sheet Grab Handle + Collapsed Peek Label */}
-        <button
-          type="button"
-          data-inline-btn="true"
-          onClick={() => {
-            if (sheetDraggedRef.current) {
-              sheetDraggedRef.current = false;
-              return;
-            }
-            if (!mobileSheetExpanded) {
-              onTabChange("upnext");
-              setMobileSheetExpanded(true);
-            } else {
-              setMobileSheetExpanded(false);
-            }
-          }}
-          onTouchStart={handleSheetHandleTouchStart}
-          onTouchMove={handleSheetHandleTouchMove}
-          onTouchEnd={handleSheetHandleTouchEnd}
-          onTouchCancel={handleSheetHandleTouchEnd}
-          aria-label={mobileSheetExpanded ? "Collapse queue sheet" : "Expand queue sheet"}
-          className="touch-none mx-auto mb-1 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2 text-center lg:hidden"
-        >
-          <span className="h-1 w-10 rounded-full bg-white/30" />
-          {!mobileSheetExpanded && (
-            <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
-              {resolvedQueueName}
-            </span>
-          )}
-        </button>
+        {/* Mobile Collapsed Bottom Dock vs Expanded Mini-Player Header (< lg) */}
+        {mobileSheetExpanded ? (
+          <div
+            onTouchStart={handleSheetHandleTouchStart}
+            onTouchMove={handleSheetHandleTouchMove}
+            onTouchEnd={handleSheetHandleTouchEnd}
+            onTouchCancel={handleSheetHandleTouchEnd}
+            className="touch-none -mx-4 shrink-0 border-b border-white/10 px-4 pt-1.5 lg:hidden"
+          >
+            <div className="mx-auto mb-1.5 h-1 w-10 rounded-full bg-white/30" />
+            <div className="flex items-center gap-2.5 pb-2">
+              <button
+                type="button"
+                data-inline-btn="true"
+                onClick={() => {
+                  if (sheetDraggedRef.current) {
+                    sheetDraggedRef.current = false;
+                    return;
+                  }
+                  setMobileSheetExpanded(false);
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+              >
+                <TrackArtwork
+                  track={current}
+                  className="h-10 w-10 shrink-0 rounded-lg"
+                  iconClassName="h-4 w-4"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-white">
+                    {current ? current.title : resolvedQueueName}
+                  </p>
+                  <p className="truncate text-xs text-zinc-400">
+                    {current ? current.author : "Nothing playing"}
+                  </p>
+                </div>
+              </button>
 
-        <div className="flex shrink-0 items-center border-b border-white/10">
+              <div className="flex shrink-0 items-center gap-0.5">
+                <button
+                  type="button"
+                  disabled={!current}
+                  onClick={onTogglePause}
+                  aria-label={playerState?.paused ? "Play" : "Pause"}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:bg-white/10 disabled:opacity-40"
+                >
+                  {playerState?.paused ? (
+                    <Play className="ml-0.5 h-5 w-5 fill-current" />
+                  ) : (
+                    <Pause className="h-5 w-5 fill-current" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={!current}
+                  onClick={onSkip}
+                  aria-label="Skip track"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
+                >
+                  <SkipForward className="h-4 w-4 fill-current" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMobileSheetExpanded(false)}
+                  aria-label="Collapse sheet"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  <ChevronDown className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="h-[2px] w-full bg-white/10">
+              <div
+                style={{ width: `${mobileProgressPct}%` }}
+                className="h-full bg-[var(--cadence-accent)]"
+              />
+            </div>
+          </div>
+        ) : (
+          <div
+            onTouchStart={handleSheetHandleTouchStart}
+            onTouchMove={handleSheetHandleTouchMove}
+            onTouchEnd={handleSheetHandleTouchEnd}
+            onTouchCancel={handleSheetHandleTouchEnd}
+            className="touch-none shrink-0 pt-1.5 pb-1 lg:hidden"
+          >
+            <div className="mx-auto mb-1.5 h-1 w-10 rounded-full bg-white/30" />
+            <div className="flex items-center">
+              {(
+                [
+                  { id: "upnext", label: "Up next" },
+                  { id: "lyrics", label: "Lyrics" },
+                  { id: "related", label: "Related" },
+                ] as const
+              ).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-inline-btn="true"
+                  onClick={() => {
+                    if (sheetDraggedRef.current) {
+                      sheetDraggedRef.current = false;
+                      return;
+                    }
+                    onTabChange(item.id);
+                    setMobileSheetExpanded(true);
+                  }}
+                  className={`flex-1 py-2 text-center text-xs font-semibold uppercase tracking-wider transition ${
+                    activeTab === item.id ? "text-white" : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div
+          className={`${
+            mobileSheetExpanded || sheetDragOffsetY !== null ? "flex" : "hidden lg:flex"
+          } shrink-0 items-center border-b border-white/10`}
+        >
           {(
             [
               { id: "upnext", label: "Up next" },
@@ -1432,6 +1456,7 @@ export function NowPlayingView({
                   <SwipeableQueueRow
                     key={`prev-${track.identifier}-${prevIndex}`}
                     swipeEnabled={privileged}
+                    longPressMs={longPressMs}
                     onSwipeRemove={() => onRemovePreviousTrack(prevIndex)}
                     onLongPress={(x, y) => openTrackMenuAt(x, y, track, { previousIndex: prevIndex })}
                     className="rounded-lg"
@@ -1631,6 +1656,7 @@ export function NowPlayingView({
                 return (
                   <SwipeableQueueRow
                     swipeEnabled={false}
+                    longPressMs={longPressMs}
                     onLongPress={(x, y) => openTrackMenuAt(x, y, current, { isCurrent: true })}
                     className="rounded-lg"
                   >
@@ -1845,6 +1871,7 @@ export function NowPlayingView({
                   <SwipeableQueueRow
                     key={`q-${track.identifier}-${queueIndex}`}
                     swipeEnabled={privileged}
+                    longPressMs={longPressMs}
                     onSwipeRemove={() => onRemoveTrack(queueIndex)}
                     onLongPress={(x, y) => openTrackMenuAt(x, y, track, { queueIndex })}
                     className="rounded-lg"
@@ -2120,7 +2147,7 @@ export function NowPlayingView({
                   <div className="mt-3.5 space-y-2.5">
                     <p className="text-sm font-medium text-zinc-400">Autoplay is on</p>
 
-                    <div className="flex items-center gap-2 overflow-x-auto pb-1.5">
+                    <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1.5">
                       {AUTOPLAY_MOODS.map((chip) => {
                         const selected = autoplayMood === chip.id;
                         return (
@@ -2158,6 +2185,7 @@ export function NowPlayingView({
                       <SwipeableQueueRow
                         key={`auto-${track.identifier}-${queueIndex}`}
                         swipeEnabled={privileged}
+                        longPressMs={longPressMs}
                         onSwipeRemove={() => onRemoveTrack(queueIndex)}
                         onLongPress={(x, y) => openTrackMenuAt(x, y, track, { queueIndex })}
                         className="rounded-lg"
@@ -2391,7 +2419,7 @@ export function NowPlayingView({
                   </div>
                 </div>
 
-                <div className="relative flex min-h-0 max-h-[60vh] flex-1 flex-col lg:max-h-none">
+                <div className="relative flex min-h-0 flex-1 flex-col">
                   <div
                     ref={lyricsContainerRef}
                     onWheel={handleManualLyricsScroll}

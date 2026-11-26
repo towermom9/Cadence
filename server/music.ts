@@ -595,14 +595,16 @@ export class MusicService {
     }
 
     const settings = this.db.getGuildSettings(guildId);
+    const initialLavalinkVol = uiVolumeToLavalink(settings.defaultVolume);
     this.uiVolumes.set(guildId, settings.defaultVolume);
+    this.lastSentLavalinkVolume.set(guildId, initialLavalinkVol);
     const player = this.manager.createPlayer({
       guildId,
       voiceChannelId,
       textChannelId: textChannelId || voiceChannelId,
       selfDeaf: true,
       selfMute: false,
-      volume: uiVolumeToLavalink(settings.defaultVolume),
+      volume: initialLavalinkVol,
       instaUpdateFiltersFix: true,
     });
 
@@ -1340,8 +1342,8 @@ export class MusicService {
     try {
       while (true) {
         const elapsed = Date.now() - (this.lastVolumeRpcAt.get(guildId) ?? 0);
-        if (elapsed < 120) {
-          await new Promise((resolve) => setTimeout(resolve, 120 - elapsed));
+        if (elapsed < 180) {
+          await new Promise((resolve) => setTimeout(resolve, 180 - elapsed));
         }
         const targetUi = entry.target;
         const lavalinkVol = uiVolumeToLavalink(targetUi);

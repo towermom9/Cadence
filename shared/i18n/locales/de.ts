@@ -38,6 +38,8 @@ export const de: Record<I18nKey, string> = {
   "a11y.focusRings.desc": "Zeigt klare 3px-Fokusrahmen bei der Tastaturnavigation.",
   "a11y.touchTargets.title": "Groessere Touch-Ziele",
   "a11y.touchTargets.desc": "Sichert mindestens 44x44px Klickflaeche gemaess Material 3.",
+  "a11y.longPress.title": "Verzoegerung fuer langes Druecken",
+  "a11y.longPress.desc": "Lege fest, wie lange ein Titel auf Touchscreens gehalten werden muss, bis das Aktionsmenue oeffnet (200ms - 1200ms).",
   "a11y.srAnnounce.title": "Screenreader-Ansagen",
   "a11y.srAnnounce.desc": "Kuendigt Titelwechsel ueber eine hoefliche ARIA-Live-Region an.",
   "server.maxHistory.title": "Max. Wiedergabeverlauf",

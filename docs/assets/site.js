@@ -153,9 +153,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.2.2)",
-      path: "docs/reference/changelog/#v0-2-2",
-      content: "v0.2.2 v0.2.1 v0.2.0 v0.1.9 v0.1.8 swipe to remove longpress mobile action sheet slide up down animation now playing queue drawer.",
+      title: "Release Changelogs (v0.0.0 to v0.2.3)",
+      path: "docs/reference/changelog/#v0-2-3",
+      content: "v0.2.3 v0.2.2 v0.2.1 v0.2.0 v0.1.9 v0.1.8 volume debounce long-press detector slider accessibility mobile full-screen sheet hardware back button search enter hide horizontal scrollbar.",
     },
   ];
 

@@ -127,6 +127,7 @@ describe("server/db (isolated SQLite)", () => {
       textScale: 120,
       enhancedFocusRings: true,
       largerTouchTargets: true,
+      longPressMs: 750,
       screenReaderAnnouncements: false,
       locale: "ja",
     });
@@ -139,12 +140,19 @@ describe("server/db (isolated SQLite)", () => {
     expect(prefs.textScale).toBe(120);
     expect(prefs.enhancedFocusRings).toBe(true);
     expect(prefs.largerTouchTargets).toBe(true);
+    expect(prefs.longPressMs).toBe(750);
     expect(prefs.screenReaderAnnouncements).toBe(false);
     expect(prefs.locale).toBe("ja");
 
     const reloaded = db.getUserPreferences("a11y-user");
     expect(reloaded.textScale).toBe(120);
+    expect(reloaded.longPressMs).toBe(750);
     expect(reloaded.locale).toBe("ja");
+
+    const clampedLow = db.updateUserPreferences("a11y-user", { longPressMs: 50 });
+    expect(clampedLow.longPressMs).toBe(200);
+    const clampedHigh = db.updateUserPreferences("a11y-user", { longPressMs: 5000 });
+    expect(clampedHigh.longPressMs).toBe(1200);
   });
 
   test("resets guild settings back to defaults cleanly", () => {

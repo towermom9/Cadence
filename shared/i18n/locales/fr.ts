@@ -38,6 +38,8 @@ export const fr: Record<I18nKey, string> = {
   "a11y.focusRings.desc": "Affiche des contours visibles de 3px lors de la navigation au clavier.",
   "a11y.touchTargets.title": "Zones Tactiles Plus Grandes",
   "a11y.touchTargets.desc": "Garantit des cibles d'au moins 44x44px selon Material 3.",
+  "a11y.longPress.title": "Delai d'appui long",
+  "a11y.longPress.desc": "Reglez la duree d'appui sur un titre sur ecran tactile avant d'ouvrir le menu d'actions (200ms - 1200ms).",
   "a11y.srAnnounce.title": "Annonces Lecteur d'Ecran",
   "a11y.srAnnounce.desc": "Annonce les changements de piste via une region ARIA live.",
   "server.maxHistory.title": "Historique de Lecture Maximal",

@@ -38,6 +38,8 @@ export const id: Record<I18nKey, string> = {
   "a11y.focusRings.desc": "Menampilkan garis fokus 3px beraksen tinggi saat navigasi dengan keyboard.",
   "a11y.touchTargets.title": "Target Sentuh Lebih Besar",
   "a11y.touchTargets.desc": "Menerapkan ukuran minimal 44x44px sesuai standar Material 3 pada tombol kontrol.",
+  "a11y.longPress.title": "Durasi Detektor Tekan Lama",
+  "a11y.longPress.desc": "Atur berapa lama menahan lagu di layar sentuh sebelum menu aksi terbuka (200ms - 1200ms).",
   "a11y.srAnnounce.title": "Pengumuman Pembaca Layar",
   "a11y.srAnnounce.desc": "Mengumumkan perubahan lagu dan status putar/jeda melalui wilayah ARIA live.",
   "server.maxHistory.title": "Batas Maksimal Riwayat Putar",

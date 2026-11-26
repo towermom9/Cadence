@@ -36,6 +36,8 @@ export const en = {
   "a11y.focusRings.desc": "Displays high-visibility 3px accent outlines around focused buttons, sliders, and links during keyboard navigation.",
   "a11y.touchTargets.title": "Larger Interactive Touch Targets",
   "a11y.touchTargets.desc": "Enforces Material 3 44x44px minimum target sizing on controls for comfortable pointer and touch ergonomics.",
+  "a11y.longPress.title": "Long-Press Detector Delay",
+  "a11y.longPress.desc": "Adjust how long to hold a track on touch screens before opening the action menu (200ms - 1200ms).",
   "a11y.srAnnounce.title": "Screen Reader Track Announcements",
   "a11y.srAnnounce.desc": "Announces newly started tracks and play/pause changes via a polite ARIA live region.",
   "server.maxHistory.title": "Max Play History Entries",

@@ -34,6 +34,7 @@ describe("web/src/utils/theme & WCAG contrast helpers", () => {
       customAccentHex: "#3EA6FF",
       customBgHex: "bad-hex",
       textScale: 999,
+      longPressMs: 5000,
       highContrast: true,
       locale: "de",
     });
@@ -41,7 +42,9 @@ describe("web/src/utils/theme & WCAG contrast helpers", () => {
     expect(clean.customAccentHex).toBe("#3ea6ff");
     expect(clean.customBgHex).toBeNull();
     expect(clean.textScale).toBe(130);
+    expect(clean.longPressMs).toBe(1200);
     expect(clean.highContrast).toBe(true);
     expect(clean.locale).toBe("de");
+    expect(DEFAULT_PREFERENCES.longPressMs).toBe(450);
   });
 });

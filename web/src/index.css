@@ -251,6 +251,15 @@ body,
   .mobile-queue-sheet {
     transform: translateY(var(--mobile-sheet-y, 0px));
   }
+
+  .overflow-x-auto {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .overflow-x-auto::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .sr-only {

@@ -72,6 +72,7 @@ export const DEFAULT_PREFERENCES: UserPreferencesDTO = {
   textScale: 100,
   enhancedFocusRings: false,
   largerTouchTargets: false,
+  longPressMs: 450,
   screenReaderAnnouncements: true,
   locale: "auto",
 };
@@ -186,6 +187,10 @@ export function sanitizePreferences(
     typeof raw.textScale === "number" && Number.isFinite(raw.textScale)
       ? Math.max(90, Math.min(130, Math.round(raw.textScale)))
       : 100;
+  const longPressMs =
+    typeof raw.longPressMs === "number" && Number.isFinite(raw.longPressMs)
+      ? Math.max(200, Math.min(1200, Math.round(raw.longPressMs)))
+      : 450;
   return {
     playlistSort: raw.playlistSort ?? DEFAULT_PREFERENCES.playlistSort,
     themeAccent:
@@ -228,6 +233,7 @@ export function sanitizePreferences(
     textScale,
     enhancedFocusRings: Boolean(raw.enhancedFocusRings),
     largerTouchTargets: Boolean(raw.largerTouchTargets),
+    longPressMs,
     screenReaderAnnouncements:
       typeof raw.screenReaderAnnouncements === "boolean" ? raw.screenReaderAnnouncements : true,
     locale: raw.locale && VALID_LOCALES.has(raw.locale) ? raw.locale : "auto",
