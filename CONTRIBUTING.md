@@ -59,14 +59,15 @@ Cadence/
 │   └── ws.ts                   # Real-time WebSocket hub (/ws)
 ├── shared/
 │   ├── artists.ts              # Multi-artist collaboration parser & "- Topic" cleaner
-│   ├── i18n/                   # BCP 47 locale catalogs (en, es, ja, id, de, fr) & translator
+│   ├── i18n/                   # Internationalization & Localization catalogs (en, es, ja, id, de, fr)
 │   ├── types.ts                # Shared DTOs and WebSocket client/server message contracts
 │   └── volume.ts               # Perceptual volume curve (x^1.6) conversion
 ├── tests/
 │   ├── artists.test.ts         # Artist parser & cleaner unit tests
 │   ├── bot.test.ts             # Slash command builder & 4-tier RBAC mocked Discord tests
 │   ├── db.test.ts              # Isolated SQLite persistence tests (temp DATA_DIR)
-│   ├── i18n.test.ts            # BCP 47 locale resolution & full catalog key parity tests
+│   ├── device.test.ts          # Tablet/desktop/mobile keyboard shortcut detection tests
+│   ├── i18n.test.ts            # Locale resolution & full translation catalog key parity tests
 │   ├── lrc.test.ts             # Synced LRC / ELRC parser unit tests
 │   ├── theme.test.ts           # Hex normalization, WCAG contrast math & preference sanitization
 │   └── volume.test.ts          # Perceptual volume curve rounding & clamping tests
@@ -75,10 +76,10 @@ Cadence/
     ├── vite.config.ts          # Vite bundler config (injects __CADENCE_VERSION__)
     └── src/
         ├── App.tsx             # Root layout, I18nProvider, skip link, aria-live & hotkeys
-        ├── i18n.tsx            # React i18n context synced with document.documentElement.lang
+        ├── i18n.tsx            # React localization context synced with document.documentElement.lang
         ├── components/         # React 19 UI views, NumericSlider, PlayerBar, SettingsView
         ├── hooks/              # useCadenceSocket real-time state & 60fps progress interpolation
-        └── utils/              # Theme accents, custom hex/WCAG math, LRC parser, playlists
+        └── utils/              # Theme accents, custom hex/WCAG math, device detection, LRC parser
 ```
 
 ---
@@ -193,9 +194,9 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 - **Accessibility Standards (Material 3 + W3C WAI / WCAG 2.2)**:
   - All new UI controls must support keyboard focus indicators (`:focus-visible`), semantic landmarks (`.skip-link` to `#main-content`), ARIA live track announcements, `>= 44x44px` minimum touch targets when **Larger Touch Targets** (`data-touch="large"`) is active, **High Contrast** (`data-contrast="high"`), **Reduced Motion** (`data-motion="reduced"`), and **Text Scale** (`90% - 130%`).
   - Use `<NumericSlider />` for configuration sliders so every range input pairs smoothly with direct keyboard numeric entry.
-- **Internationalization (`shared/i18n/`, `web/src/i18n.tsx`)**:
-  - Cadence uses **BCP 47** locale tags (`en`, `es`, `ja`, `id`, `de`, `fr`, plus `"auto"` browser detection) with ICU-style `{placeholder}` message catalogs in `shared/i18n/locales/`.
-  - To add a new language: add its BCP 47 code to `SupportedLocale` (`shared/types.ts`), create `shared/i18n/locales/<locale>.ts` with every key from `en.ts`, register it in `shared/i18n/index.ts`, and verify full key parity via `bun test tests/i18n.test.ts`.
+- **Internationalization & Localization ([LOCALIZATION.md](LOCALIZATION.md))**:
+  - Cadence follows BCP 47 (`RFC 5646`) language tags (`en`, `es`, `ja`, `id`, `de`, `fr`, plus `"auto"` browser detection) with ICU-style `{placeholder}` message catalogs in `shared/i18n/locales/`.
+  - Keep numeronyms (`i18n`, `l10n`) out of user-facing strings and UI copy, and verify full catalog parity via `bun test tests/i18n.test.ts`.
 - **Auto-Saving Server Settings (`SettingsView.tsx`)**: Switches and role pills save immediately; `Text Command Prefix` and sliders (`defaultVolume`, `maxHistory`, `pauseOnEmptySeconds`, `emptyVcDisconnectMinutes`) debounce for `350ms` via `commitServerPatch(..., { debounce: true })` and display an inline auto-save status badge in the Server header.
 - **No Em-Dashes:** Keep all UI copy, Discord embeds, and documentation free of literal em-dashes (`\u2014`); use hyphens (`-`).
 

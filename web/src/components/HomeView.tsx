@@ -29,6 +29,8 @@ interface Props {
   onReorderPinnedTracks: (trackIds: string[]) => void;
   onSelectPlaylist: (playlistId: string) => void;
   onPlayPlaylist: (playlistId: string) => void;
+  onTogglePinPlaylist: (playlistId: string) => void;
+  onCreatePlaylistWithTracks: (name: string, tracks: TrackDTO[], pin?: boolean) => void;
   onViewHistory: () => void;
   onClearHistory: () => void;
   onOpenArtist: (artistName: string) => void;
@@ -94,6 +96,8 @@ export function HomeView({
   onReorderPinnedTracks,
   onSelectPlaylist,
   onPlayPlaylist,
+  onTogglePinPlaylist,
+  onCreatePlaylistWithTracks,
   onViewHistory,
   onClearHistory,
   onOpenArtist,
@@ -213,6 +217,21 @@ export function HomeView({
       }
     }
 
+    for (const pl of playlists) {
+      if (!pl.isPinned || pl.isLiked) continue;
+      const norm = pl.name.trim().toLowerCase();
+      if (!norm || seenPlaylists.has(norm)) continue;
+      seenPlaylists.add(norm);
+      const historyTracks = historyTracksByPlaylist.get(norm) ?? [];
+      items.push({
+        kind: "playlist",
+        key: `playlist:${norm}`,
+        playlist: pl,
+        savedPlaylistId: pl.id,
+        tracks: pl.tracks.length > 0 ? pl.tracks : historyTracks,
+      });
+    }
+
     for (const entry of history) {
       const plName = entry.playlistName?.trim();
       if (plName) {
@@ -316,6 +335,7 @@ export function HomeView({
             {listenAgainItems.slice(0, 10).map((item) => {
               if (item.kind === "playlist") {
                 const { playlist, savedPlaylistId, tracks } = item;
+                const isPinnedPlaylist = Boolean(playlist.isPinned);
                 return (
                   <div
                     key={item.key}
@@ -338,7 +358,37 @@ export function HomeView({
                         playlist={playlist}
                         className="h-full w-full transition duration-300 group-hover:scale-105 group-hover:brightness-75"
                       />
-                      <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm">
+                      {!playlist.isLiked && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (savedPlaylistId) {
+                              onTogglePinPlaylist(savedPlaylistId);
+                            } else {
+                              onCreatePlaylistWithTracks(playlist.name, tracks, true);
+                            }
+                          }}
+                          title={
+                            isPinnedPlaylist
+                              ? "Unpin playlist from Listen again"
+                              : "Pin playlist to Listen again"
+                          }
+                          aria-label={
+                            isPinnedPlaylist
+                              ? "Unpin playlist from Listen again"
+                              : "Pin playlist to Listen again"
+                          }
+                          className={`absolute left-2.5 top-2.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/75 text-white shadow transition ${
+                            isPinnedPlaylist
+                              ? "opacity-100"
+                              : "opacity-100 sm:opacity-0 hover:bg-black sm:group-hover:opacity-100"
+                          }`}
+                        >
+                          <Pin className={`h-3.5 w-3.5 ${isPinnedPlaylist ? "fill-current" : ""}`} />
+                        </button>
+                      )}
+                      <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 rounded-full bg-black/75 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm">
                         <Disc3 className="h-3 w-3" />
                         {t("home.playlistLabel")}
                       </span>

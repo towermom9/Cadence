@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Accessibility,
   Check,
   ChevronDown,
   Copy,
@@ -34,9 +33,11 @@ import {
   THEME_ACCENTS,
   getContrastRatio,
   normalizeHexColor,
+  previewCustomColors,
 } from "../utils/theme";
 import { CadenceBanner, CadenceIcon } from "./CadenceBrand";
 import { NumericSlider } from "./NumericSlider";
+import { UniversalAccessIcon } from "./UniversalAccessIcon";
 
 interface Props {
   guildId: string | null;
@@ -202,7 +203,7 @@ export function SettingsView({
   onLoadSettings,
   onSaveSettings,
 }: Props) {
-  const { t, locale: resolvedLocale } = useI18n();
+  const { t } = useI18n();
   const canAccessServerSettings = isBotOwner || isGuildOwner || canManage;
   const canAccessSystemSettings = isBotOwner || isGuildOwner || canAccessSystem;
   const resolvedTier: AccessTier =
@@ -211,6 +212,104 @@ export function SettingsView({
   const [tab, setTab] = useState<SettingsTab>("appearance");
   const [advancedColorsOpen, setAdvancedColorsOpen] = useState(() =>
     Boolean(preferences.customAccentHex || preferences.customBgHex || preferences.customSurfaceHex)
+  );
+  const [draftAccentHex, setDraftAccentHex] = useState<string | null>(() =>
+    normalizeHexColor(preferences.customAccentHex)
+  );
+  const [draftBgHex, setDraftBgHex] = useState<string | null>(() =>
+    normalizeHexColor(preferences.customBgHex)
+  );
+  const [draftSurfaceHex, setDraftSurfaceHex] = useState<string | null>(() =>
+    normalizeHexColor(preferences.customSurfaceHex)
+  );
+  const colorCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const colorRafRef = useRef<number | null>(null);
+  const colorDraftsRef = useRef<{
+    customAccentHex: string | null;
+    customBgHex: string | null;
+    customSurfaceHex: string | null;
+  }>({
+    customAccentHex: normalizeHexColor(preferences.customAccentHex),
+    customBgHex: normalizeHexColor(preferences.customBgHex),
+    customSurfaceHex: normalizeHexColor(preferences.customSurfaceHex),
+  });
+  const isPickingColorRef = useRef(false);
+
+  useEffect(() => {
+    if (isPickingColorRef.current) return;
+    const nextAccent = normalizeHexColor(preferences.customAccentHex);
+    const nextBg = normalizeHexColor(preferences.customBgHex);
+    const nextSurface = normalizeHexColor(preferences.customSurfaceHex);
+    setDraftAccentHex(nextAccent);
+    setDraftBgHex(nextBg);
+    setDraftSurfaceHex(nextSurface);
+    colorDraftsRef.current = {
+      customAccentHex: nextAccent,
+      customBgHex: nextBg,
+      customSurfaceHex: nextSurface,
+    };
+  }, [preferences.customAccentHex, preferences.customBgHex, preferences.customSurfaceHex]);
+
+  useEffect(() => {
+    return () => {
+      if (colorCommitTimerRef.current) clearTimeout(colorCommitTimerRef.current);
+      if (colorRafRef.current !== null) cancelAnimationFrame(colorRafRef.current);
+    };
+  }, []);
+
+  const scheduleColorChange = useCallback(
+    (
+      key: "customAccentHex" | "customBgHex" | "customSurfaceHex",
+      rawHex: string
+    ) => {
+      const normalized = normalizeHexColor(rawHex);
+      if (!normalized) return;
+      isPickingColorRef.current = true;
+      colorDraftsRef.current = { ...colorDraftsRef.current, [key]: normalized };
+      if (key === "customAccentHex") setDraftAccentHex(normalized);
+      else if (key === "customBgHex") setDraftBgHex(normalized);
+      else setDraftSurfaceHex(normalized);
+
+      if (colorRafRef.current !== null) {
+        cancelAnimationFrame(colorRafRef.current);
+      }
+      const snapshot = { ...colorDraftsRef.current };
+      colorRafRef.current = requestAnimationFrame(() => {
+        colorRafRef.current = null;
+        previewCustomColors({
+          themeAccent: preferences.themeAccent,
+          backgroundMode: preferences.backgroundMode,
+          customAccentHex: snapshot.customAccentHex,
+          customBgHex: snapshot.customBgHex,
+          customSurfaceHex: snapshot.customSurfaceHex,
+        });
+      });
+
+      if (colorCommitTimerRef.current) {
+        clearTimeout(colorCommitTimerRef.current);
+      }
+      colorCommitTimerRef.current = setTimeout(() => {
+        colorCommitTimerRef.current = null;
+        isPickingColorRef.current = false;
+        onUpdatePreferences({ [key]: colorDraftsRef.current[key] });
+      }, 250);
+    },
+    [onUpdatePreferences, preferences.backgroundMode, preferences.themeAccent]
+  );
+
+  const flushColorCommit = useCallback(
+    (key: "customAccentHex" | "customBgHex" | "customSurfaceHex") => {
+      isPickingColorRef.current = false;
+      if (colorCommitTimerRef.current) {
+        clearTimeout(colorCommitTimerRef.current);
+        colorCommitTimerRef.current = null;
+      }
+      const val = colorDraftsRef.current[key];
+      if (val && val !== preferences[key]) {
+        onUpdatePreferences({ [key]: val });
+      }
+    },
+    [onUpdatePreferences, preferences]
   );
   const [prefix, setPrefix] = useState("?");
   const [defaultVolume, setDefaultVolume] = useState(100);
@@ -489,7 +588,7 @@ export function SettingsView({
   const visibleTabs = [
     { id: "appearance" as const, label: t("settings.tab.appearance"), icon: Palette },
     { id: "playback" as const, label: t("settings.tab.playback"), icon: Play },
-    { id: "accessibility" as const, label: t("settings.tab.accessibility"), icon: Accessibility },
+    { id: "accessibility" as const, label: t("settings.tab.accessibility"), icon: UniversalAccessIcon },
     ...(canAccessServerSettings
       ? [{ id: "server" as const, label: t("settings.tab.server"), icon: Server }]
       : []),
@@ -499,14 +598,17 @@ export function SettingsView({
   ];
 
   const activeAccentHex =
+    draftAccentHex ||
     normalizeHexColor(preferences.customAccentHex) ||
     THEME_ACCENTS.find((a) => a.id === preferences.themeAccent)?.hex ||
     "#ff0033";
   const activeBgHex =
+    draftBgHex ||
     normalizeHexColor(preferences.customBgHex) ||
     BACKGROUND_MODES.find((b) => b.id === preferences.backgroundMode)?.swatch ||
     "#030303";
-  const activeSurfaceHex = normalizeHexColor(preferences.customSurfaceHex) || "#121212";
+  const activeSurfaceHex =
+    draftSurfaceHex || normalizeHexColor(preferences.customSurfaceHex) || "#121212";
   const accentBgContrast = getContrastRatio(activeAccentHex, activeBgHex);
 
   return (
@@ -549,6 +651,28 @@ export function SettingsView({
       {/* APPEARANCE TAB */}
       {tab === "appearance" && (
         <div className="space-y-6">
+          {/* Ambience Mode */}
+          <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">Ambience Mode</h2>
+                  <p className="mt-0.5 text-xs text-zinc-400">
+                    Subtle theme and album-art radial glow behind the top header and Now Playing deck.
+                  </p>
+                </div>
+              </div>
+              <ThemeSwitch
+                checked={preferences.ambienceMode}
+                onChange={(val) => onUpdatePreferences({ ambienceMode: val })}
+                label="Toggle Ambience Mode"
+              />
+            </div>
+          </section>
+
           {/* Live Brand & Theme Accent Picker */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/8 pb-4">
@@ -597,7 +721,7 @@ export function SettingsView({
             </div>
           </section>
 
-          {/* Background Style */}
+          {/* Background Style + Advanced Custom Colors */}
           <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
             <div>
               <h2 className="text-base font-semibold text-white">Background Surface</h2>
@@ -641,72 +765,6 @@ export function SettingsView({
             </div>
           </section>
 
-          {/* Ambience Mode */}
-          <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold text-white">Ambience Mode</h2>
-                  <p className="mt-0.5 text-xs text-zinc-400">
-                    Subtle theme and album-art radial glow behind the top header and Now Playing deck.
-                  </p>
-                </div>
-              </div>
-              <ThemeSwitch
-                checked={preferences.ambienceMode}
-                onChange={(val) => onUpdatePreferences({ ambienceMode: val })}
-                label="Toggle Ambience Mode"
-              />
-            </div>
-          </section>
-
-          {/* Language (i18n) */}
-          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
-                  <Languages className="h-4 w-4" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold text-white">
-                    {t("appearance.language.title")}
-                  </h2>
-                  <p className="mt-0.5 text-xs text-zinc-400">{t("appearance.language.desc")}</p>
-                </div>
-              </div>
-              <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 font-mono text-[11px] text-zinc-300">
-                BCP 47: {resolvedLocale}
-              </span>
-            </div>
-
-            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-              {SUPPORTED_LOCALES.map((loc) => {
-                const selected = (preferences.locale || "auto") === loc.id;
-                return (
-                  <button
-                    key={loc.id}
-                    type="button"
-                    onClick={() => onUpdatePreferences({ locale: loc.id })}
-                    className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
-                      selected
-                        ? "border-white bg-white/10 text-white"
-                        : "border-white/10 bg-[#0b0b0b] text-zinc-300 hover:border-white/25 hover:bg-white/[0.05]"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{loc.nativeLabel}</p>
-                      <p className="truncate text-[11px] text-zinc-400">{loc.label}</p>
-                    </div>
-                    {selected && <Check className="h-4 w-4 shrink-0 text-white" />}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
           {/* Advanced · Custom Colors */}
           <section className="rounded-2xl border border-white/10 bg-[#121212] p-5">
             <button
@@ -737,19 +795,19 @@ export function SettingsView({
                         key: "customAccentHex" as const,
                         label: "Accent Hex",
                         value: activeAccentHex,
-                        customValue: preferences.customAccentHex ?? "",
+                        customValue: draftAccentHex ?? preferences.customAccentHex ?? "",
                       },
                       {
                         key: "customBgHex" as const,
                         label: "Canvas Background",
                         value: activeBgHex,
-                        customValue: preferences.customBgHex ?? "",
+                        customValue: draftBgHex ?? preferences.customBgHex ?? "",
                       },
                       {
                         key: "customSurfaceHex" as const,
                         label: "Card Surface",
                         value: activeSurfaceHex,
-                        customValue: preferences.customSurfaceHex ?? "",
+                        customValue: draftSurfaceHex ?? preferences.customSurfaceHex ?? "",
                       },
                     ] as const
                   ).map((field) => (
@@ -765,9 +823,8 @@ export function SettingsView({
                           type="color"
                           value={field.value}
                           aria-label={`${field.label} picker`}
-                          onChange={(e) =>
-                            onUpdatePreferences({ [field.key]: e.target.value.toLowerCase() })
-                          }
+                          onChange={(e) => scheduleColorChange(field.key, e.target.value)}
+                          onBlur={() => flushColorCommit(field.key)}
                           className="h-9 w-11 shrink-0 cursor-pointer rounded border border-white/15 bg-transparent p-0.5"
                         />
                         <input
@@ -776,12 +833,8 @@ export function SettingsView({
                           maxLength={7}
                           placeholder={field.value}
                           aria-label={`${field.label} hex value`}
-                          onChange={(e) => {
-                            const norm = normalizeHexColor(e.target.value);
-                            if (norm) {
-                              onUpdatePreferences({ [field.key]: norm });
-                            }
-                          }}
+                          onChange={(e) => scheduleColorChange(field.key, e.target.value)}
+                          onBlur={() => flushColorCommit(field.key)}
                           className="min-w-0 flex-1 rounded-lg border border-white/15 bg-[#161616] px-2.5 py-1.5 font-mono text-xs text-white outline-none focus:border-white/40"
                         />
                       </div>
@@ -814,13 +867,33 @@ export function SettingsView({
 
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      isPickingColorRef.current = false;
+                      if (colorCommitTimerRef.current) {
+                        clearTimeout(colorCommitTimerRef.current);
+                        colorCommitTimerRef.current = null;
+                      }
+                      setDraftAccentHex(null);
+                      setDraftBgHex(null);
+                      setDraftSurfaceHex(null);
+                      colorDraftsRef.current = {
+                        customAccentHex: null,
+                        customBgHex: null,
+                        customSurfaceHex: null,
+                      };
+                      previewCustomColors({
+                        themeAccent: preferences.themeAccent,
+                        backgroundMode: preferences.backgroundMode,
+                        customAccentHex: null,
+                        customBgHex: null,
+                        customSurfaceHex: null,
+                      });
                       onUpdatePreferences({
                         customAccentHex: null,
                         customBgHex: null,
                         customSurfaceHex: null,
-                      })
-                    }
+                      });
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
@@ -829,6 +902,47 @@ export function SettingsView({
                 </div>
               </div>
             )}
+          </section>
+
+          {/* Language */}
+          <section className="space-y-4 rounded-2xl border border-white/10 bg-[#121212] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
+                  <Languages className="h-4 w-4" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-white">
+                    {t("appearance.language.title")}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-zinc-400">{t("appearance.language.desc")}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              {SUPPORTED_LOCALES.map((loc) => {
+                const selected = (preferences.locale || "auto") === loc.id;
+                return (
+                  <button
+                    key={loc.id}
+                    type="button"
+                    onClick={() => onUpdatePreferences({ locale: loc.id })}
+                    className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition ${
+                      selected
+                        ? "border-white bg-white/10 text-white"
+                        : "border-white/10 bg-[#0b0b0b] text-zinc-300 hover:border-white/25 hover:bg-white/[0.05]"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{loc.nativeLabel}</p>
+                      <p className="truncate text-[11px] text-zinc-400">{loc.label}</p>
+                    </div>
+                    {selected && <Check className="h-4 w-4 shrink-0 text-white" />}
+                  </button>
+                );
+              })}
+            </div>
           </section>
         </div>
       )}
@@ -1007,7 +1121,7 @@ export function SettingsView({
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/8 pb-4">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 rounded-lg bg-white/[0.08] p-2 text-zinc-200">
-                  <Accessibility className="h-4 w-4" />
+                  <UniversalAccessIcon className="h-5 w-5" />
                 </div>
                 <div>
                   <h2 className="text-base font-semibold text-white">{t("a11y.banner.title")}</h2>

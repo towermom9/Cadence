@@ -10,6 +10,8 @@
   <strong>All-in-one Discord music bot &amp; real-time YouTube Music style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong><br />
   <a href="https://towermom9.github.io/Cadence/">Website</a> &middot;
   <a href="https://towermom9.github.io/Cadence/docs/guides/getting-started/">Guides</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/guides/accessibility/">Accessibility</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/guides/localization/">Localization</a> &middot;
   <a href="https://towermom9.github.io/Cadence/docs/reference/commands/">Commands</a> &middot;
   <a href="https://towermom9.github.io/Cadence/docs/reference/changelog/">Changelog</a>
 </p>
@@ -45,7 +47,7 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 - `Smart Autoplay with 7 Moods` (`All`, `Familiar`, `Discover`, `Popular`, `Deep Cuts`, `Chill`, `Upbeat`) powered by listener history, liked tracks, and YouTube Music radio mixes, with customizable click behavior (`Play now`, `Play next`, or `Add to end`).
 - `Synced ELRC & LRC Lyrics` via LavaLyrics and LRCLIB with word-tag stripping, click-any-line-to-seek, and smooth auto-scroll that automatically pauses when you scroll manually.
 - `Dynamic Theme Accents, Custom Colors & AMOLED Mode` with 9 preset accents, custom hex color swatches with live WCAG contrast validation, true `#000000` AMOLED surfaces, and artwork Ambience glow.
-- `Accessibility & Multi-Language (i18n)` designed around Material 3 adaptive clarity and W3C WAI / WCAG 2.2 principles (High Contrast, Reduce Motion, `90%-130%` Text Scale, Enhanced Keyboard Focus Rings, `>= 44px` Touch Targets, Skip Link, Screen Reader Track Announcements, typeable sliders, and BCP 47 i18n across English, Spanish, Japanese, Indonesian, German, and French).
+- `Accessibility, Internationalization & Localization` designed around Material 3 adaptive clarity and W3C Web Accessibility Initiative / WCAG 2.2 principles (High Contrast, Reduce Motion, `90%-130%` Text Scale, Enhanced Keyboard Focus Rings, `>= 44px` Touch Targets, Skip Link, Screen Reader Track Announcements, typeable sliders, mobile touch queue drag, and multi-language support across English, Spanish, Japanese, Indonesian, German, and French). See [LOCALIZATION.md](LOCALIZATION.md).
 - `4-Tier Discord Role-Based Access Control` cascading cleanly from **Tier 1 (User)** -> **Tier 2 (DJ)** -> **Tier 3 (Admin / Server Settings)** -> **Tier 4 (Server Owner & Bot Owner / System Diagnostics)** using your logged-in Discord identity.
 - `Guided 4-Step Web Onboarding Wizard` that validates your Discord Bot Token and Gateway Intents live, generates your OAuth2 Redirect URI, and launches the bot without touching config files.
 - `Vocard-Style Discord VC Chat Controller` that automatically posts interactive Now Playing controls (`Back`, `Pause/Resume`, `Skip`, `Leave`, `❤️`, `Queue`, `Web`) into your voice channel's text chat - even when playback is started from the web dashboard.
@@ -54,13 +56,14 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
   <summary><strong>Web Dashboard &amp; Library Features</strong></summary>
 
 - **Home & Discovery**:
-  - **Listen Again** shelf with drag-to-reorder pinned tracks and playlist grouping (playlists played in history render as playlist cards instead of individual track cards).
+  - **Listen Again** shelf with drag-to-reorder pinned tracks, playlist grouping, and one-click playlist pinning right from playlist cards.
   - **Recommendations for Today** personalized from your recent play history, liked songs, and pinned tracks.
   - **Search Autofill & Instant Track Previews** with per-user default search provider (`YouTube Music`, `YouTube`, `Spotify`, `SoundCloud`, `Deezer`, or `Server Default`).
   - **Artist Profiles** with full catalog search, Top Songs, Albums & Singles, and clickable multi-artist collaboration links (e.g. `Lime & LilyPichu`).
-- **Accessibility & Multi-Language (i18n)**:
-  - Dedicated **Settings -> Accessibility** tab following Material 3 & W3C WAI / WCAG 2.2 (`High Contrast`, `Reduce Motion`, `90%-130%` Text Size Scale, `Enhanced Keyboard Focus Rings`, `Larger 44px Touch Targets`, `Screen Reader Track Announcements`, and Skip-to-Content link).
-  - **BCP 47 i18n** under **Settings -> Appearance** with automatic browser detection plus English (`en`), Spanish (`es`), Japanese (`ja`), Indonesian (`id`), German (`de`), and French (`fr`).
+- **Accessibility, Internationalization & Localization**:
+  - Dedicated **Settings -> Accessibility** tab following Material 3 & W3C Web Accessibility Initiative / WCAG 2.2 (`High Contrast`, `Reduce Motion`, `90%-130%` Text Size Scale, `Enhanced Keyboard Focus Rings`, `Larger 44px Touch Targets`, `Screen Reader Track Announcements`, and Skip-to-Content link).
+  - **Language & Localization** under **Settings -> Appearance** with automatic browser detection plus English, Spanish, Japanese, Indonesian, German, and French (see [LOCALIZATION.md](LOCALIZATION.md)).
+  - **Mobile & Tablet Ergonomics**: Touch drag-and-drop queue reordering via Pointer Events, inline move arrows on small screens, and automatic hiding of keyboard-shortcut buttons on phones while staying enabled on tablets and desktops.
 - **Power-User Controls**:
   - Click artwork to Play/Pause with optional ±5s-30s floating seek buttons.
   - Server-level **Empty VC Automation** (under **Settings -> Server**): auto-pause when voice channel becomes empty with a configurable `0s-5m` continuation delay, auto-resume on join, optional extended auto-disconnect (`Off` / `5m-2h`), deafened listener filtering, and configurable **Max Play History** auto-pruning (`0` = Unlimited).

@@ -758,6 +758,8 @@ export function App() {
                       navigateTo("playlist");
                     }}
                     onPlayPlaylist={(id) => handlePlayPlaylist(id, false)}
+                    onTogglePinPlaylist={socket.togglePinPlaylist}
+                    onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
                     onViewHistory={() => {
                       setLibraryTab("history");
                       navigateTo("library");

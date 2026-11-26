@@ -28,6 +28,7 @@ import type {
   UserProfileDTO,
 } from "@shared/types";
 import { useI18n } from "../i18n";
+import { useShowKeyboardShortcuts } from "../utils/device";
 import { formatMs } from "../utils/format";
 import { loadUiPrefs, saveUiPrefs } from "../utils/theme";
 import { ArtistLinks } from "./ArtistLinks";
@@ -79,6 +80,7 @@ export function TopBar({
   onLogout,
 }: Props) {
   const { t } = useI18n();
+  const showKeyboardShortcuts = useShowKeyboardShortcuts();
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<SearchSource>(() => {
     const saved = loadUiPrefs().searchSource;
@@ -590,18 +592,20 @@ export function TopBar({
               <Settings className="h-4 w-4 text-zinc-400" />
               Settings
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setOpenMenu(null);
-                onOpenShortcuts();
-              }}
-              className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-zinc-200 transition hover:bg-white/10"
-            >
-              <Keyboard className="h-4 w-4 text-zinc-400" />
-              <span>Keyboard shortcuts</span>
-              <span className="ml-auto font-mono text-[10px] text-zinc-500">?</span>
-            </button>
+            {showKeyboardShortcuts && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onOpenShortcuts();
+                }}
+                className="mt-0.5 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-zinc-200 transition hover:bg-white/10"
+              >
+                <Keyboard className="h-4 w-4 text-zinc-400" />
+                <span>Keyboard shortcuts</span>
+                <span className="ml-auto font-mono text-[10px] text-zinc-500">?</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onLogout}

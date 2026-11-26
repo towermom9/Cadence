@@ -52,7 +52,8 @@
           <a class="sidebar-link" href="../../guides/discord-setup/">Discord Bot Setup</a>
           <a class="sidebar-link" href="../../guides/playback/">Playback &amp; Empty VC</a>
           <a class="sidebar-link" href="../../guides/rbac/">Role-Based Access &amp; Domains</a>
-          <a class="sidebar-link" href="../../guides/accessibility-and-i18n/">Accessibility &amp; i18n</a>
+          <a class="sidebar-link" href="../../guides/accessibility/">Accessibility</a>
+          <a class="sidebar-link" href="../../guides/localization/">Internationalization &amp; Localization</a>
         </div>
         <div class="sidebar-group">
           <div class="sidebar-group-title">Reference</div>
@@ -66,15 +67,25 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-1-9">v0.1.9 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-2-0">v0.2.0 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Reordered <strong>Settings -&gt; Appearance</strong> so <strong>Ambience Mode</strong> appears at the top and <strong>Advanced · Custom Colors</strong> sits directly beneath <strong>Background Surface</strong>.</li>
+          <li>Eliminated color-wheel lag in Custom Colors with live <code>requestAnimationFrame</code> CSS variable previews, debounced preference commits, and cached dynamic favicon masks.</li>
+          <li>Added pinning support to playlists in <strong>Listen again</strong> on Home (save &amp; pin or toggle pins right from playlist cards).</li>
+          <li>Added touch Pointer Events drag-and-drop and inline mobile Move Up / Move Down buttons to the <strong>Now Playing</strong> queue timeline.</li>
+          <li>Automatically hid <strong>Keyboard shortcuts</strong> buttons on touch phones while keeping them visible on desktop computers and tablets.</li>
+          <li>Updated the Accessibility icon to the Universal Access circular symbol, removed technical language-standard labels from the dashboard Language card, split the <strong>Accessibility</strong> and <strong>Internationalization &amp; Localization</strong> documentation guides without numeronyms, and added <code>LOCALIZATION.md</code>.</li>
+        </ul>
+
+        <h2 id="v0-1-9">v0.1.9 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Grouped playlist playback in <strong>Listen again</strong> on the Home dashboard so played playlists render as single playlist cards instead of individual tracks.</li>
           <li>Added <strong>Max Play History</strong> per-server auto-pruning slider under <strong>Settings -&gt; Server</strong> and <code>/settings maxhistory</code> (0 = Unlimited, up to 10,000 tracks).</li>
           <li>Added configurable <strong>Stuck-Track Recovery Timeout</strong> (<code>5s - 60s</code>, default <code>20s</code>) under <strong>Settings -&gt; System</strong>, automatic stalled-track recovery in Lavalink, and raised Lavalink audio buffers.</li>
           <li>Fixed audio stuttering while dragging volume sliders with a 150ms frontend throttle and &gt;= 120ms coalesced Lavalink volume RPC loop, plus added inline typeable numeric inputs to all sliders via <code>&lt;NumericSlider /&gt;</code>.</li>
           <li>Removed the redundant Settings shortcut inside the TopBar <strong>Play on Server</strong> popover and consolidated <strong>Pause When Voice Channel is Empty</strong> strictly inside <strong>Settings -&gt; Server</strong>.</li>
-          <li>Added collapsible <strong>Advanced · Custom Colors</strong> (Accent, Canvas, Surface hex pickers + WCAG contrast check) in Appearance, a new <strong>Accessibility</strong> settings tab (High Contrast, Reduce Motion, 90%-130% Text Scale, Enhanced Focus Rings, 44px Touch Targets, Screen Reader Announcements, Skip Link), and <strong>BCP 47 i18n</strong> across <code>en</code>, <code>es</code>, <code>ja</code>, <code>id</code>, <code>de</code>, and <code>fr</code>.</li>
-          <li>Expanded isolated <code>bun test</code> coverage with i18n parity tests, WCAG/theme math tests, and mocked Discord slash-command &amp; 4-tier RBAC tests (<code>tests/bot.test.ts</code>).</li>
+          <li>Added collapsible <strong>Advanced · Custom Colors</strong> (Accent, Canvas, Surface hex pickers + WCAG contrast check) in Appearance, a new <strong>Accessibility</strong> settings tab (High Contrast, Reduce Motion, 90%-130% Text Scale, Enhanced Focus Rings, 44px Touch Targets, Screen Reader Announcements, Skip Link), and <strong>BCP 47 Internationalization &amp; Localization</strong> across <code>en</code>, <code>es</code>, <code>ja</code>, <code>id</code>, <code>de</code>, and <code>fr</code>.</li>
+          <li>Expanded isolated <code>bun test</code> coverage with translation key parity tests, WCAG/theme math tests, and mocked Discord slash-command &amp; 4-tier RBAC tests (<code>tests/bot.test.ts</code>).</li>
         </ul>
 
         <h2 id="v0-1-8">v0.1.8 <span class="release-date">2026-11-26</span></h2>

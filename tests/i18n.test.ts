@@ -35,10 +35,16 @@ describe("shared/i18n", () => {
     expect(resolveLocale(undefined, undefined)).toBe("en");
   });
 
-  test("t() translates known keys cleanly per locale", () => {
+  test("t() translates known keys cleanly per locale and hides internal standard jargon", () => {
     expect(t("en", "nav.home")).toBe("Home");
     expect(t("es", "nav.home")).toBe("Inicio");
     expect(t("ja", "nav.home")).toBe("ホーム");
     expect(t("id", "settings.tab.accessibility")).toBe("Aksesibilitas");
+
+    expect(SUPPORTED_LOCALES[0].nativeLabel).toBe("Auto");
+    for (const loc of ["en", "es", "ja", "id", "de", "fr"] as const) {
+      expect(t(loc, "appearance.language.title")).not.toMatch(/i18n|bcp\s*47/i);
+      expect(t(loc, "appearance.language.desc")).not.toMatch(/i18n|l10n|bcp\s*47/i);
+    }
   });
 });

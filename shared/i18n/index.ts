@@ -13,7 +13,7 @@ export const SUPPORTED_LOCALES: {
   label: string;
   nativeLabel: string;
 }[] = [
-  { id: "auto", label: "System Default (Auto)", nativeLabel: "Auto (BCP 47)" },
+  { id: "auto", label: "System Default (Auto)", nativeLabel: "Auto" },
   { id: "en", label: "English", nativeLabel: "English" },
   { id: "es", label: "Spanish", nativeLabel: "Espanol" },
   { id: "ja", label: "Japanese", nativeLabel: "日本語" },

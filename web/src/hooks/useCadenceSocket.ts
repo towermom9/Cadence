@@ -576,8 +576,8 @@ export function useCadenceSocket(
     requestSettings,
     updateSettings,
     createPlaylist: (name: string) => send({ type: "createPlaylist", name }),
-    createPlaylistWithTracks: (name: string, tracks: TrackDTO[]) =>
-      send({ type: "createPlaylistWithTracks", name, tracks }),
+    createPlaylistWithTracks: (name: string, tracks: TrackDTO[], pin?: boolean) =>
+      send({ type: "createPlaylistWithTracks", name, tracks, pin }),
     importPlaylist: (url: string, name?: string) =>
       send({ type: "importPlaylist", url, name }),
     syncPlaylist: (playlistId: string, url?: string) =>

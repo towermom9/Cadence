@@ -666,15 +666,21 @@ export class CadenceWsHub {
         case "createPlaylistWithTracks": {
           const created = this.db.createPlaylist(user.id, msg.name);
           if (msg.tracks.length > 0) {
-            const res = this.db.addTracksToPlaylist(user.id, created.id, msg.tracks);
-            this.sendPlaylists(ws, user.id);
+            this.db.addTracksToPlaylist(user.id, created.id, msg.tracks);
+          }
+          if (msg.pin) {
+            this.db.togglePinPlaylist(user.id, created.id);
+          }
+          this.sendPlaylists(ws, user.id);
+          if (msg.pin) {
+            this.sendToast(ws, "success", `Pinned "${created.name}" to Listen again`);
+          } else if (msg.tracks.length > 0) {
             this.sendToast(
               ws,
               "success",
-              `Created "${created.name}" with ${res.added} track${res.added === 1 ? "" : "s"}`
+              `Created "${created.name}" with ${msg.tracks.length} track${msg.tracks.length === 1 ? "" : "s"}`
             );
           } else {
-            this.sendPlaylists(ws, user.id);
             this.sendToast(ws, "success", `Created playlist "${created.name}"`);
           }
           return;

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Accessibility &amp; i18n | Cadence Docs</title>
+    <title>Internationalization &amp; Localization | Cadence Docs</title>
     <link rel="icon" type="image/png" href="../../../assets/favicon.png" />
     <script>try{var t=localStorage.getItem("cadence-docs-theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t;}catch(e){}</script>
     <link rel="stylesheet" href="../../../assets/site.css" />
@@ -52,7 +52,8 @@
           <a class="sidebar-link" href="../discord-setup/">Discord Bot Setup</a>
           <a class="sidebar-link" href="../playback/">Playback &amp; Empty VC</a>
           <a class="sidebar-link" href="../rbac/">Role-Based Access &amp; Domains</a>
-          <a class="sidebar-link active" href="../accessibility-and-i18n/">Accessibility &amp; i18n</a>
+          <a class="sidebar-link" href="../accessibility/">Accessibility</a>
+          <a class="sidebar-link active" href="../localization/">Internationalization &amp; Localization</a>
         </div>
         <div class="sidebar-group">
           <div class="sidebar-group-title">Reference</div>
@@ -63,37 +64,69 @@
       </aside>
 
       <main class="docs-content">
-        <h1>Accessibility, Custom Colors &amp; i18n</h1>
-        <p class="docs-lead">Design principles, WCAG 2.2 accessibility controls, custom hex theme swatches, typeable sliders, and BCP 47 localization across the Cadence dashboard.</p>
+        <h1>Internationalization &amp; Localization</h1>
+        <p class="docs-lead">How Cadence separates translatable interface strings from application logic, detects browser languages with BCP 47 standards, and maintains multi-language catalogs.</p>
 
-        <h2 id="accessibility">Accessibility (Material 3 + W3C WAI / WCAG 2.2)</h2>
-        <p>Cadence's <strong>Settings -&gt; Accessibility</strong> tab is designed around <strong>Material 3</strong> adaptive clarity and <strong>W3C WAI / WCAG 2.2 POUR</strong> principles (Perceivable, Operable, Understandable, Robust):</p>
+        <h2 id="standards">BCP 47 Language Tags &amp; Browser Detection</h2>
+        <p>Cadence follows the <strong>IETF BCP 47</strong> standard for identifying languages cleanly:</p>
         <ul>
-          <li><strong>High Contrast Mode (<code>data-contrast="high"</code>):</strong> Increases card border contrast, muted label brightness, and control outlines for easier reading.</li>
-          <li><strong>Reduce Motion (<code>data-motion="reduced"</code>):</strong> Disables artwork zoom effects, hover animations, and smooth transitions (alongside OS <code>prefers-reduced-motion</code>).</li>
-          <li><strong>Text Size Scale (<code>90% - 130%</code>):</strong> Adjusts root typography smoothly without clipping cards or breaking responsive grids.</li>
-          <li><strong>Enhanced Keyboard Focus Rings (<code>data-focus="enhanced"</code>):</strong> Renders crisp 3px accent rings on keyboard-focused buttons, sliders, switches, and links, paired with a top-left <strong>Skip to main content</strong> landmark link.</li>
-          <li><strong>Larger Interactive Touch Targets (<code>data-touch="large"</code>):</strong> Enforces Material 3 <code>44x44px</code> minimum touch areas on controls.</li>
-          <li><strong>Screen Reader Track Announcements:</strong> Uses a polite <code>aria-live="polite"</code> region to announce active tracks and play/pause transitions without stealing focus.</li>
+          <li>Selecting <strong>System Default (Auto)</strong> under <strong>Settings -&gt; Appearance -&gt; Language</strong> reads your browser's primary language subtag (e.g., <code>ja-JP</code> resolves to <code>ja</code>) and falls back cleanly to English (<code>en</code>).</li>
+          <li>The active resolved language updates <code>&lt;html lang="..."&gt;</code> automatically so screen readers, spellcheckers, and font fallback engines render each script accurately.</li>
+          <li>Message interpolation uses named <strong>ICU-style <code>{placeholder}</code> tokens</strong> so translators can adjust word order naturally across languages.</li>
         </ul>
 
-        <h2 id="custom-colors">Custom Colors &amp; Typeable Sliders</h2>
-        <ul>
-          <li><strong>Advanced · Custom Colors:</strong> Under <strong>Settings -&gt; Appearance</strong>, pick custom 6-digit hex swatches for <strong>Accent Hex</strong>, <strong>Canvas Background</strong>, and <strong>Card Surface</strong> with live WCAG AA contrast ratio calculation.</li>
-          <li><strong>Direct Numeric Input on Every Slider:</strong> All dashboard sliders (volume, seek interval, text scale, default volume, max history, empty VC delays, and stuck-track timeout) pair the range track with an inline typeable number box.</li>
-        </ul>
+        <h2 id="supported-locales">Supported Languages</h2>
+        <div class="docs-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Language</th>
+                <th>Display Name</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>en</code></td>
+                <td>English</td>
+                <td>English</td>
+              </tr>
+              <tr>
+                <td><code>es</code></td>
+                <td>Spanish</td>
+                <td>Espanol</td>
+              </tr>
+              <tr>
+                <td><code>ja</code></td>
+                <td>Japanese</td>
+                <td>日本語</td>
+              </tr>
+              <tr>
+                <td><code>id</code></td>
+                <td>Indonesian</td>
+                <td>Bahasa Indonesia</td>
+              </tr>
+              <tr>
+                <td><code>de</code></td>
+                <td>German</td>
+                <td>Deutsch</td>
+              </tr>
+              <tr>
+                <td><code>fr</code></td>
+                <td>French</td>
+                <td>Francais</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-        <h2 id="i18n">Internationalization (BCP 47 + ICU Placeholders)</h2>
-        <p>Cadence uses standard <strong>BCP 47</strong> language tags synced directly to <code>&lt;html lang="..."&gt;</code> and supports automatic browser language detection (<code>auto</code>):</p>
-        <ul>
-          <li><strong>Supported Locales:</strong> English (<code>en</code>), Spanish (<code>es</code>), Japanese (<code>ja</code>), Indonesian (<code>id</code>), German (<code>de</code>), and French (<code>fr</code>).</li>
-          <li><strong>Shared Type-Safe Catalogs:</strong> Translation strings live in <code>shared/i18n/locales/</code> and are validated for 100% key parity by <code>bun test tests/i18n.test.ts</code>.</li>
-        </ul>
+        <h2 id="contributing-translations">Contributing a New Translation</h2>
+        <p>All translation catalogs live inside the shared workspace alongside automated key-parity tests. See <a href="https://github.com/towermom9/Cadence/blob/main/LOCALIZATION.md" target="_blank" rel="noopener noreferrer">LOCALIZATION.md</a> in the repository root for full contributor instructions and verification commands.</p>
 
         <div class="pager">
-          <a class="pager-link prev" href="../rbac/">
+          <a class="pager-link prev" href="../accessibility/">
             <span class="pager-label">Previous page</span>
-            <span class="pager-title">&larr; Role-Based Access &amp; Domains</span>
+            <span class="pager-title">&larr; Accessibility</span>
           </a>
           <a class="pager-link next" href="../../reference/commands/">
             <span class="pager-label">Next page</span>

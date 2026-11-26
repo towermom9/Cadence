@@ -352,7 +352,7 @@ export type WsClientMessage =
     }
   | { type: "getPlaylists" }
   | { type: "createPlaylist"; name: string }
-  | { type: "createPlaylistWithTracks"; name: string; tracks: TrackDTO[] }
+  | { type: "createPlaylistWithTracks"; name: string; tracks: TrackDTO[]; pin?: boolean }
   | { type: "importPlaylist"; url: string; name?: string }
   | { type: "syncPlaylist"; playlistId: string; url?: string }
   | { type: "renamePlaylist"; playlistId: string; name: string }

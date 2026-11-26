@@ -110,10 +110,16 @@
       content: "Settings System Public Domain Dashboard URL Use Current URL Save Domain OAuth2 Redirect URI Stuck-Track Recovery Timeout 5s 60s.",
     },
     {
-      section: "Guides / Accessibility & i18n",
-      title: "Accessibility, Custom Colors, Typeable Sliders & BCP 47 i18n",
-      path: "docs/guides/accessibility-and-i18n/#accessibility",
-      content: "Material 3 WCAG 2.2 High Contrast Reduce Motion Text Size Scale Focus Rings 44px Touch Targets Screen Reader Track Announcements Skip Link Custom Colors hex WCAG contrast BCP 47 i18n en es ja id de fr NumericSlider.",
+      section: "Guides / Accessibility",
+      title: "Accessibility Settings, Custom Colors & Touch Queue Drag",
+      path: "docs/guides/accessibility/#a11y-controls",
+      content: "Material 3 WCAG 2.2 High Contrast Reduce Motion Text Size Scale Focus Rings 44px Touch Targets Screen Reader Track Announcements Skip Link Custom Colors hex contrast Typeable Sliders touch drag queue mobile.",
+    },
+    {
+      section: "Guides / Internationalization & Localization",
+      title: "Internationalization, Localization, BCP 47 & Languages",
+      path: "docs/guides/localization/#standards",
+      content: "Internationalization Localization BCP 47 RFC 5646 browser language detection ICU placeholders LOCALIZATION.md English Spanish Japanese Indonesian German French.",
     },
     {
       section: "Reference / Commands",
@@ -147,9 +153,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.1.9)",
-      path: "docs/reference/changelog/#v0-1-9",
-      content: "v0.1.9 v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog accessibility i18n custom colors.",
+      title: "Release Changelogs (v0.0.0 to v0.2.0)",
+      path: "docs/reference/changelog/#v0-2-0",
+      content: "v0.2.0 v0.1.9 v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog accessibility localization internationalization custom colors mobile queue drag.",
     },
   ];
 

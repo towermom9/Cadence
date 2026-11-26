@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -218,6 +226,10 @@ export function NowPlayingView({
   }, [mobileVolDraft, mobileVolume, onVolume]);
 
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
+  const queueScrollRef = useRef<HTMLDivElement>(null);
+  const touchDragSourceRef = useRef<DragTimelineItem | null>(null);
+  const touchDragTargetRef = useRef<DragTimelineItem | null>(null);
+  const touchDragPosRef = useRef<"above" | "below" | null>(null);
   const lyricLineRefs = useRef<(HTMLElement | null)[]>([]);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -239,6 +251,9 @@ export function NowPlayingView({
   );
 
   const resetDragState = useCallback(() => {
+    touchDragSourceRef.current = null;
+    touchDragTargetRef.current = null;
+    touchDragPosRef.current = null;
     setDragSource(null);
     setDragTarget(null);
     setDragOverPosition(null);
@@ -268,13 +283,17 @@ export function NowPlayingView({
   );
 
   const handleTimelineDrop = useCallback(
-    (target: DragTimelineItem) => {
-      if (!privileged || !dragSource || !canDropTimeline(dragSource, target)) {
+    (
+      target: DragTimelineItem,
+      sourceOverride?: DragTimelineItem | null,
+      posOverride?: "above" | "below" | null
+    ) => {
+      const source = sourceOverride ?? dragSource;
+      const pos = posOverride ?? dragOverPosition ?? "above";
+      if (!privileged || !source || !canDropTimeline(source, target)) {
         resetDragState();
         return;
       }
-      const source = dragSource;
-      const pos = dragOverPosition ?? "above";
       resetDragState();
 
       if (
@@ -384,6 +403,109 @@ export function NowPlayingView({
       queue.length,
       resetDragState,
     ]
+  );
+
+  const parseTimelineElement = useCallback((el: HTMLElement | null): DragTimelineItem | null => {
+    const row = el?.closest<HTMLElement>("[data-timeline-row='true']");
+    if (!row) return null;
+    const section = row.dataset.timelineSection;
+    if (section === "current") {
+      return { section: "current" };
+    }
+    if (section === "previous") {
+      const prevIndex = Number.parseInt(row.dataset.timelineIndex ?? "", 10);
+      const displayIdx = Number.parseInt(row.dataset.timelineDisplayIdx ?? "", 10);
+      if (Number.isFinite(prevIndex) && Number.isFinite(displayIdx)) {
+        return { section: "previous", prevIndex, displayIdx };
+      }
+      return null;
+    }
+    if (section === "manual" || section === "autoplay") {
+      const queueIndex = Number.parseInt(row.dataset.timelineIndex ?? "", 10);
+      if (Number.isFinite(queueIndex)) {
+        return { section, queueIndex };
+      }
+    }
+    return null;
+  }, []);
+
+  const handleTouchDragStart = useCallback(
+    (e: ReactPointerEvent<HTMLElement>, item: DragTimelineItem) => {
+      if (!privileged || e.pointerType === "mouse") return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // Ignore pointer capture rejection
+      }
+      touchDragSourceRef.current = item;
+      touchDragTargetRef.current = null;
+      touchDragPosRef.current = null;
+      setDragSource(item);
+      setDragTarget(null);
+      setDragOverPosition(null);
+    },
+    [privileged]
+  );
+
+  const handleTouchDragMove = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      const source = touchDragSourceRef.current;
+      if (!privileged || !source || e.pointerType === "mouse") return;
+      e.preventDefault();
+
+      const container = queueScrollRef.current;
+      if (container) {
+        const bounds = container.getBoundingClientRect();
+        if (e.clientY < bounds.top + 48) {
+          container.scrollTop -= 12;
+        } else if (e.clientY > bounds.bottom - 48) {
+          container.scrollTop += 12;
+        }
+      }
+
+      const underPointer = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+      const row = underPointer?.closest<HTMLElement>("[data-timeline-row='true']") ?? null;
+      const targetItem = parseTimelineElement(row);
+      if (!row || !targetItem || !canDropTimeline(source, targetItem)) {
+        touchDragTargetRef.current = null;
+        touchDragPosRef.current = null;
+        setDragTarget(null);
+        setDragOverPosition(null);
+        return;
+      }
+
+      const rect = row.getBoundingClientRect();
+      const pos = e.clientY >= rect.top + rect.height / 2 ? "below" : "above";
+      touchDragTargetRef.current = targetItem;
+      touchDragPosRef.current = pos;
+      setDragTarget(targetItem);
+      setDragOverPosition(pos);
+    },
+    [canDropTimeline, parseTimelineElement, privileged]
+  );
+
+  const handleTouchDragEnd = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      if (e.pointerType === "mouse") return;
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // Ignore release errors
+      }
+      const source = touchDragSourceRef.current;
+      const target = touchDragTargetRef.current;
+      const pos = touchDragPosRef.current;
+      if (source && target && pos) {
+        handleTimelineDrop(target, source, pos);
+      } else {
+        resetDragState();
+      }
+    },
+    [handleTimelineDrop, resetDragState]
   );
 
   useEffect(() => {
@@ -999,7 +1121,7 @@ export function NowPlayingView({
             </div>
 
             {/* Scrollable Queue Timeline */}
-            <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+            <div ref={queueScrollRef} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
               {!current && queue.length === 0 && previousEntries.length === 0 && (
                 <div className="mb-3 rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-zinc-400">
                   Nothing in the queue yet. Search or click a song to play.
@@ -1018,6 +1140,10 @@ export function NowPlayingView({
                 return (
                   <div
                     key={`prev-${track.identifier}-${prevIndex}`}
+                    data-timeline-row="true"
+                    data-timeline-section="previous"
+                    data-timeline-index={prevIndex}
+                    data-timeline-display-idx={displayIdx}
                     draggable={privileged}
                     onDragStart={(e) => {
                       if (!privileged) return;
@@ -1076,7 +1202,20 @@ export function NowPlayingView({
                       />
                     )}
                     {privileged && (
-                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) =>
+                          handleTouchDragStart(e, { section: "previous", prevIndex, displayIdx })
+                        }
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag track to reorder"
+                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
                     )}
                     <TrackArtwork
                       track={track}
@@ -1175,6 +1314,8 @@ export function NowPlayingView({
                 const isDraggingCurrent = dragSource?.section === "current";
                 return (
                   <div
+                    data-timeline-row="true"
+                    data-timeline-section="current"
                     draggable={privileged}
                     onDragStart={(e) => {
                       if (!privileged) return;
@@ -1246,7 +1387,18 @@ export function NowPlayingView({
                       />
                     )}
                     {privileged && (
-                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-500 transition group-hover:text-zinc-200 active:cursor-grabbing" />
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => handleTouchDragStart(e, { section: "current" })}
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag active track to reorder"
+                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
                     )}
                     <button
                       type="button"
@@ -1354,6 +1506,9 @@ export function NowPlayingView({
                 return (
                   <div
                     key={`q-${track.identifier}-${queueIndex}`}
+                    data-timeline-row="true"
+                    data-timeline-section="manual"
+                    data-timeline-index={queueIndex}
                     draggable={privileged}
                     onDragStart={(e) => {
                       if (!privileged) return;
@@ -1406,7 +1561,20 @@ export function NowPlayingView({
                       />
                     )}
                     {privileged && (
-                      <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) =>
+                          handleTouchDragStart(e, { section: "manual", queueIndex })
+                        }
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag queued track to reorder"
+                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </button>
                     )}
                     <TrackArtwork
                       track={track}
@@ -1423,11 +1591,11 @@ export function NowPlayingView({
                       </p>
                     </div>
 
-                    <span className="shrink-0 text-xs tabular-nums text-zinc-400 group-hover:hidden">
+                    <span className="hidden shrink-0 text-xs tabular-nums text-zinc-400 sm:block sm:group-hover:hidden">
                       {track.isStream ? "LIVE" : formatMs(track.duration)}
                     </span>
 
-                    <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+                    <div className="flex shrink-0 items-center gap-0.5 sm:hidden sm:group-hover:flex">
                       {!track.isStream && (
                         <button
                           type="button"
@@ -1626,6 +1794,9 @@ export function NowPlayingView({
                     return (
                       <div
                         key={`auto-${track.identifier}-${queueIndex}`}
+                        data-timeline-row="true"
+                        data-timeline-section="autoplay"
+                        data-timeline-index={queueIndex}
                         draggable={privileged}
                         onDragStart={(e) => {
                           if (!privileged) return;
@@ -1678,7 +1849,20 @@ export function NowPlayingView({
                           />
                         )}
                         {privileged && (
-                          <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-zinc-600 transition group-hover:text-zinc-300 active:cursor-grabbing" />
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) =>
+                              handleTouchDragStart(e, { section: "autoplay", queueIndex })
+                            }
+                            onPointerMove={handleTouchDragMove}
+                            onPointerUp={handleTouchDragEnd}
+                            onPointerCancel={handleTouchDragEnd}
+                            aria-label="Drag autoplay track to reorder"
+                            className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                          >
+                            <GripVertical className="h-4 w-4" />
+                          </button>
                         )}
                         <TrackArtwork
                           track={track}

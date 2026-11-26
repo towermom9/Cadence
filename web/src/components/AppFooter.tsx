@@ -1,5 +1,6 @@
 import type { AppMetaDTO } from "@shared/types";
 import { useI18n } from "../i18n";
+import { useShowKeyboardShortcuts } from "../utils/device";
 import type { MainView } from "./Sidebar";
 
 interface Props {
@@ -16,6 +17,7 @@ export function AppFooter({
   onOpenPlayer,
 }: Props) {
   const { t } = useI18n();
+  const showKeyboardShortcuts = useShowKeyboardShortcuts();
   const version = meta?.appVersion || __CADENCE_VERSION__;
 
   return (
@@ -58,16 +60,18 @@ export function AppFooter({
             >
               {t("nav.nowPlaying")}
             </button>
-            <button
-              type="button"
-              onClick={onOpenShortcuts}
-              className="inline-flex items-center gap-1.5 transition hover:text-white"
-            >
-              <span>{t("nav.shortcuts")}</span>
-              <kbd className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
-                ?
-              </kbd>
-            </button>
+            {showKeyboardShortcuts && (
+              <button
+                type="button"
+                onClick={onOpenShortcuts}
+                className="inline-flex items-center gap-1.5 transition hover:text-white"
+              >
+                <span>{t("nav.shortcuts")}</span>
+                <kbd className="rounded border border-white/15 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+                  ?
+                </kbd>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-[11px] text-zinc-500">

@@ -335,6 +335,20 @@ function loadImg(src: string): Promise<HTMLImageElement> {
 }
 
 let lastFaviconKey = "";
+let cachedMasksPromise: Promise<[HTMLImageElement, HTMLImageElement]> | null = null;
+
+function getFaviconMasks(): Promise<[HTMLImageElement, HTMLImageElement]> {
+  if (!cachedMasksPromise) {
+    cachedMasksPromise = Promise.all([
+      loadImg("/brand/icon-accent-mask.png"),
+      loadImg("/brand/icon-inner-mask.png"),
+    ]).catch((err) => {
+      cachedMasksPromise = null;
+      throw err;
+    });
+  }
+  return cachedMasksPromise;
+}
 
 async function updateDynamicFavicon(accentHex: string, fgHex: string): Promise<void> {
   if (typeof document === "undefined") return;
@@ -343,10 +357,7 @@ async function updateDynamicFavicon(accentHex: string, fgHex: string): Promise<v
   lastFaviconKey = key;
 
   try {
-    const [accentMask, innerMask] = await Promise.all([
-      loadImg("/brand/icon-accent-mask.png"),
-      loadImg("/brand/icon-inner-mask.png"),
-    ]);
+    const [accentMask, innerMask] = await getFaviconMasks();
 
     const size = 64;
     const canvas = document.createElement("canvas");
@@ -390,6 +401,46 @@ async function updateDynamicFavicon(accentHex: string, fgHex: string): Promise<v
     link.href = dataUrl;
   } catch {
     // Fallback to static /favicon.png if canvas rendering fails
+  }
+}
+
+export function previewCustomColors(opts: {
+  themeAccent: ThemeAccentId;
+  backgroundMode: BackgroundMode;
+  customAccentHex?: string | null;
+  customBgHex?: string | null;
+  customSurfaceHex?: string | null;
+}): void {
+  if (typeof document === "undefined") return;
+  const preset = THEME_ACCENTS.find((a) => a.id === opts.themeAccent) ?? THEME_ACCENTS[0];
+  const customAccent = normalizeHexColor(opts.customAccentHex);
+  const accentHex = customAccent ?? preset.hex;
+  const accentFg = customAccent ? pickContrastingFg(customAccent) : preset.fg;
+  const accentRgb = customAccent ? hexToRgbString(customAccent) : preset.rgb;
+
+  const root = document.documentElement;
+  root.style.setProperty("--cadence-accent", accentHex);
+  root.style.setProperty("--cadence-accent-fg", accentFg);
+  root.style.setProperty("--cadence-accent-rgb", accentRgb);
+
+  const customBg = normalizeHexColor(opts.customBgHex);
+  if (customBg) {
+    root.style.setProperty("--cadence-bg", customBg);
+    root.dataset.customBg = "on";
+  } else {
+    root.style.removeProperty("--cadence-bg");
+    delete root.dataset.customBg;
+  }
+
+  const customSurface = normalizeHexColor(opts.customSurfaceHex);
+  if (customSurface) {
+    root.style.setProperty("--cadence-surface", customSurface);
+    root.style.setProperty("--cadence-card", customSurface);
+    root.dataset.customSurface = "on";
+  } else {
+    root.style.removeProperty("--cadence-surface");
+    root.style.removeProperty("--cadence-card");
+    delete root.dataset.customSurface;
   }
 }
 
