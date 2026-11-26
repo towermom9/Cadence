@@ -67,7 +67,13 @@
         <h1>Changelog</h1>
         <p class="docs-lead">Complete release history for Cadence from v0.0.0 through the latest release.</p>
 
-        <h2 id="v0-2-3">v0.2.3 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <h2 id="v0-2-4">v0.2.4 <span class="release-badge">Latest</span> <span class="release-date">2026-11-26</span></h2>
+        <ul>
+          <li>Restored the v0.2.2 halfway-expanded mobile <strong>Now Playing</strong> queue, lyrics, and related sheet layout while adding 3-state vertical drag-to-full-screen (collapsed, halfway hero, and full-screen drawer) plus 3-step hardware Back button unwinding.</li>
+          <li>Removed mini-player and artwork horizontal swipe gestures and fixed desktop grid column width containment (<code>min-w-0</code> / <code>max-lg:</code> mobile sheet scoping) so long track titles and mobile AMOLED backdrops never clip or bleed into the desktop Now Playing view.</li>
+        </ul>
+
+        <h2 id="v0-2-3">v0.2.3 <span class="release-date">2026-11-26</span></h2>
         <ul>
           <li>Stabilized web and mobile volume sliders via shared debounced drag handling, optimistic client state locks, and initialized Lavalink volume tracking to eliminate stuttering and slider snap-backs.</li>
           <li>Added a typeable <strong>Long-Press Detector Delay</strong> slider (<code>200ms - 1200ms</code>) under <strong>Settings -&gt; Accessibility</strong> controlling touch hold timing on queue tracks.</li>

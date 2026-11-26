@@ -36,6 +36,7 @@ import {
   pushViewHistory,
   resolveBackAction,
   type BackStackSnapshot,
+  type MobileSheetState,
 } from "./utils/navigation";
 import { sortPlaylists } from "./utils/playlists";
 
@@ -112,7 +113,7 @@ export function App() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
-  const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
+  const [mobileSheetState, setMobileSheetState] = useState<MobileSheetState>("collapsed");
   const [nowPlayingMounted, setNowPlayingMounted] = useState(false);
   const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
@@ -132,7 +133,7 @@ export function App() {
       };
     }
 
-    setMobileSheetExpanded(false);
+    setMobileSheetState("collapsed");
     setNowPlayingVisible(false);
     const timer = setTimeout(() => {
       setNowPlayingMounted(false);
@@ -199,7 +200,7 @@ export function App() {
 
   const navigateTo = useCallback((view: MainView) => {
     setNowPlayingOpen(false);
-    setMobileSheetExpanded(false);
+    setMobileSheetState("collapsed");
     setActiveView((current) => {
       if (view !== "artist") {
         prevViewRef.current = view;
@@ -262,7 +263,7 @@ export function App() {
       setViewHistory((hist) => pushViewHistory(hist, activeView, "artist"));
       setSelectedArtist(clean);
       setNowPlayingOpen(false);
-      setMobileSheetExpanded(false);
+      setMobileSheetState("collapsed");
       setActiveView("artist");
     },
     [activeView]
@@ -280,7 +281,7 @@ export function App() {
       setNowPlayingTab("lyrics");
       setNowPlayingOpen(true);
       if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
-        setMobileSheetExpanded(true);
+        setMobileSheetState("half");
       }
       socket.requestLyrics(track.title, track.author, track.duration);
     },
@@ -294,7 +295,7 @@ export function App() {
       setNowPlayingTab("related");
       setNowPlayingOpen(true);
       if (typeof window !== "undefined" && !window.matchMedia("(min-width: 1024px)").matches) {
-        setMobileSheetExpanded(true);
+        setMobileSheetState("half");
       }
     },
     [socket.playerState?.current?.identifier]
@@ -361,7 +362,7 @@ export function App() {
       shortcutsOpen,
       mobileMenuOpen,
       nowPlayingOpen,
-      mobileSheetExpanded,
+      mobileSheetState,
       activeView,
       viewHistory,
     }),
@@ -369,7 +370,7 @@ export function App() {
       activeView,
       contextMenu,
       mobileMenuOpen,
-      mobileSheetExpanded,
+      mobileSheetState,
       nowPlayingOpen,
       saveModalTracks,
       shortcutsOpen,
@@ -429,15 +430,19 @@ export function App() {
           setMobileMenuOpen(false);
           nextSnap.mobileMenuOpen = false;
           break;
+        case "collapse_sheet_to_half":
+          setMobileSheetState("half");
+          nextSnap.mobileSheetState = "half";
+          break;
         case "collapse_now_playing_sheet":
-          setMobileSheetExpanded(false);
-          nextSnap.mobileSheetExpanded = false;
+          setMobileSheetState("collapsed");
+          nextSnap.mobileSheetState = "collapsed";
           break;
         case "close_now_playing":
           setNowPlayingOpen(false);
-          setMobileSheetExpanded(false);
+          setMobileSheetState("collapsed");
           nextSnap.nowPlayingOpen = false;
-          nextSnap.mobileSheetExpanded = false;
+          nextSnap.mobileSheetState = "collapsed";
           break;
         case "pop_view": {
           const target = snap.viewHistory[snap.viewHistory.length - 1] ?? "home";
@@ -994,8 +999,8 @@ export function App() {
                   artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
                   lyricsAutoScroll={socket.preferences.lyricsAutoScroll}
                   longPressMs={socket.preferences.longPressMs ?? 450}
-                  mobileSheetExpanded={mobileSheetExpanded}
-                  onMobileSheetExpandedChange={setMobileSheetExpanded}
+                  mobileSheetState={mobileSheetState}
+                  onMobileSheetStateChange={setMobileSheetState}
                   likedTrackIds={likedTrackIds}
                   onTabChange={(tab) => {
                     setLyricsSubjectTrack(null);

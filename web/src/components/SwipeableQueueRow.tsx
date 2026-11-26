@@ -174,7 +174,7 @@ export function SwipeableQueueRow({
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
       onClickCapture={handleClickCapture}
-      className={`relative overflow-hidden touch-pan-y select-none ${className}`}
+      className={`relative w-full min-w-0 overflow-hidden touch-pan-y select-none ${className}`}
     >
       {showBackdrop && (
         <div
@@ -190,7 +190,7 @@ export function SwipeableQueueRow({
         style={{
           transform: offsetX !== 0 ? `translateX(${offsetX}px)` : undefined,
         }}
-        className={`relative ${
+        className={`relative w-full min-w-0 ${
           dragging ? "" : "transition-transform duration-200 ease-out"
         }`}
       >

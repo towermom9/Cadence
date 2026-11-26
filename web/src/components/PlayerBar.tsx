@@ -6,7 +6,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
-  type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   ChevronDown,
@@ -105,7 +104,6 @@ export function PlayerBar({
   const [hoverInfo, setHoverInfo] = useState<{ pct: number; ms: number } | null>(null);
   const [effectsOpen, setEffectsOpen] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [miniSwipeOffsetX, setMiniSwipeOffsetX] = useState(0);
 
   const barRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
@@ -113,10 +111,6 @@ export function PlayerBar({
   const scrubPosRef = useRef(0);
   const isSeekingRef = useRef(false);
   const effectsRef = useRef<HTMLDivElement>(null);
-  const miniTouchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const miniGestureRef = useRef<"idle" | "swipe-x" | "swipe-y">("idle");
-  const miniSuppressClickRef = useRef(false);
-  const miniSuppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const track = playerState?.current ?? null;
   const duration = track?.duration || 0;
@@ -134,14 +128,6 @@ export function PlayerBar({
     disabled: !isConnected || !privileged,
     onCommit: onVolume,
   });
-
-  useEffect(() => {
-    return () => {
-      if (miniSuppressTimerRef.current) {
-        clearTimeout(miniSuppressTimerRef.current);
-      }
-    };
-  }, []);
 
   const emptyVcPauseAt = playerState?.emptyVcPauseAt ?? null;
   const countingDownEmptyVc = Boolean(
@@ -166,67 +152,6 @@ export function PlayerBar({
     emptyVcRemainingSec > 0
       ? `${Math.floor(emptyVcRemainingSec / 60)}:${String(emptyVcRemainingSec % 60).padStart(2, "0")}`
       : null;
-
-  const triggerMiniSuppressClick = () => {
-    miniSuppressClickRef.current = true;
-    if (miniSuppressTimerRef.current) clearTimeout(miniSuppressTimerRef.current);
-    miniSuppressTimerRef.current = setTimeout(() => {
-      miniSuppressClickRef.current = false;
-    }, 320);
-  };
-
-  const handleMiniTouchStart = (e: ReactTouchEvent<HTMLDivElement>) => {
-    if (e.touches.length !== 1) return;
-    const t = e.touches[0];
-    miniTouchStartRef.current = { x: t.clientX, y: t.clientY };
-    miniGestureRef.current = "idle";
-  };
-
-  const handleMiniTouchMove = (e: ReactTouchEvent<HTMLDivElement>) => {
-    const start = miniTouchStartRef.current;
-    if (!start || e.touches.length !== 1) return;
-    const t = e.touches[0];
-    const dx = t.clientX - start.x;
-    const dy = t.clientY - start.y;
-    if (miniGestureRef.current === "idle") {
-      if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.15) {
-        miniGestureRef.current = "swipe-y";
-      } else if (hasPlayer && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-        miniGestureRef.current = "swipe-x";
-      }
-    }
-    if (miniGestureRef.current === "swipe-x") {
-      setMiniSwipeOffsetX(Math.max(-96, Math.min(96, dx * 0.65)));
-    }
-  };
-
-  const handleMiniTouchEnd = (e: ReactTouchEvent<HTMLDivElement>) => {
-    const start = miniTouchStartRef.current;
-    const gesture = miniGestureRef.current;
-    miniTouchStartRef.current = null;
-    miniGestureRef.current = "idle";
-    setMiniSwipeOffsetX(0);
-    if (!start) return;
-    const endTouch = e.changedTouches[0];
-    if (!endTouch) return;
-    const dx = endTouch.clientX - start.x;
-    const dy = endTouch.clientY - start.y;
-
-    if (gesture === "swipe-y" && dy < -35) {
-      triggerMiniSuppressClick();
-      onToggleDrawer();
-    } else if (gesture === "swipe-x" && hasPlayer) {
-      if (dx < -55) {
-        triggerMiniSuppressClick();
-        onSkip();
-      } else if (dx > 55) {
-        triggerMiniSuppressClick();
-        onPrevious();
-      } else if (Math.abs(dx) > 16) {
-        triggerMiniSuppressClick();
-      }
-    }
-  };
 
   const applyBarVisualPct = useCallback((pct: number) => {
     const safe = Math.min(100, Math.max(0, pct));
@@ -413,24 +338,7 @@ export function PlayerBar({
       </div>
 
       {/* Mobile Mini-Player (< md) */}
-      <div
-        onTouchStart={handleMiniTouchStart}
-        onTouchMove={handleMiniTouchMove}
-        onTouchEnd={handleMiniTouchEnd}
-        onTouchCancel={handleMiniTouchEnd}
-        onClickCapture={(e) => {
-          if (miniSuppressClickRef.current) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        }}
-        style={{
-          transform: miniSwipeOffsetX !== 0 ? `translateX(${miniSwipeOffsetX}px)` : undefined,
-        }}
-        className={`flex h-14 items-center justify-between gap-2 px-3 md:hidden ${
-          miniSwipeOffsetX === 0 ? "transition-transform duration-200 ease-out" : ""
-        }`}
-      >
+      <div className="flex h-14 items-center justify-between gap-2 px-3 md:hidden">
         <button
           type="button"
           onClick={onToggleDrawer}

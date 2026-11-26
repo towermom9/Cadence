@@ -12,7 +12,7 @@ const baseSnapshot: BackStackSnapshot = {
   shortcutsOpen: false,
   mobileMenuOpen: false,
   nowPlayingOpen: false,
-  mobileSheetExpanded: false,
+  mobileSheetState: "collapsed",
   activeView: "home",
   viewHistory: [],
 };
@@ -28,7 +28,7 @@ describe("web/src/utils/navigation back stack", () => {
         contextMenuOpen: true,
         saveModalOpen: true,
         nowPlayingOpen: true,
-        mobileSheetExpanded: true,
+        mobileSheetState: "full",
         activeView: "settings",
       })
     ).toBe("close_context_menu");
@@ -62,7 +62,16 @@ describe("web/src/utils/navigation back stack", () => {
       resolveBackAction({
         ...baseSnapshot,
         nowPlayingOpen: true,
-        mobileSheetExpanded: true,
+        mobileSheetState: "full",
+        activeView: "library",
+      })
+    ).toBe("collapse_sheet_to_half");
+
+    expect(
+      resolveBackAction({
+        ...baseSnapshot,
+        nowPlayingOpen: true,
+        mobileSheetState: "half",
         activeView: "library",
       })
     ).toBe("collapse_now_playing_sheet");
@@ -71,7 +80,7 @@ describe("web/src/utils/navigation back stack", () => {
       resolveBackAction({
         ...baseSnapshot,
         nowPlayingOpen: true,
-        mobileSheetExpanded: false,
+        mobileSheetState: "collapsed",
         activeView: "library",
       })
     ).toBe("close_now_playing");

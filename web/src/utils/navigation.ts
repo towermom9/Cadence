@@ -1,12 +1,14 @@
 import type { MainView } from "../components/Sidebar";
 
+export type MobileSheetState = "collapsed" | "half" | "full";
+
 export interface BackStackSnapshot {
   contextMenuOpen: boolean;
   saveModalOpen: boolean;
   shortcutsOpen: boolean;
   mobileMenuOpen: boolean;
   nowPlayingOpen: boolean;
-  mobileSheetExpanded: boolean;
+  mobileSheetState: MobileSheetState;
   activeView: MainView;
   viewHistory: MainView[];
 }
@@ -16,6 +18,7 @@ export type BackAction =
   | "close_save_modal"
   | "close_shortcuts"
   | "close_mobile_menu"
+  | "collapse_sheet_to_half"
   | "collapse_now_playing_sheet"
   | "close_now_playing"
   | "pop_view"
@@ -26,7 +29,10 @@ export function resolveBackAction(snapshot: BackStackSnapshot): BackAction {
   if (snapshot.saveModalOpen) return "close_save_modal";
   if (snapshot.shortcutsOpen) return "close_shortcuts";
   if (snapshot.mobileMenuOpen) return "close_mobile_menu";
-  if (snapshot.nowPlayingOpen && snapshot.mobileSheetExpanded) {
+  if (snapshot.nowPlayingOpen && snapshot.mobileSheetState === "full") {
+    return "collapse_sheet_to_half";
+  }
+  if (snapshot.nowPlayingOpen && snapshot.mobileSheetState === "half") {
     return "collapse_now_playing_sheet";
   }
   if (snapshot.nowPlayingOpen) return "close_now_playing";

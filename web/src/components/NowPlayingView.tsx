@@ -53,11 +53,13 @@ import type {
 import { useVolumeControl } from "../hooks/useVolumeControl";
 import { formatMs, sourceLabel } from "../utils/format";
 import { parseSyncedLyrics, stripInlineTags } from "../utils/lrc";
+import type { MobileSheetState } from "../utils/navigation";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
 import { SwipeableQueueRow } from "./SwipeableQueueRow";
 import { TrackArtwork } from "./TrackArtwork";
 
+export type { MobileSheetState };
 export type NowPlayingTab = "upnext" | "lyrics" | "related";
 
 const AUTOPLAY_MOODS: { id: AutoplayMood; label: string }[] = [
@@ -86,8 +88,8 @@ interface Props {
   artworkSeekSeconds: number;
   lyricsAutoScroll: boolean;
   longPressMs?: number;
-  mobileSheetExpanded?: boolean;
-  onMobileSheetExpandedChange?: (expanded: boolean) => void;
+  mobileSheetState?: MobileSheetState;
+  onMobileSheetStateChange?: (state: MobileSheetState) => void;
   likedTrackIds: Set<string>;
   onTabChange: (tab: NowPlayingTab) => void;
   onCloseMobile?: () => void;
@@ -136,8 +138,8 @@ export function NowPlayingView({
   artworkSeekSeconds,
   lyricsAutoScroll,
   longPressMs = 450,
-  mobileSheetExpanded: mobileSheetExpandedProp,
-  onMobileSheetExpandedChange,
+  mobileSheetState: mobileSheetStateProp,
+  onMobileSheetStateChange,
   likedTrackIds,
   onTabChange,
   onCloseMobile,
@@ -182,31 +184,28 @@ export function NowPlayingView({
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
-  const [internalSheetExpanded, setInternalSheetExpanded] = useState(false);
-  const isControlledSheet = typeof mobileSheetExpandedProp === "boolean";
-  const mobileSheetExpanded = isControlledSheet ? mobileSheetExpandedProp : internalSheetExpanded;
-  const setMobileSheetExpanded = useCallback(
-    (next: boolean | ((prev: boolean) => boolean)) => {
-      const resolved = typeof next === "function" ? next(mobileSheetExpanded) : next;
+  const [internalSheetState, setInternalSheetState] = useState<MobileSheetState>("collapsed");
+  const isControlledSheet = mobileSheetStateProp !== undefined;
+  const mobileSheetState = isControlledSheet ? mobileSheetStateProp : internalSheetState;
+  const setMobileSheetState = useCallback(
+    (next: MobileSheetState) => {
       if (!isControlledSheet) {
-        setInternalSheetExpanded(resolved);
+        setInternalSheetState(next);
       }
-      onMobileSheetExpandedChange?.(resolved);
+      onMobileSheetStateChange?.(next);
     },
-    [isControlledSheet, mobileSheetExpanded, onMobileSheetExpandedChange]
+    [isControlledSheet, onMobileSheetStateChange]
   );
+  const isSheetOpen = mobileSheetState !== "collapsed";
   const [mobileVolumeOpen, setMobileVolumeOpen] = useState(false);
   const [mobileScrub, setMobileScrub] = useState<number | null>(null);
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
   const [sheetDragOffsetY, setSheetDragOffsetY] = useState<number | null>(null);
-  const [artworkSwipeOffsetX, setArtworkSwipeOffsetX] = useState(0);
   const sheetSwipeStartYRef = useRef<number | null>(null);
   const sheetContainerRef = useRef<HTMLDivElement>(null);
   const sheetDraggedRef = useRef(false);
-  const artTouchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const artGestureRef = useRef<"idle" | "swipe-x" | "swipe-y">("idle");
   const justDraggedRef = useRef(false);
   const dragClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -692,6 +691,8 @@ export function NowPlayingView({
     [onTrackContextMenu]
   );
 
+  const HALF_OFFSET_Y = 210;
+
   const handleSheetHandleTouchStart = useCallback((e: ReactTouchEvent<HTMLElement>) => {
     sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
     sheetDraggedRef.current = false;
@@ -702,18 +703,22 @@ export function NowPlayingView({
       const startY = sheetSwipeStartYRef.current;
       const curY = e.touches[0]?.clientY;
       if (startY === null || typeof curY !== "number") return;
-      const sheetH = sheetContainerRef.current?.offsetHeight || 640;
-      const maxOffset = Math.max(120, sheetH - 64);
+      const sheetH = sheetContainerRef.current?.offsetHeight || 720;
+      const collapsedY = Math.max(HALF_OFFSET_Y + 120, sheetH - 56);
       const dy = curY - startY;
       if (Math.abs(dy) > 6) {
         sheetDraggedRef.current = true;
       }
-      const nextOffset = mobileSheetExpanded
-        ? Math.max(0, Math.min(maxOffset, dy))
-        : Math.max(0, Math.min(maxOffset, maxOffset + dy));
+      const baseOffset =
+        mobileSheetState === "full"
+          ? 0
+          : mobileSheetState === "half"
+            ? HALF_OFFSET_Y
+            : collapsedY;
+      const nextOffset = Math.max(0, Math.min(collapsedY, baseOffset + dy));
       setSheetDragOffsetY(nextOffset);
     },
-    [mobileSheetExpanded]
+    [mobileSheetState]
   );
 
   const handleSheetHandleTouchEnd = useCallback(
@@ -723,45 +728,89 @@ export function NowPlayingView({
       sheetSwipeStartYRef.current = null;
       setSheetDragOffsetY(null);
       if (startY === null || typeof endY !== "number") return;
+      const sheetH = sheetContainerRef.current?.offsetHeight || 720;
+      const collapsedY = Math.max(HALF_OFFSET_Y + 120, sheetH - 56);
+      const baseOffset =
+        mobileSheetState === "full"
+          ? 0
+          : mobileSheetState === "half"
+            ? HALF_OFFSET_Y
+            : collapsedY;
       const dy = endY - startY;
-      if (dy < -45) {
-        setMobileSheetExpanded(true);
-      } else if (dy > 45) {
-        setMobileSheetExpanded(false);
+      const endOffset = Math.max(0, Math.min(collapsedY, baseOffset + dy));
+
+      if (mobileSheetState === "collapsed") {
+        if (endOffset < HALF_OFFSET_Y * 0.55) {
+          setMobileSheetState("full");
+        } else if (dy < -45) {
+          setMobileSheetState("half");
+        }
+      } else if (mobileSheetState === "half") {
+        if (dy < -45) {
+          setMobileSheetState("full");
+        } else if (dy > 45) {
+          setMobileSheetState("collapsed");
+        }
+      } else {
+        if (endOffset > (HALF_OFFSET_Y + collapsedY) / 2) {
+          setMobileSheetState("collapsed");
+        } else if (dy > 45) {
+          setMobileSheetState("half");
+        }
       }
     },
-    [setMobileSheetExpanded]
+    [mobileSheetState, setMobileSheetState]
   );
 
   const mobileSheetY =
     sheetDragOffsetY !== null
       ? `${sheetDragOffsetY}px`
-      : mobileSheetExpanded
+      : mobileSheetState === "full"
         ? "0px"
-        : "calc(100% - 64px)";
-
-  const mobileProgressPct =
-    duration > 0 ? Math.min(100, Math.max(0, (clampedMobilePos / duration) * 100)) : 0;
+        : mobileSheetState === "half"
+          ? "210px"
+          : "calc(100% - 56px)";
 
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10">
-      {ambienceMode && current && (
+      {ambienceMode && current && !isSheetOpen && (
         <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
           <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
         </div>
       )}
+      {ambienceMode && current && isSheetOpen && (
+        <div className="pointer-events-none absolute inset-0 -z-0 hidden overflow-hidden opacity-25 blur-3xl lg:block">
+          <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
+        </div>
+      )}
 
-      {/* Left Clean Artwork Column (Desktop) + Full Mobile Player (< lg) */}
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-between lg:col-span-7 lg:flex-initial lg:justify-center">
+      {/* Left Clean Artwork Column (Desktop) + v0.2.2 Mobile Player / Compact Halfway Hero (< lg) */}
+      <div
+        className={`relative z-10 flex min-h-0 min-w-0 flex-col lg:col-span-7 lg:flex-initial lg:justify-center ${
+          isSheetOpen ? "shrink-0 overflow-hidden" : "flex-1 justify-between"
+        }`}
+      >
+        {/* Mobile Expanded Top Hero Artwork Backdrop */}
+        {isSheetOpen && current && (
+          <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
+            <TrackArtwork
+              track={current}
+              className="h-full w-full scale-105 opacity-45"
+              iconClassName="h-16 w-16"
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/75 to-[#111111]" />
+          </div>
+        )}
+
         {/* Mobile Top Bar (< lg) */}
         <div
           onTouchStart={(e) => {
-            if (!mobileSheetExpanded) {
+            if (!isSheetOpen) {
               sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
             }
           }}
           onTouchEnd={(e) => {
-            if (mobileSheetExpanded) return;
+            if (isSheetOpen) return;
             const startY = sheetSwipeStartYRef.current;
             sheetSwipeStartYRef.current = null;
             const endY = e.changedTouches[0]?.clientY;
@@ -773,21 +822,22 @@ export function NowPlayingView({
         >
           <button
             type="button"
-            onClick={() => onCloseMobile?.()}
-            aria-label="Minimize Now Playing"
+            onClick={() => {
+              if (mobileSheetState === "full") {
+                setMobileSheetState("half");
+              } else if (mobileSheetState === "half") {
+                setMobileSheetState("collapsed");
+              } else {
+                onCloseMobile?.();
+              }
+            }}
+            aria-label={isSheetOpen ? "Collapse queue sheet" : "Minimize Now Playing"}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10"
           >
             <ChevronDown className="h-5 w-5" />
           </button>
 
-          <div className="min-w-0 flex-1 text-center">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-              Playing from
-            </p>
-            <p className="truncate text-xs font-semibold text-zinc-100">
-              {resolvedQueueName}
-            </p>
-          </div>
+          <div className="flex-1" />
 
           <div className="flex items-center gap-0.5">
             <button
@@ -816,8 +866,14 @@ export function NowPlayingView({
           </div>
         </div>
 
-        <div className="mx-auto flex w-full flex-1 flex-col items-center justify-between px-5 pb-20 pt-2 lg:max-w-[460px] lg:flex-initial lg:justify-center lg:p-0">
-          {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean art + swipe prev/next/close) */}
+        <div
+          className={`mx-auto flex w-full flex-col items-center lg:max-w-[460px] ${
+            isSheetOpen
+              ? "px-4 pb-2 pt-0.5 lg:px-0 lg:pb-0 lg:pt-0"
+              : "flex-1 justify-between px-5 pb-16 pt-2 lg:flex-initial lg:justify-center lg:p-0"
+          }`}
+        >
+          {/* Centered Artwork (Desktop: click pauses + hover overlay; Mobile: clean art without tap-to-pause, ±10s, or darkening) */}
           <div
             role={current ? "button" : undefined}
             tabIndex={current ? 0 : undefined}
@@ -838,58 +894,6 @@ export function NowPlayingView({
               }
               onTogglePause();
             }}
-            onTouchStart={(e) => {
-              if (e.touches.length !== 1) return;
-              if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-                return;
-              }
-              const t = e.touches[0];
-              artTouchStartRef.current = { x: t.clientX, y: t.clientY };
-              artGestureRef.current = "idle";
-            }}
-            onTouchMove={(e) => {
-              const start = artTouchStartRef.current;
-              if (!start || e.touches.length !== 1) return;
-              const t = e.touches[0];
-              const dx = t.clientX - start.x;
-              const dy = t.clientY - start.y;
-              if (artGestureRef.current === "idle") {
-                if (current && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.2) {
-                  artGestureRef.current = "swipe-x";
-                } else if (dy > 14 && dy > Math.abs(dx) * 1.2) {
-                  artGestureRef.current = "swipe-y";
-                }
-              }
-              if (artGestureRef.current === "swipe-x") {
-                setArtworkSwipeOffsetX(Math.max(-96, Math.min(96, dx * 0.55)));
-              }
-            }}
-            onTouchEnd={(e) => {
-              const start = artTouchStartRef.current;
-              const gesture = artGestureRef.current;
-              artTouchStartRef.current = null;
-              artGestureRef.current = "idle";
-              setArtworkSwipeOffsetX(0);
-              if (!start) return;
-              const endTouch = e.changedTouches[0];
-              if (!endTouch) return;
-              const dx = endTouch.clientX - start.x;
-              const dy = endTouch.clientY - start.y;
-              if (gesture === "swipe-x" && current) {
-                if (dx < -55) {
-                  onSkip();
-                } else if (dx > 55) {
-                  onPrevious();
-                }
-              } else if (gesture === "swipe-y" && dy > 65) {
-                onCloseMobile?.();
-              }
-            }}
-            onTouchCancel={() => {
-              artTouchStartRef.current = null;
-              artGestureRef.current = "idle";
-              setArtworkSwipeOffsetX(0);
-            }}
             onKeyDown={(e) => {
               if (!current) return;
               if (e.key === "Enter" || e.key === " ") {
@@ -901,12 +905,9 @@ export function NowPlayingView({
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            style={{
-              transform: artworkSwipeOffsetX !== 0 ? `translateX(${artworkSwipeOffsetX}px)` : undefined,
-            }}
-            className={`group relative my-auto block aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
+            className={`group relative aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
               current ? "lg:cursor-pointer" : ""
-            } ${artworkSwipeOffsetX === 0 ? "transition-transform duration-200 ease-out" : ""}`}
+            } ${isSheetOpen ? "hidden lg:block" : "my-auto block"}`}
           >
             <TrackArtwork
               track={current}
@@ -971,7 +972,7 @@ export function NowPlayingView({
           </div>
 
           {/* Mobile Controls (< lg) */}
-          <div className="mt-4 w-full space-y-3.5 lg:hidden">
+          <div className={`w-full lg:hidden ${isSheetOpen ? "space-y-1.5" : "mt-4 space-y-3.5"}`}>
             {current ? (
               <>
                 {/* Title & Artist */}
@@ -982,7 +983,11 @@ export function NowPlayingView({
                     onClick={() => primaryArtist && onOpenArtist(primaryArtist)}
                     className="flex max-w-full items-center gap-1 text-left"
                   >
-                    <h2 className="truncate text-[22px] font-bold leading-tight tracking-tight text-white">
+                    <h2
+                      className={`truncate font-bold tracking-tight text-white ${
+                        isSheetOpen ? "text-lg" : "text-[22px] leading-tight"
+                      }`}
+                    >
                       {current.title}
                     </h2>
                     <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -993,96 +998,98 @@ export function NowPlayingView({
                   </p>
                 </div>
 
-                {/* Horizontal Pill Actions Strip */}
-                <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
-                  <button
-                    type="button"
-                    disabled={current.isStream}
-                    onClick={() => onToggleLike(current)}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
-                      likedTrackIds.has(current.identifier)
-                        ? "bg-white text-black"
-                        : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
-                    }`}
-                  >
-                    <ThumbsUp
-                      className={`h-3.5 w-3.5 ${
-                        likedTrackIds.has(current.identifier) ? "fill-current" : ""
+                {/* Horizontal Pill Actions Strip (shown when collapsed) */}
+                {!isSheetOpen && (
+                  <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
+                    <button
+                      type="button"
+                      disabled={current.isStream}
+                      onClick={() => onToggleLike(current)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
+                        likedTrackIds.has(current.identifier)
+                          ? "bg-white text-black"
+                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
                       }`}
-                    />
-                    <span>{likedTrackIds.has(current.identifier) ? "Liked" : "Like"}</span>
-                  </button>
+                    >
+                      <ThumbsUp
+                        className={`h-3.5 w-3.5 ${
+                          likedTrackIds.has(current.identifier) ? "fill-current" : ""
+                        }`}
+                      />
+                      <span>{likedTrackIds.has(current.identifier) ? "Liked" : "Like"}</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onTabChange("lyrics");
-                      setMobileSheetExpanded(true);
-                    }}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                  >
-                    <MessageSquareText className="h-3.5 w-3.5" />
-                    <span>Lyrics</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange("lyrics");
+                        setMobileSheetState("half");
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <MessageSquareText className="h-3.5 w-3.5" />
+                      <span>Lyrics</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => onOpenSaveModal([current])}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                  >
-                    <ListPlus className="h-3.5 w-3.5" />
-                    <span>Save</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenSaveModal([current])}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <ListPlus className="h-3.5 w-3.5" />
+                      <span>Save</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    disabled={!privileged}
-                    onClick={() => setMobileVolumeOpen((v) => !v)}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
-                      mobileVolumeOpen
-                        ? "bg-white text-black"
-                        : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
-                    }`}
-                  >
-                    {mobileVol.localVolume === 0 ? (
-                      <VolumeX className="h-3.5 w-3.5" />
-                    ) : (
-                      <Volume2 className="h-3.5 w-3.5" />
-                    )}
-                    <span>{mobileVol.localVolume}%</span>
-                  </button>
+                    <button
+                      type="button"
+                      disabled={!privileged}
+                      onClick={() => setMobileVolumeOpen((v) => !v)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
+                        mobileVolumeOpen
+                          ? "bg-white text-black"
+                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
+                      }`}
+                    >
+                      {mobileVol.localVolume === 0 ? (
+                        <VolumeX className="h-3.5 w-3.5" />
+                      ) : (
+                        <Volume2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>{mobileVol.localVolume}%</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => onStartMix(current)}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                  >
-                    <Radio className="h-3.5 w-3.5" />
-                    <span>Mix</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onStartMix(current)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <Radio className="h-3.5 w-3.5" />
+                      <span>Mix</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onTabChange("related");
-                      setMobileSheetExpanded(true);
-                    }}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Related</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange("related");
+                        setMobileSheetState("half");
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Related</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    disabled={!privileged}
-                    onClick={onStop}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40"
-                  >
-                    <PhoneOff className="h-3.5 w-3.5" />
-                    <span>Leave</span>
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      disabled={!privileged}
+                      onClick={onStop}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40"
+                    >
+                      <PhoneOff className="h-3.5 w-3.5" />
+                      <span>Leave</span>
+                    </button>
+                  </div>
+                )}
 
                 {/* Collapsible Inline Mobile Volume Control */}
                 {mobileVolumeOpen && (
@@ -1187,12 +1194,14 @@ export function NowPlayingView({
                     type="button"
                     onClick={onTogglePause}
                     title={playerState?.paused ? "Play" : "Pause"}
-                    className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
+                    className={`flex items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95 ${
+                      isSheetOpen ? "h-12 w-12" : "h-16 w-16"
+                    }`}
                   >
                     {playerState?.paused ? (
-                      <Play className="ml-0.5 h-7 w-7 fill-current" />
+                      <Play className={`ml-0.5 fill-current ${isSheetOpen ? "h-5 w-5" : "h-7 w-7"}`} />
                     ) : (
-                      <Pause className="h-7 w-7 fill-current" />
+                      <Pause className={`fill-current ${isSheetOpen ? "h-5 w-5" : "h-7 w-7"}`} />
                     )}
                   </button>
                   <button
@@ -1228,141 +1237,56 @@ export function NowPlayingView({
         </div>
       </div>
 
-      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Full-Screen Sliding Mobile Sheet) */}
+      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + 3-state Sliding Mobile Sheet: collapsed <-> half <-> full) */}
       <div
         ref={sheetContainerRef}
         style={{ "--mobile-sheet-y": mobileSheetY } as CSSProperties}
-        className={`mobile-queue-sheet absolute inset-0 z-20 flex min-h-0 flex-col border-t border-white/10 bg-[#121212]/95 px-4 pt-1 backdrop-blur-md will-change-transform lg:static lg:inset-auto lg:z-10 lg:col-span-5 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none ${
-          mobileSheetExpanded && sheetDragOffsetY === null ? "rounded-none" : "rounded-t-2xl"
+        className={`mobile-queue-sheet flex min-h-0 min-w-0 flex-col max-lg:absolute max-lg:inset-0 max-lg:z-20 max-lg:border-t max-lg:border-white/10 max-lg:bg-[#121212]/95 max-lg:px-4 max-lg:pt-1 max-lg:backdrop-blur-md max-lg:will-change-transform lg:static lg:z-10 lg:col-span-5 ${
+          mobileSheetState === "half" && sheetDragOffsetY === null ? "max-lg:pb-[210px]" : ""
+        } ${
+          mobileSheetState === "full" && sheetDragOffsetY === null
+            ? "max-lg:rounded-none"
+            : "max-lg:rounded-t-2xl"
         } ${
           sheetDragOffsetY === null
-            ? "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            ? "max-lg:transition-transform max-lg:duration-300 max-lg:ease-[cubic-bezier(0.22,1,0.36,1)]"
             : ""
         }`}
       >
-        {/* Mobile Collapsed Bottom Dock vs Expanded Mini-Player Header (< lg) */}
-        {mobileSheetExpanded ? (
-          <div
-            onTouchStart={handleSheetHandleTouchStart}
-            onTouchMove={handleSheetHandleTouchMove}
-            onTouchEnd={handleSheetHandleTouchEnd}
-            onTouchCancel={handleSheetHandleTouchEnd}
-            className="touch-none -mx-4 shrink-0 border-b border-white/10 px-4 pt-1.5 lg:hidden"
-          >
-            <div className="mx-auto mb-1.5 h-1 w-10 rounded-full bg-white/30" />
-            <div className="flex items-center gap-2.5 pb-2">
-              <button
-                type="button"
-                data-inline-btn="true"
-                onClick={() => {
-                  if (sheetDraggedRef.current) {
-                    sheetDraggedRef.current = false;
-                    return;
-                  }
-                  setMobileSheetExpanded(false);
-                }}
-                className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-              >
-                <TrackArtwork
-                  track={current}
-                  className="h-10 w-10 shrink-0 rounded-lg"
-                  iconClassName="h-4 w-4"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-white">
-                    {current ? current.title : resolvedQueueName}
-                  </p>
-                  <p className="truncate text-xs text-zinc-400">
-                    {current ? current.author : "Nothing playing"}
-                  </p>
-                </div>
-              </button>
-
-              <div className="flex shrink-0 items-center gap-0.5">
-                <button
-                  type="button"
-                  disabled={!current}
-                  onClick={onTogglePause}
-                  aria-label={playerState?.paused ? "Play" : "Pause"}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-white transition hover:bg-white/10 disabled:opacity-40"
-                >
-                  {playerState?.paused ? (
-                    <Play className="ml-0.5 h-5 w-5 fill-current" />
-                  ) : (
-                    <Pause className="h-5 w-5 fill-current" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  disabled={!current}
-                  onClick={onSkip}
-                  aria-label="Skip track"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10 disabled:opacity-40"
-                >
-                  <SkipForward className="h-4 w-4 fill-current" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMobileSheetExpanded(false)}
-                  aria-label="Collapse sheet"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                >
-                  <ChevronDown className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-            <div className="h-[2px] w-full bg-white/10">
-              <div
-                style={{ width: `${mobileProgressPct}%` }}
-                className="h-full bg-[var(--cadence-accent)]"
-              />
-            </div>
-          </div>
-        ) : (
-          <div
-            onTouchStart={handleSheetHandleTouchStart}
-            onTouchMove={handleSheetHandleTouchMove}
-            onTouchEnd={handleSheetHandleTouchEnd}
-            onTouchCancel={handleSheetHandleTouchEnd}
-            className="touch-none shrink-0 pt-1.5 pb-1 lg:hidden"
-          >
-            <div className="mx-auto mb-1.5 h-1 w-10 rounded-full bg-white/30" />
-            <div className="flex items-center">
-              {(
-                [
-                  { id: "upnext", label: "Up next" },
-                  { id: "lyrics", label: "Lyrics" },
-                  { id: "related", label: "Related" },
-                ] as const
-              ).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-inline-btn="true"
-                  onClick={() => {
-                    if (sheetDraggedRef.current) {
-                      sheetDraggedRef.current = false;
-                      return;
-                    }
-                    onTabChange(item.id);
-                    setMobileSheetExpanded(true);
-                  }}
-                  className={`flex-1 py-2 text-center text-xs font-semibold uppercase tracking-wider transition ${
-                    activeTab === item.id ? "text-white" : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div
-          className={`${
-            mobileSheetExpanded || sheetDragOffsetY !== null ? "flex" : "hidden lg:flex"
-          } shrink-0 items-center border-b border-white/10`}
+        {/* Mobile Sheet Grab Handle + Collapsed Peek Label */}
+        <button
+          type="button"
+          data-inline-btn="true"
+          onClick={() => {
+            if (sheetDraggedRef.current) {
+              sheetDraggedRef.current = false;
+              return;
+            }
+            if (mobileSheetState === "collapsed") {
+              onTabChange("upnext");
+              setMobileSheetState("half");
+            } else if (mobileSheetState === "half") {
+              setMobileSheetState("collapsed");
+            } else {
+              setMobileSheetState("half");
+            }
+          }}
+          onTouchStart={handleSheetHandleTouchStart}
+          onTouchMove={handleSheetHandleTouchMove}
+          onTouchEnd={handleSheetHandleTouchEnd}
+          onTouchCancel={handleSheetHandleTouchEnd}
+          aria-label={isSheetOpen ? "Collapse queue sheet" : "Expand queue sheet"}
+          className="touch-none mx-auto mb-1 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2 text-center lg:hidden"
         >
+          <span className="h-1 w-10 rounded-full bg-white/30" />
+          {mobileSheetState === "collapsed" && (
+            <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
+              {resolvedQueueName}
+            </span>
+          )}
+        </button>
+
+        <div className="flex shrink-0 items-center border-b border-white/10">
           {(
             [
               { id: "upnext", label: "Up next" },
@@ -1390,7 +1314,7 @@ export function NowPlayingView({
 
         {/* UP NEXT */}
         {activeTab === "upnext" && (
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
             {/* Horizontal Mood Filter Pills on Mobile & Playing From Header */}
             <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">
               <div className="min-w-0">
@@ -1436,7 +1360,7 @@ export function NowPlayingView({
             </div>
 
             {/* Scrollable Queue Timeline */}
-            <div ref={queueScrollRef} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+            <div ref={queueScrollRef} className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
               {!current && queue.length === 0 && previousEntries.length === 0 && (
                 <div className="mb-3 rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-zinc-400">
                   Nothing in the queue yet. Search or click a song to play.
@@ -2359,7 +2283,7 @@ export function NowPlayingView({
 
         {/* LYRICS */}
         {activeTab === "lyrics" && (
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
             {!activeLyricsTrack ? (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                 Play a track to load lyrics.
@@ -2419,7 +2343,7 @@ export function NowPlayingView({
                   </div>
                 </div>
 
-                <div className="relative flex min-h-0 flex-1 flex-col">
+                <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   <div
                     ref={lyricsContainerRef}
                     onWheel={handleManualLyricsScroll}
@@ -2551,7 +2475,7 @@ export function NowPlayingView({
 
         {/* RELATED / SUGGESTIONS */}
         {activeTab === "related" && (
-          <div className="flex min-h-0 flex-1 flex-col pt-3">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
             {!activeRelatedTrack ? (
               <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-zinc-400">
                 Play or right-click a track to see related song suggestions.
@@ -2586,7 +2510,7 @@ export function NowPlayingView({
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
+                <div className="min-h-0 min-w-0 flex-1 space-y-0.5 overflow-y-auto pr-1">
                   {relatedLoading && relatedTracks.length === 0 ? (
                     <div className="flex items-center justify-center gap-2 py-12 text-sm text-zinc-400">
                       <Loader2 className="h-4 w-4 animate-spin text-white" />

@@ -252,6 +252,10 @@ body,
     transform: translateY(var(--mobile-sheet-y, 0px));
   }
 
+  :root[data-bg="amoled"] .mobile-queue-sheet {
+    background-color: rgba(0, 0, 0, 0.94) !important;
+  }
+
   .overflow-x-auto {
     scrollbar-width: none;
     -ms-overflow-style: none;
