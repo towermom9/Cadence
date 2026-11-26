@@ -71,6 +71,7 @@ interface Props {
   onRemoveFromHistory?: (opts: { historyId?: number; trackIdentifier?: string }) => void;
   onPlayPlaylist: (playlistId: string, shuffle?: boolean) => void;
   onTogglePinPlaylist: (playlistId: string) => void;
+  onCreatePlaylistWithTracks: (name: string, tracks: TrackDTO[], pin?: boolean) => void;
   onSyncPlaylist: (playlistId: string) => void;
   onDeletePlaylist: (playlistId: string) => void;
   onToast: (level: ToastLevel, message: string) => void;
@@ -127,6 +128,7 @@ export function ContextMenu({
   onRemoveFromHistory,
   onPlayPlaylist,
   onTogglePinPlaylist,
+  onCreatePlaylistWithTracks,
   onSyncPlaylist,
   onDeletePlaylist,
   onToast,
@@ -485,111 +487,158 @@ export function ContextMenu({
             </>
           )}
         </>
-      ) : (
-        <>
-          <div className="border-b border-white/8 px-4 py-2">
-            <p className="truncate text-xs font-semibold text-white">{menu.playlist.name}</p>
-            <p className="truncate text-[11px] text-zinc-400">
-              {menu.playlist.tracks.length}{" "}
-              {menu.playlist.tracks.length === 1 ? "track" : "tracks"}
-            </p>
-          </div>
+      ) : (() => {
+        const isHistoryPlaylist = menu.playlist.id.startsWith("history-pl:");
+        return (
+          <>
+            <div className="border-b border-white/8 px-4 py-2">
+              <p className="truncate text-xs font-semibold text-white">{menu.playlist.name}</p>
+              <p className="truncate text-[11px] text-zinc-400">
+                {menu.playlist.tracks.length}{" "}
+                {menu.playlist.tracks.length === 1 ? "track" : "tracks"}
+              </p>
+            </div>
 
-          <button
-            type="button"
-            disabled={menu.playlist.tracks.length === 0}
-            onClick={() => {
-              onPlayPlaylist(menu.playlist.id, false);
-              onClose();
-            }}
-            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
-          >
-            <Play className="h-4 w-4 text-zinc-300" />
-            <span>Play</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={menu.playlist.tracks.length === 0}
-            onClick={() => {
-              onPlayPlaylist(menu.playlist.id, true);
-              onClose();
-            }}
-            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
-          >
-            <Shuffle className="h-4 w-4 text-zinc-300" />
-            <span>Shuffle play</span>
-          </button>
-
-          <button
-            type="button"
-            disabled={menu.playlist.tracks.length === 0}
-            onClick={() => {
-              onEnqueue(menu.playlist.tracks, "end", menu.playlist.name);
-              onClose();
-            }}
-            className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
-          >
-            <ListPlus className="h-4 w-4 text-zinc-300" />
-            <span>Add to queue</span>
-          </button>
-
-          {!menu.playlist.isLiked && (
             <button
               type="button"
+              disabled={menu.playlist.tracks.length === 0}
               onClick={() => {
-                onTogglePinPlaylist(menu.playlist.id);
+                if (isHistoryPlaylist) {
+                  onEnqueue(menu.playlist.tracks, "replace", menu.playlist.name);
+                } else {
+                  onPlayPlaylist(menu.playlist.id, false);
+                }
                 onClose();
               }}
-              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
             >
-              {menu.playlist.isPinned ? (
-                <>
-                  <PinOff className="h-4 w-4 text-zinc-300" />
-                  <span>Unpin playlist</span>
-                </>
-              ) : (
-                <>
+              <Play className="h-4 w-4 text-zinc-300" />
+              <span>Play</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={menu.playlist.tracks.length === 0}
+              onClick={() => {
+                if (isHistoryPlaylist) {
+                  const shuffled = [...menu.playlist.tracks];
+                  for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                  }
+                  onEnqueue(shuffled, "replace", menu.playlist.name);
+                } else {
+                  onPlayPlaylist(menu.playlist.id, true);
+                }
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+            >
+              <Shuffle className="h-4 w-4 text-zinc-300" />
+              <span>Shuffle play</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={menu.playlist.tracks.length === 0}
+              onClick={() => {
+                onEnqueue(menu.playlist.tracks, "end", menu.playlist.name);
+                onClose();
+              }}
+              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+            >
+              <ListPlus className="h-4 w-4 text-zinc-300" />
+              <span>Add to queue</span>
+            </button>
+
+            {isHistoryPlaylist ? (
+              <>
+                <button
+                  type="button"
+                  disabled={menu.playlist.tracks.length === 0}
+                  onClick={() => {
+                    onCreatePlaylistWithTracks(menu.playlist.name, menu.playlist.tracks, false);
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+                >
+                  <BookmarkPlus className="h-4 w-4 text-zinc-300" />
+                  <span>Save to Library</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={menu.playlist.tracks.length === 0}
+                  onClick={() => {
+                    onCreatePlaylistWithTracks(menu.playlist.name, menu.playlist.tracks, true);
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10 disabled:opacity-40"
+                >
                   <Pin className="h-4 w-4 text-zinc-300" />
-                  <span>Pin playlist</span>
-                </>
-              )}
-            </button>
-          )}
+                  <span>Pin to Listen again</span>
+                </button>
+              </>
+            ) : (
+              <>
+                {!menu.playlist.isLiked && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onTogglePinPlaylist(menu.playlist.id);
+                      onClose();
+                    }}
+                    className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+                  >
+                    {menu.playlist.isPinned ? (
+                      <>
+                        <PinOff className="h-4 w-4 text-zinc-300" />
+                        <span>Unpin playlist</span>
+                      </>
+                    ) : (
+                      <>
+                        <Pin className="h-4 w-4 text-zinc-300" />
+                        <span>Pin playlist</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
-          {menu.playlist.sourceUrl && (
-            <button
-              type="button"
-              onClick={() => {
-                onSyncPlaylist(menu.playlist.id);
-                onClose();
-              }}
-              className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
-            >
-              <RefreshCw className="h-4 w-4 text-zinc-300" />
-              <span>Sync playlist</span>
-            </button>
-          )}
+                {menu.playlist.sourceUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSyncPlaylist(menu.playlist.id);
+                      onClose();
+                    }}
+                    className="flex w-full items-center gap-3.5 px-4 py-2 text-left transition hover:bg-white/10"
+                  >
+                    <RefreshCw className="h-4 w-4 text-zinc-300" />
+                    <span>Sync playlist</span>
+                  </button>
+                )}
 
-          {!menu.playlist.isLiked && (
-            <>
-              <div className="my-1 border-t border-white/10" />
+                {!menu.playlist.isLiked && (
+                  <>
+                    <div className="my-1 border-t border-white/10" />
 
-              <button
-                type="button"
-                onClick={() => {
-                  onDeletePlaylist(menu.playlist.id);
-                  onClose();
-                }}
-                className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>Delete playlist</span>
-              </button>
-            </>
-          )}
-        </>
-      )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeletePlaylist(menu.playlist.id);
+                        onClose();
+                      }}
+                      className="flex w-full items-center gap-3.5 px-4 py-2 text-left text-zinc-200 transition hover:bg-rose-500/15 hover:text-rose-200"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>Delete playlist</span>
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

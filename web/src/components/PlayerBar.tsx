@@ -518,7 +518,7 @@ export function PlayerBar({
       </div>
 
       {/* Desktop Player Bar (>= md) */}
-      <div className="hidden h-[72px] items-center justify-between gap-3 px-4 md:flex">
+      <div className="hidden min-h-[72px] items-center justify-between gap-3 px-4 md:flex">
         {/* Left: Playback transport + timestamp */}
         <div className="flex items-center gap-1 sm:gap-2">
           <button
@@ -788,7 +788,7 @@ export function PlayerBar({
             disabled={!hasPlayer}
             onClick={onShuffle}
             title="Shuffle queue"
-            className="hidden rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-40 sm:inline-flex"
+            className="hidden items-center justify-center rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white disabled:opacity-40 sm:inline-flex"
           >
             <Shuffle className="h-4 w-4" />
           </button>
@@ -798,7 +798,7 @@ export function PlayerBar({
             disabled={!playerState}
             onClick={() => onToggleAutoplay(!playerState?.autoplay)}
             title="Toggle Autoplay"
-            className={`hidden rounded-full p-2 transition hover:bg-white/10 disabled:opacity-40 sm:inline-flex ${
+            className={`hidden items-center justify-center rounded-full p-2 transition hover:bg-white/10 disabled:opacity-40 sm:inline-flex ${
               playerState?.autoplay ? "text-emerald-400" : "text-zinc-400"
             }`}
           >

@@ -628,6 +628,7 @@ export function App() {
         onRemoveFromHistory={socket.removeHistoryEntry}
         onPlayPlaylist={handlePlayPlaylist}
         onTogglePinPlaylist={socket.togglePinPlaylist}
+        onCreatePlaylistWithTracks={socket.createPlaylistWithTracks}
         onSyncPlaylist={(id) => socket.syncPlaylist(id)}
         onDeletePlaylist={(id) => {
           socket.deletePlaylist(id);
@@ -660,30 +661,32 @@ export function App() {
         />
 
         <div className="ytm-ambient flex min-w-0 flex-1 flex-col">
-          <TopBar
-            user={user}
-            meta={effectiveMeta}
-            guilds={guilds}
-            selectedGuildId={socket.selectedGuildId}
-            defaultSearchSource={socket.preferences.defaultSearchSource}
-            searching={socket.searching}
-            onOpenMobileMenu={() => setMobileMenuOpen(true)}
-            onSearch={handleSearch}
-            onPlayTrack={(track) => handleEnqueue([track], "now")}
-            onOpenArtist={handleOpenArtist}
-            onTrackContextMenu={handleTrackContextMenu}
-            onSelectGuild={socket.selectGuild}
-            onOpenSettings={() => navigateTo("settings")}
-            onOpenShortcuts={() => setShortcutsOpen(true)}
-            onLogout={() => void handleLogout()}
-          />
+          <div className={nowPlayingOpen ? "hidden lg:block" : ""}>
+            <TopBar
+              user={user}
+              meta={effectiveMeta}
+              guilds={guilds}
+              selectedGuildId={socket.selectedGuildId}
+              defaultSearchSource={socket.preferences.defaultSearchSource}
+              searching={socket.searching}
+              onOpenMobileMenu={() => setMobileMenuOpen(true)}
+              onSearch={handleSearch}
+              onPlayTrack={(track) => handleEnqueue([track], "now")}
+              onOpenArtist={handleOpenArtist}
+              onTrackContextMenu={handleTrackContextMenu}
+              onSelectGuild={socket.selectGuild}
+              onOpenSettings={() => navigateTo("settings")}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
+              onLogout={() => void handleLogout()}
+            />
+          </div>
 
           <main
             id="main-content"
             tabIndex={-1}
             className={
               nowPlayingOpen
-                ? "min-h-0 flex-1 overflow-y-auto px-4 py-4 focus:outline-none lg:overflow-hidden lg:px-8 lg:py-6"
+                ? "min-h-0 flex-1 overflow-hidden p-0 focus:outline-none lg:px-8 lg:py-6"
                 : "min-h-0 flex-1 overflow-y-auto px-4 py-6 focus:outline-none lg:px-8"
             }
           >

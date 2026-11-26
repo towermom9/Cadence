@@ -346,11 +346,7 @@ export function HomeView({
                         onEnqueue(tracks, "replace", playlist.name);
                       }
                     }}
-                    onContextMenu={(e) => {
-                      if (savedPlaylistId) {
-                        onPlaylistContextMenu(e, playlist);
-                      }
-                    }}
+                    onContextMenu={(e) => onPlaylistContextMenu(e, playlist)}
                     className="group cursor-pointer space-y-2.5"
                   >
                     <div className="relative aspect-square overflow-hidden rounded-lg bg-[#181818]">
@@ -413,6 +409,7 @@ export function HomeView({
                     <div className="min-w-0">
                       <button
                         type="button"
+                        data-inline-btn="true"
                         onClick={(e) => {
                           if (savedPlaylistId) {
                             e.stopPropagation();

@@ -520,9 +520,29 @@ export function LibraryView({
                     const expanded = Boolean(expandedGroups[item.key]);
                     const tracksForPlay = [...item.entries].reverse().map((e) => e.track);
                     const coverTrack = item.entries[0]?.track;
+                    const normName = item.playlistName.trim().toLowerCase();
+                    const savedPl =
+                      playlists.find((p) => p.name.trim().toLowerCase() === normName) ?? null;
+                    const uniqueTracks: TrackDTO[] = [];
+                    const seenIds = new Set<string>();
+                    for (const t of tracksForPlay) {
+                      if (!seenIds.has(t.identifier)) {
+                        seenIds.add(t.identifier);
+                        uniqueTracks.push(t);
+                      }
+                    }
+                    const latestPlayedAt = item.entries[0]?.playedAt ?? Date.now();
+                    const contextPlaylist: PlaylistDTO = savedPl ?? {
+                      id: `history-pl:${normName}`,
+                      name: item.playlistName,
+                      tracks: uniqueTracks,
+                      createdAt: latestPlayedAt,
+                      updatedAt: latestPlayedAt,
+                    };
                     return (
                       <div key={item.key} className="divide-y divide-white/[0.05]">
                         <div
+                          onContextMenu={(e) => onPlaylistContextMenu(e, contextPlaylist)}
                           onClick={() =>
                             setExpandedGroups((prev) => ({
                               ...prev,

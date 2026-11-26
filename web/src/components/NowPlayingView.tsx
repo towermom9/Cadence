@@ -11,9 +11,13 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  ChevronRight,
+  Equal,
   GripVertical,
+  Headphones,
   ListPlus,
   Loader2,
+  MessageSquareText,
   MoreVertical,
   Pause,
   PhoneOff,
@@ -28,12 +32,14 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Sparkles,
   ThumbsUp,
   Trash2,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
+import { splitArtists } from "@shared/artists";
 import type {
   AutoplayMood,
   EnqueueMode,
@@ -167,6 +173,8 @@ export function NowPlayingView({
   const [relatedCache, setRelatedCache] = useState<Record<string, TrackDTO[]>>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [userScrolledAway, setUserScrolledAway] = useState(false);
+  const [mobileSheetExpanded, setMobileSheetExpanded] = useState(false);
+  const [mobileVolumeOpen, setMobileVolumeOpen] = useState(false);
   const [mobileVolume, setMobileVolume] = useState(() => playerState?.volume ?? 100);
   const [mobileVolDraft, setMobileVolDraft] = useState(() => String(playerState?.volume ?? 100));
   const [isEditingMobileVol, setIsEditingMobileVol] = useState(false);
@@ -174,6 +182,7 @@ export function NowPlayingView({
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
+  const sheetSwipeStartYRef = useRef<number | null>(null);
   const isDraggingMobileVolRef = useRef(false);
   const lastMobileVolSentAtRef = useRef(0);
   const pendingMobileVolRef = useRef<number | null>(null);
@@ -689,44 +698,119 @@ export function NowPlayingView({
     const next: RepeatModeType = mode === "off" ? "queue" : mode === "queue" ? "track" : "off";
     onRepeat(next);
   };
+  const primaryArtist = current ? splitArtists(current.author)[0] || current.author : "";
 
   return (
-    <div className="relative mx-auto flex min-h-0 w-full max-w-7xl flex-col gap-5 pb-4 lg:grid lg:h-full lg:grid-cols-12 lg:gap-10 lg:pb-0">
-      {ambienceMode && current && (
+    <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10">
+      {ambienceMode && current && !mobileSheetExpanded && (
         <div className="pointer-events-none absolute inset-0 -z-0 overflow-hidden opacity-25 blur-3xl">
           <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
         </div>
       )}
-
-      {/* Mobile Now Playing Header (< lg) */}
-      <div className="relative z-10 flex shrink-0 items-center justify-between gap-2 lg:hidden">
-        <button
-          type="button"
-          onClick={onCloseMobile}
-          aria-label="Minimize Now Playing"
-          className="rounded-full bg-white/[0.06] p-2 text-zinc-200 hover:bg-white/15"
-        >
-          <ChevronDown className="h-5 w-5" />
-        </button>
-        <div className="min-w-0 text-center">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-400">Playing from</p>
-          <p className="truncate text-xs font-semibold text-white">{resolvedQueueName}</p>
+      {ambienceMode && current && mobileSheetExpanded && (
+        <div className="pointer-events-none absolute inset-0 -z-0 hidden overflow-hidden opacity-25 blur-3xl lg:block">
+          <TrackArtwork track={current} className="h-full w-full scale-110" iconClassName="h-24 w-24" />
         </div>
-        <button
-          type="button"
-          disabled={(!playerState?.connected && !playerState?.voiceChannelId && !current) || !privileged}
-          onClick={onStop}
-          title="Disconnect"
-          aria-label="Disconnect voice"
-          className="rounded-full bg-white/[0.06] p-2 text-zinc-300 hover:bg-rose-500/20 hover:text-rose-200 disabled:opacity-35"
-        >
-          <PhoneOff className="h-4 w-4" />
-        </button>
-      </div>
+      )}
 
-      {/* Left Clean Artwork Column (click to Play / Pause + configurable +/-Ns seek) */}
-      <div className="relative z-10 flex min-h-0 shrink-0 flex-col items-center justify-center lg:col-span-7">
-        <div className="flex w-full max-w-[340px] flex-col items-center sm:max-w-[400px] lg:max-w-[460px]">
+      {/* Left Clean Artwork Column (Desktop) + YT Music Mobile Full Player / Compact Sheet Hero (< lg) */}
+      <div
+        className={`relative z-10 flex min-h-0 flex-col lg:col-span-7 lg:justify-center ${
+          mobileSheetExpanded ? "shrink-0 overflow-hidden" : "flex-1 justify-between lg:flex-initial"
+        }`}
+      >
+        {/* Mobile Expanded Top Hero Artwork Backdrop */}
+        {mobileSheetExpanded && current && (
+          <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden lg:hidden">
+            <TrackArtwork
+              track={current}
+              className="h-full w-full scale-105 opacity-45"
+              iconClassName="h-16 w-16"
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-black/75 to-[#111111]" />
+          </div>
+        )}
+
+        {/* Mobile Top Bar (< lg) */}
+        <div className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              if (mobileSheetExpanded) {
+                setMobileSheetExpanded(false);
+              } else {
+                onCloseMobile?.();
+              }
+            }}
+            aria-label={mobileSheetExpanded ? "Collapse queue sheet" : "Minimize Now Playing"}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10"
+          >
+            <ChevronDown className="h-5 w-5" />
+          </button>
+
+          <div className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 backdrop-blur-sm">
+            <button
+              type="button"
+              data-inline-btn="true"
+              onClick={() => setMobileSheetExpanded(false)}
+              aria-label="Song view"
+              className={`inline-flex h-7 w-10 items-center justify-center rounded-full transition ${
+                !mobileSheetExpanded
+                  ? "bg-white/20 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Headphones className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-inline-btn="true"
+              onClick={() => {
+                onTabChange("lyrics");
+                setMobileSheetExpanded(true);
+              }}
+              aria-label="Lyrics view"
+              className={`inline-flex h-7 w-10 items-center justify-center rounded-full transition ${
+                mobileSheetExpanded && activeTab === "lyrics"
+                  ? "bg-white/20 text-white"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <MessageSquareText className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              disabled={!privileged}
+              onClick={() => setMobileVolumeOpen((v) => !v)}
+              aria-label="Toggle volume slider"
+              style={mobileVolumeOpen ? { color: "var(--cadence-accent)" } : undefined}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10 disabled:opacity-35"
+            >
+              {mobileVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              disabled={!current}
+              onClick={(e) => current && onTrackContextMenu(e, current, { isCurrent: true })}
+              aria-label="Track options"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 transition hover:bg-white/10 disabled:opacity-35"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div
+          className={`mx-auto flex w-full flex-col items-center lg:max-w-[460px] ${
+            mobileSheetExpanded
+              ? "px-4 pb-3 pt-1 lg:px-0 lg:pb-0 lg:pt-0"
+              : "flex-1 justify-between px-5 pb-3 pt-2 lg:flex-initial lg:justify-center lg:p-0"
+          }`}
+        >
+          {/* Centered Artwork (Full on collapsed mobile + always on Desktop) */}
           <div
             role={current ? "button" : undefined}
             tabIndex={current ? 0 : undefined}
@@ -754,9 +838,9 @@ export function NowPlayingView({
               if (!current) return;
               onTrackContextMenu(e, current, { isCurrent: true });
             }}
-            className={`group relative aspect-square w-full overflow-hidden rounded-xl bg-[#181818] shadow-2xl ring-1 ring-white/10 ${
+            className={`group relative aspect-square w-full max-w-[360px] overflow-hidden rounded-2xl bg-[#181818] shadow-2xl ring-1 ring-white/10 lg:max-w-[460px] ${
               current ? "cursor-pointer" : ""
-            }`}
+            } ${mobileSheetExpanded ? "hidden lg:block" : "my-auto block"}`}
           >
             <TrackArtwork
               track={current}
@@ -820,48 +904,217 @@ export function NowPlayingView({
             )}
           </div>
 
-          {/* Mobile Full Controls (< lg) */}
-          <div className="mt-4 w-full space-y-3 lg:hidden">
+          {/* Mobile Controls (< lg) */}
+          <div className={`w-full lg:hidden ${mobileSheetExpanded ? "space-y-2.5" : "mt-4 space-y-3.5"}`}>
             {current ? (
               <>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1 text-left">
-                    <h2 className="truncate text-lg font-bold text-white">{current.title}</h2>
-                    <p className="mt-0.5 truncate text-xs text-zinc-400">
-                      <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
-                      <span> • {sourceLabel(current.sourceName)}</span>
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                {/* Title & Artist */}
+                <div className="min-w-0 text-left">
+                  <button
+                    type="button"
+                    data-inline-btn="true"
+                    onClick={() => primaryArtist && onOpenArtist(primaryArtist)}
+                    className="flex max-w-full items-center gap-1 text-left"
+                  >
+                    <h2
+                      className={`truncate font-bold tracking-tight text-white ${
+                        mobileSheetExpanded ? "text-lg" : "text-[22px] leading-tight"
+                      }`}
+                    >
+                      {current.title}
+                    </h2>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
+                  </button>
+                  <p className="mt-0.5 truncate text-sm text-zinc-300">
+                    <ArtistLinks author={current.author} onOpenArtist={onOpenArtist} />
+                    <span className="text-zinc-400"> · {sourceLabel(current.sourceName)}</span>
+                  </p>
+                </div>
+
+                {/* Horizontal Pill Actions Strip (shown when collapsed) */}
+                {!mobileSheetExpanded && (
+                  <div className="no-scrollbar -mx-1 flex items-center gap-2 overflow-x-auto px-1 py-0.5">
                     <button
                       type="button"
                       disabled={current.isStream}
                       onClick={() => onToggleLike(current)}
-                      title={
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
                         likedTrackIds.has(current.identifier)
-                          ? "Remove from Liked Music"
-                          : "Save to Liked Music"
-                      }
-                      className={`rounded-full p-2 transition hover:bg-white/10 disabled:opacity-35 ${
-                        likedTrackIds.has(current.identifier) ? "text-white" : "text-zinc-400"
+                          ? "bg-white text-black"
+                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
                       }`}
                     >
                       <ThumbsUp
-                        className={`h-4 w-4 ${
+                        className={`h-3.5 w-3.5 ${
                           likedTrackIds.has(current.identifier) ? "fill-current" : ""
                         }`}
                       />
+                      <span>{likedTrackIds.has(current.identifier) ? "Liked" : "Like"}</span>
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange("lyrics");
+                        setMobileSheetExpanded(true);
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <MessageSquareText className="h-3.5 w-3.5" />
+                      <span>Lyrics</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => onOpenSaveModal([current])}
-                      title="Save to playlist"
-                      className="rounded-full p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
                     >
-                      <ListPlus className="h-4 w-4" />
+                      <ListPlus className="h-3.5 w-3.5" />
+                      <span>Save</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!privileged}
+                      onClick={() => setMobileVolumeOpen((v) => !v)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3.5 py-1.5 text-xs font-medium transition disabled:opacity-40 ${
+                        mobileVolumeOpen
+                          ? "bg-white text-black"
+                          : "bg-white/[0.08] text-zinc-100 hover:bg-white/15"
+                      }`}
+                    >
+                      {mobileVolume === 0 ? (
+                        <VolumeX className="h-3.5 w-3.5" />
+                      ) : (
+                        <Volume2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>{mobileVolume}%</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onStartMix(current)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <Radio className="h-3.5 w-3.5" />
+                      <span>Mix</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onTabChange("related");
+                        setMobileSheetExpanded(true);
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/15"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Related</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!privileged}
+                      onClick={onStop}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.08] px-3.5 py-1.5 text-xs font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-40"
+                    >
+                      <PhoneOff className="h-3.5 w-3.5" />
+                      <span>Leave</span>
                     </button>
                   </div>
-                </div>
+                )}
+
+                {/* Collapsible Inline Mobile Volume Control */}
+                {mobileVolumeOpen && (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-white/12 bg-black/45 px-3 py-2 backdrop-blur-sm">
+                    <button
+                      type="button"
+                      disabled={!privileged}
+                      onClick={() => {
+                        const next = mobileVolume === 0 ? 100 : 0;
+                        setMobileVolume(next);
+                        setMobileVolDraft(String(next));
+                        onVolume(next);
+                      }}
+                      className="text-zinc-300 disabled:opacity-40"
+                      aria-label="Toggle mute"
+                    >
+                      {mobileVolume === 0 ? (
+                        <VolumeX className="h-4 w-4" />
+                      ) : (
+                        <Volume2 className="h-4 w-4" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={mobileVolume}
+                      disabled={!privileged}
+                      onPointerDown={() => {
+                        isDraggingMobileVolRef.current = true;
+                      }}
+                      onPointerUp={() => {
+                        isDraggingMobileVolRef.current = false;
+                        if (pendingMobileVolRef.current !== null) {
+                          const finalVol = pendingMobileVolRef.current;
+                          pendingMobileVolRef.current = null;
+                          if (mobileVolThrottleRef.current) {
+                            clearTimeout(mobileVolThrottleRef.current);
+                            mobileVolThrottleRef.current = null;
+                          }
+                          lastMobileVolSentAtRef.current = performance.now();
+                          onVolume(finalVol);
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        isDraggingMobileVolRef.current = false;
+                        if (pendingMobileVolRef.current !== null) {
+                          const finalVol = pendingMobileVolRef.current;
+                          pendingMobileVolRef.current = null;
+                          lastMobileVolSentAtRef.current = performance.now();
+                          onVolume(finalVol);
+                        }
+                      }}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setMobileVolume(val);
+                        setMobileVolDraft(String(val));
+                        sendMobileVolumeThrottled(val);
+                      }}
+                      style={{ accentColor: "var(--cadence-accent)" }}
+                      aria-label="Mobile volume slider"
+                      className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
+                    />
+                    <div className="flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 focus-within:border-white/35">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        aria-label="Mobile volume percentage"
+                        disabled={!privileged}
+                        value={isEditingMobileVol ? mobileVolDraft : String(mobileVolume)}
+                        onFocus={(e) => {
+                          setIsEditingMobileVol(true);
+                          setMobileVolDraft(String(mobileVolume));
+                          e.currentTarget.select();
+                        }}
+                        onChange={(e) => setMobileVolDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+                        onBlur={commitMobileVolDraft}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            setIsEditingMobileVol(false);
+                            setMobileVolDraft(String(mobileVolume));
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
+                      />
+                      <span className="ml-0.5 text-[11px] text-zinc-400">%</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Mobile seek slider */}
                 <div className="space-y-1">
@@ -883,170 +1136,149 @@ export function NowPlayingView({
                     }}
                     aria-label="Seek track position"
                     style={{ accentColor: "var(--cadence-accent)" }}
-                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:opacity-40"
+                    className="h-1 w-full cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
                   />
-                  <div className="flex items-center justify-between text-[11px] tabular-nums text-zinc-400">
+                  <div className="flex items-center justify-between text-[11px] tabular-nums text-zinc-300">
                     <span>{current.isStream ? "LIVE" : formatMs(clampedMobilePos)}</span>
                     <span>{current.isStream ? "LIVE" : formatMs(duration)}</span>
                   </div>
                 </div>
 
                 {/* Mobile transport buttons */}
-                <div className="flex items-center justify-between px-2">
+                <div className="flex items-center justify-between px-1">
                   <button
                     type="button"
                     onClick={onShuffle}
                     disabled={queue.length < 2}
                     title="Shuffle queue"
-                    className="rounded-full p-2 text-zinc-300 hover:bg-white/10 hover:text-white disabled:opacity-35"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-zinc-200 hover:bg-white/10 disabled:opacity-35"
                   >
-                    <Shuffle className="h-4 w-4" />
+                    <Shuffle className="h-5 w-5" />
                   </button>
                   <button
                     type="button"
                     onClick={onPrevious}
                     title="Previous"
-                    className="rounded-full p-2.5 text-zinc-100 hover:bg-white/10"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-white/10"
                   >
-                    <SkipBack className="h-5 w-5 fill-current" />
+                    <SkipBack className="h-6 w-6 fill-current" />
                   </button>
                   <button
                     type="button"
                     onClick={onTogglePause}
                     title={playerState?.paused ? "Play" : "Pause"}
-                    className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95"
+                    className={`flex items-center justify-center rounded-full bg-white text-black shadow-lg transition active:scale-95 ${
+                      mobileSheetExpanded ? "h-12 w-12" : "h-16 w-16"
+                    }`}
                   >
                     {playerState?.paused ? (
-                      <Play className="ml-0.5 h-6 w-6 fill-current" />
+                      <Play className={`ml-0.5 fill-current ${mobileSheetExpanded ? "h-5 w-5" : "h-7 w-7"}`} />
                     ) : (
-                      <Pause className="h-6 w-6 fill-current" />
+                      <Pause className={`fill-current ${mobileSheetExpanded ? "h-5 w-5" : "h-7 w-7"}`} />
                     )}
                   </button>
                   <button
                     type="button"
                     onClick={onSkip}
                     title="Skip"
-                    className="rounded-full p-2.5 text-zinc-100 hover:bg-white/10"
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-full text-white hover:bg-white/10"
                   >
-                    <SkipForward className="h-5 w-5 fill-current" />
+                    <SkipForward className="h-6 w-6 fill-current" />
                   </button>
                   <button
                     type="button"
                     onClick={cycleRepeat}
                     title={`Repeat: ${playerState?.repeatMode ?? "off"}`}
-                    className={`rounded-full p-2 hover:bg-white/10 ${
-                      playerState?.repeatMode !== "off" ? "text-white" : "text-zinc-400"
+                    className={`inline-flex h-10 w-10 items-center justify-center rounded-full hover:bg-white/10 ${
+                      playerState?.repeatMode !== "off" ? "text-white" : "text-zinc-300"
                     }`}
                   >
                     {playerState?.repeatMode === "track" ? (
-                      <Repeat1 className="h-4 w-4" />
+                      <Repeat1 className="h-5 w-5" />
                     ) : (
-                      <Repeat className="h-4 w-4" />
+                      <Repeat className="h-5 w-5" />
                     )}
                   </button>
                 </div>
 
-                {/* Mobile volume slider */}
-                <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+                {/* Bottom Peek Handle (tap or swipe up to open queue bottom sheet) */}
+                {!mobileSheetExpanded && (
                   <button
                     type="button"
-                    disabled={!privileged}
+                    data-inline-btn="true"
                     onClick={() => {
-                      const next = mobileVolume === 0 ? 100 : 0;
-                      setMobileVolume(next);
-                      setMobileVolDraft(String(next));
-                      onVolume(next);
+                      onTabChange("upnext");
+                      setMobileSheetExpanded(true);
                     }}
-                    className="text-zinc-300 disabled:opacity-40"
-                    aria-label="Toggle mute"
+                    onTouchStart={(e) => {
+                      sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
+                    }}
+                    onTouchEnd={(e) => {
+                      const startY = sheetSwipeStartYRef.current;
+                      sheetSwipeStartYRef.current = null;
+                      const endY = e.changedTouches[0]?.clientY;
+                      if (startY !== null && typeof endY === "number" && startY - endY > 25) {
+                        onTabChange("upnext");
+                        setMobileSheetExpanded(true);
+                      }
+                    }}
+                    className="flex w-full flex-col items-center gap-2 pt-2 pb-1 text-center"
                   >
-                    {mobileVolume === 0 ? (
-                      <VolumeX className="h-4 w-4" />
-                    ) : (
-                      <Volume2 className="h-4 w-4" />
-                    )}
+                    <span className="h-1 w-9 rounded-full bg-white/30" />
+                    <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
+                      {resolvedQueueName}
+                    </span>
                   </button>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={mobileVolume}
-                    disabled={!privileged}
-                    onPointerDown={() => {
-                      isDraggingMobileVolRef.current = true;
-                    }}
-                    onPointerUp={() => {
-                      isDraggingMobileVolRef.current = false;
-                      if (pendingMobileVolRef.current !== null) {
-                        const finalVol = pendingMobileVolRef.current;
-                        pendingMobileVolRef.current = null;
-                        if (mobileVolThrottleRef.current) {
-                          clearTimeout(mobileVolThrottleRef.current);
-                          mobileVolThrottleRef.current = null;
-                        }
-                        lastMobileVolSentAtRef.current = performance.now();
-                        onVolume(finalVol);
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      isDraggingMobileVolRef.current = false;
-                      if (pendingMobileVolRef.current !== null) {
-                        const finalVol = pendingMobileVolRef.current;
-                        pendingMobileVolRef.current = null;
-                        lastMobileVolSentAtRef.current = performance.now();
-                        onVolume(finalVol);
-                      }
-                    }}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setMobileVolume(val);
-                      setMobileVolDraft(String(val));
-                      sendMobileVolumeThrottled(val);
-                    }}
-                    style={{ accentColor: "var(--cadence-accent)" }}
-                    aria-label="Mobile volume slider"
-                    className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/25 disabled:opacity-40"
-                  />
-                  <div className="flex items-center rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 focus-within:border-white/35">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      aria-label="Mobile volume percentage"
-                      disabled={!privileged}
-                      value={isEditingMobileVol ? mobileVolDraft : String(mobileVolume)}
-                      onFocus={(e) => {
-                        setIsEditingMobileVol(true);
-                        setMobileVolDraft(String(mobileVolume));
-                        e.currentTarget.select();
-                      }}
-                      onChange={(e) => setMobileVolDraft(e.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
-                      onBlur={commitMobileVolDraft}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.currentTarget.blur();
-                        } else if (e.key === "Escape") {
-                          setIsEditingMobileVol(false);
-                          setMobileVolDraft(String(mobileVolume));
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      className="w-7 bg-transparent text-right text-xs tabular-nums text-zinc-200 outline-none disabled:opacity-40"
-                    />
-                    <span className="ml-0.5 text-[11px] text-zinc-400">%</span>
-                  </div>
-                </div>
+                )}
               </>
             ) : (
-              <p className="text-center text-sm text-zinc-400">
-                Pick a track to start playing in Discord.
-              </p>
+              <div className="space-y-3 py-6 text-center">
+                <p className="text-sm text-zinc-400">Pick a track to start playing in Discord.</p>
+                {!mobileSheetExpanded && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileSheetExpanded(true)}
+                    className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-1.5 text-xs font-medium text-zinc-200"
+                  >
+                    Open Queue Sheet
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Right Queue / Lyrics / Related Column */}
-      <div className="relative z-10 flex min-h-[380px] flex-1 flex-col lg:col-span-5 lg:min-h-0">
+      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Expandable Mobile Bottom Sheet) */}
+      <div
+        className={`relative z-10 min-h-0 flex-col lg:col-span-5 ${
+          mobileSheetExpanded
+            ? "flex flex-1 rounded-t-2xl border-t border-white/10 bg-[#111111]/95 px-4 pt-2 backdrop-blur-md lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0"
+            : "hidden lg:flex"
+        }`}
+      >
+        {/* Mobile Sheet Grab Handle */}
+        <button
+          type="button"
+          data-inline-btn="true"
+          onClick={() => setMobileSheetExpanded(false)}
+          onTouchStart={(e) => {
+            sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
+          }}
+          onTouchEnd={(e) => {
+            const startY = sheetSwipeStartYRef.current;
+            sheetSwipeStartYRef.current = null;
+            const endY = e.changedTouches[0]?.clientY;
+            if (startY !== null && typeof endY === "number" && endY - startY > 25) {
+              setMobileSheetExpanded(false);
+            }
+          }}
+          aria-label="Collapse queue sheet"
+          className="mx-auto mb-1 flex w-24 shrink-0 justify-center py-1.5 lg:hidden"
+        >
+          <span className="h-1 w-10 rounded-full bg-white/30" />
+        </button>
+
         <div className="flex shrink-0 items-center border-b border-white/10">
           {(
             [
@@ -1076,7 +1308,7 @@ export function NowPlayingView({
         {/* UP NEXT */}
         {activeTab === "upnext" && (
           <div className="flex min-h-0 flex-1 flex-col pt-3">
-            {/* Playing from header + white + Save pill */}
+            {/* Horizontal Mood Filter Pills on Mobile & Playing From Header */}
             <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] text-zinc-400">Playing from</p>
@@ -1212,7 +1444,7 @@ export function NowPlayingView({
                         onPointerUp={handleTouchDragEnd}
                         onPointerCancel={handleTouchDragEnd}
                         aria-label="Drag track to reorder"
-                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                        className="hidden touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing lg:inline-flex"
                       >
                         <GripVertical className="h-4 w-4" />
                       </button>
@@ -1304,6 +1536,22 @@ export function NowPlayingView({
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </div>
+                    {privileged && (
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) =>
+                          handleTouchDragStart(e, { section: "previous", prevIndex, displayIdx })
+                        }
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag track to reorder"
+                        className="inline-flex touch-none shrink-0 items-center justify-center rounded p-1.5 text-zinc-400 active:text-white lg:hidden"
+                      >
+                        <Equal className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1395,7 +1643,7 @@ export function NowPlayingView({
                         onPointerUp={handleTouchDragEnd}
                         onPointerCancel={handleTouchDragEnd}
                         aria-label="Drag active track to reorder"
-                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                        className="hidden touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing lg:inline-flex"
                       >
                         <GripVertical className="h-4 w-4" />
                       </button>
@@ -1490,6 +1738,20 @@ export function NowPlayingView({
                         <MoreVertical className="h-4 w-4" />
                       </button>
                     </div>
+                    {privileged && (
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => handleTouchDragStart(e, { section: "current" })}
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag active track to reorder"
+                        className="inline-flex touch-none shrink-0 items-center justify-center rounded p-1.5 text-zinc-300 active:text-white lg:hidden"
+                      >
+                        <Equal className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 );
               })()}
@@ -1571,7 +1833,7 @@ export function NowPlayingView({
                         onPointerUp={handleTouchDragEnd}
                         onPointerCancel={handleTouchDragEnd}
                         aria-label="Drag queued track to reorder"
-                        className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                        className="hidden touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing lg:inline-flex"
                       >
                         <GripVertical className="h-4 w-4" />
                       </button>
@@ -1667,6 +1929,22 @@ export function NowPlayingView({
                         <MoreVertical className="h-3.5 w-3.5" />
                       </button>
                     </div>
+                    {privileged && (
+                      <button
+                        type="button"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) =>
+                          handleTouchDragStart(e, { section: "manual", queueIndex })
+                        }
+                        onPointerMove={handleTouchDragMove}
+                        onPointerUp={handleTouchDragEnd}
+                        onPointerCancel={handleTouchDragEnd}
+                        aria-label="Drag queued track to reorder"
+                        className="inline-flex touch-none shrink-0 items-center justify-center rounded p-1.5 text-zinc-400 active:text-white lg:hidden"
+                      >
+                        <Equal className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1859,7 +2137,7 @@ export function NowPlayingView({
                             onPointerUp={handleTouchDragEnd}
                             onPointerCancel={handleTouchDragEnd}
                             aria-label="Drag autoplay track to reorder"
-                            className="touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing"
+                            className="hidden touch-none shrink-0 cursor-grab rounded p-1 text-zinc-500 transition hover:text-zinc-200 active:cursor-grabbing lg:inline-flex"
                           >
                             <GripVertical className="h-4 w-4" />
                           </button>
@@ -1922,6 +2200,22 @@ export function NowPlayingView({
                             <MoreVertical className="h-3.5 w-3.5" />
                           </button>
                         </div>
+                        {privileged && (
+                          <button
+                            type="button"
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) =>
+                              handleTouchDragStart(e, { section: "autoplay", queueIndex })
+                            }
+                            onPointerMove={handleTouchDragMove}
+                            onPointerUp={handleTouchDragEnd}
+                            onPointerCancel={handleTouchDragEnd}
+                            aria-label="Drag autoplay track to reorder"
+                            className="inline-flex touch-none shrink-0 items-center justify-center rounded p-1.5 text-zinc-400 active:text-white lg:hidden"
+                          >
+                            <Equal className="h-4 w-4" />
+                          </button>
+                        )}
                       </div>
                     );
                   })

@@ -153,9 +153,9 @@
     },
     {
       section: "Reference / Changelog",
-      title: "Release Changelogs (v0.0.0 to v0.2.0)",
-      path: "docs/reference/changelog/#v0-2-0",
-      content: "v0.2.0 v0.1.9 v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog accessibility localization internationalization custom colors mobile queue drag.",
+      title: "Release Changelogs (v0.0.0 to v0.2.1)",
+      path: "docs/reference/changelog/#v0-2-1",
+      content: "v0.2.1 v0.2.0 v0.1.9 v0.1.8 v0.1.7 v0.1.6 v0.1.5 v0.1.4 v0.1.2 v0.1.1 v0.0.19 v0.0.18 v0.0.17 v0.0.16 v0.0.15 v0.0.0 initial release changelog large touch targets history playlist context menu mobile now playing sheet.",
     },
   ];
 

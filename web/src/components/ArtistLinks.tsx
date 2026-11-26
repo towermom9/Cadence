@@ -20,6 +20,7 @@ export function ArtistLinks({ author, onOpenArtist, className = "" }: Props) {
           {idx > 0 && <span className="text-zinc-500">, </span>}
           <button
             type="button"
+            data-inline-btn="true"
             onClick={(e) => {
               e.stopPropagation();
               onOpenArtist(name);
