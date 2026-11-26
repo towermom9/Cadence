@@ -4,8 +4,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   ArrowDown,
@@ -53,6 +55,7 @@ import { formatMs, sourceLabel } from "../utils/format";
 import { parseSyncedLyrics, stripInlineTags } from "../utils/lrc";
 import { ArtistLinks } from "./ArtistLinks";
 import type { TrackMenuContext } from "./ContextMenu";
+import { SwipeableQueueRow } from "./SwipeableQueueRow";
 import { TrackArtwork } from "./TrackArtwork";
 
 export type NowPlayingTab = "upnext" | "lyrics" | "related";
@@ -182,7 +185,10 @@ export function NowPlayingView({
   const [dragSource, setDragSource] = useState<DragTimelineItem | null>(null);
   const [dragTarget, setDragTarget] = useState<DragTimelineItem | null>(null);
   const [dragOverPosition, setDragOverPosition] = useState<"above" | "below" | null>(null);
+  const [sheetDragOffsetY, setSheetDragOffsetY] = useState<number | null>(null);
   const sheetSwipeStartYRef = useRef<number | null>(null);
+  const sheetContainerRef = useRef<HTMLDivElement>(null);
+  const sheetDraggedRef = useRef(false);
   const isDraggingMobileVolRef = useRef(false);
   const lastMobileVolSentAtRef = useRef(0);
   const pendingMobileVolRef = useRef<number | null>(null);
@@ -700,6 +706,70 @@ export function NowPlayingView({
   };
   const primaryArtist = current ? splitArtists(current.author)[0] || current.author : "";
 
+  const openTrackMenuAt = useCallback(
+    (x: number, y: number, track: TrackDTO, ctx?: TrackMenuContext) => {
+      onTrackContextMenu(
+        {
+          preventDefault: () => {},
+          stopPropagation: () => {},
+          clientX: x,
+          clientY: y,
+        } as unknown as MouseEvent,
+        track,
+        ctx
+      );
+    },
+    [onTrackContextMenu]
+  );
+
+  const handleSheetHandleTouchStart = useCallback((e: ReactTouchEvent<HTMLElement>) => {
+    sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
+    sheetDraggedRef.current = false;
+  }, []);
+
+  const handleSheetHandleTouchMove = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const startY = sheetSwipeStartYRef.current;
+      const curY = e.touches[0]?.clientY;
+      if (startY === null || typeof curY !== "number") return;
+      const sheetH = sheetContainerRef.current?.offsetHeight || 520;
+      const maxOffset = Math.max(120, sheetH - 56);
+      const dy = curY - startY;
+      if (Math.abs(dy) > 6) {
+        sheetDraggedRef.current = true;
+      }
+      const nextOffset = mobileSheetExpanded
+        ? Math.max(0, Math.min(maxOffset, dy))
+        : Math.max(0, Math.min(maxOffset, maxOffset + dy));
+      setSheetDragOffsetY(nextOffset);
+    },
+    [mobileSheetExpanded]
+  );
+
+  const handleSheetHandleTouchEnd = useCallback(
+    (e: ReactTouchEvent<HTMLElement>) => {
+      const startY = sheetSwipeStartYRef.current;
+      const endY = e.changedTouches[0]?.clientY;
+      sheetSwipeStartYRef.current = null;
+      setSheetDragOffsetY(null);
+      if (startY === null || typeof endY !== "number") return;
+      const dy = endY - startY;
+      if (dy < -45) {
+        setMobileSheetExpanded(true);
+      } else if (dy > 45) {
+        setMobileSheetExpanded(false);
+      }
+    },
+    []
+  );
+
+  const mobileSheetY =
+    sheetDragOffsetY !== null
+      ? `${sheetDragOffsetY}px`
+      : mobileSheetExpanded
+        ? "0px"
+        : "calc(100% - 56px)";
+
   return (
     <div className="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col lg:grid lg:grid-cols-12 lg:gap-10">
       {ambienceMode && current && !mobileSheetExpanded && (
@@ -732,7 +802,23 @@ export function NowPlayingView({
         )}
 
         {/* Mobile Top Bar (< lg) */}
-        <div className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden">
+        <div
+          onTouchStart={(e) => {
+            if (!mobileSheetExpanded) {
+              sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
+            }
+          }}
+          onTouchEnd={(e) => {
+            if (mobileSheetExpanded) return;
+            const startY = sheetSwipeStartYRef.current;
+            sheetSwipeStartYRef.current = null;
+            const endY = e.changedTouches[0]?.clientY;
+            if (startY !== null && typeof endY === "number" && endY - startY > 45) {
+              onCloseMobile?.();
+            }
+          }}
+          className="relative z-10 flex shrink-0 items-center justify-between gap-2 px-4 pt-2 pb-1 lg:hidden"
+        >
           <button
             type="button"
             onClick={() => {
@@ -806,8 +892,8 @@ export function NowPlayingView({
         <div
           className={`mx-auto flex w-full flex-col items-center lg:max-w-[460px] ${
             mobileSheetExpanded
-              ? "px-4 pb-3 pt-1 lg:px-0 lg:pb-0 lg:pt-0"
-              : "flex-1 justify-between px-5 pb-3 pt-2 lg:flex-initial lg:justify-center lg:p-0"
+              ? "px-4 pb-2 pt-0.5 lg:px-0 lg:pb-0 lg:pt-0"
+              : "flex-1 justify-between px-5 pb-16 pt-2 lg:flex-initial lg:justify-center lg:p-0"
           }`}
         >
           {/* Centered Artwork (Full on collapsed mobile + always on Desktop) */}
@@ -905,7 +991,7 @@ export function NowPlayingView({
           </div>
 
           {/* Mobile Controls (< lg) */}
-          <div className={`w-full lg:hidden ${mobileSheetExpanded ? "space-y-2.5" : "mt-4 space-y-3.5"}`}>
+          <div className={`w-full lg:hidden ${mobileSheetExpanded ? "space-y-1.5" : "mt-4 space-y-3.5"}`}>
             {current ? (
               <>
                 {/* Title & Artist */}
@@ -1201,82 +1287,55 @@ export function NowPlayingView({
                   </button>
                 </div>
 
-                {/* Bottom Peek Handle (tap or swipe up to open queue bottom sheet) */}
-                {!mobileSheetExpanded && (
-                  <button
-                    type="button"
-                    data-inline-btn="true"
-                    onClick={() => {
-                      onTabChange("upnext");
-                      setMobileSheetExpanded(true);
-                    }}
-                    onTouchStart={(e) => {
-                      sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
-                    }}
-                    onTouchEnd={(e) => {
-                      const startY = sheetSwipeStartYRef.current;
-                      sheetSwipeStartYRef.current = null;
-                      const endY = e.changedTouches[0]?.clientY;
-                      if (startY !== null && typeof endY === "number" && startY - endY > 25) {
-                        onTabChange("upnext");
-                        setMobileSheetExpanded(true);
-                      }
-                    }}
-                    className="flex w-full flex-col items-center gap-2 pt-2 pb-1 text-center"
-                  >
-                    <span className="h-1 w-9 rounded-full bg-white/30" />
-                    <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
-                      {resolvedQueueName}
-                    </span>
-                  </button>
-                )}
               </>
             ) : (
               <div className="space-y-3 py-6 text-center">
                 <p className="text-sm text-zinc-400">Pick a track to start playing in Discord.</p>
-                {!mobileSheetExpanded && (
-                  <button
-                    type="button"
-                    onClick={() => setMobileSheetExpanded(true)}
-                    className="rounded-full border border-white/15 bg-white/[0.08] px-4 py-1.5 text-xs font-medium text-zinc-200"
-                  >
-                    Open Queue Sheet
-                  </button>
-                )}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Expandable Mobile Bottom Sheet) */}
+      {/* Right Queue / Lyrics / Related Column (Desktop sidebar + Sliding Mobile Bottom Sheet) */}
       <div
-        className={`relative z-10 min-h-0 flex-col lg:col-span-5 ${
-          mobileSheetExpanded
-            ? "flex flex-1 rounded-t-2xl border-t border-white/10 bg-[#111111]/95 px-4 pt-2 backdrop-blur-md lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0"
-            : "hidden lg:flex"
+        ref={sheetContainerRef}
+        style={{ "--mobile-sheet-y": mobileSheetY } as CSSProperties}
+        className={`mobile-queue-sheet absolute inset-x-0 bottom-0 top-[210px] z-20 flex min-h-0 flex-col rounded-t-2xl border-t border-white/10 bg-[#121212]/95 px-4 pt-1 backdrop-blur-md will-change-transform lg:static lg:inset-auto lg:top-auto lg:z-10 lg:col-span-5 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none ${
+          sheetDragOffsetY === null
+            ? "transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+            : ""
         }`}
       >
-        {/* Mobile Sheet Grab Handle */}
+        {/* Mobile Sheet Grab Handle + Collapsed Peek Label */}
         <button
           type="button"
           data-inline-btn="true"
-          onClick={() => setMobileSheetExpanded(false)}
-          onTouchStart={(e) => {
-            sheetSwipeStartYRef.current = e.touches[0]?.clientY ?? null;
-          }}
-          onTouchEnd={(e) => {
-            const startY = sheetSwipeStartYRef.current;
-            sheetSwipeStartYRef.current = null;
-            const endY = e.changedTouches[0]?.clientY;
-            if (startY !== null && typeof endY === "number" && endY - startY > 25) {
+          onClick={() => {
+            if (sheetDraggedRef.current) {
+              sheetDraggedRef.current = false;
+              return;
+            }
+            if (!mobileSheetExpanded) {
+              onTabChange("upnext");
+              setMobileSheetExpanded(true);
+            } else {
               setMobileSheetExpanded(false);
             }
           }}
-          aria-label="Collapse queue sheet"
-          className="mx-auto mb-1 flex w-24 shrink-0 justify-center py-1.5 lg:hidden"
+          onTouchStart={handleSheetHandleTouchStart}
+          onTouchMove={handleSheetHandleTouchMove}
+          onTouchEnd={handleSheetHandleTouchEnd}
+          onTouchCancel={handleSheetHandleTouchEnd}
+          aria-label={mobileSheetExpanded ? "Collapse queue sheet" : "Expand queue sheet"}
+          className="touch-none mx-auto mb-1 flex w-full shrink-0 flex-col items-center justify-center gap-1.5 py-2 text-center lg:hidden"
         >
           <span className="h-1 w-10 rounded-full bg-white/30" />
+          {!mobileSheetExpanded && (
+            <span className="max-w-full truncate text-xs font-semibold text-zinc-200">
+              {resolvedQueueName}
+            </span>
+          )}
         </button>
 
         <div className="flex shrink-0 items-center border-b border-white/10">
@@ -1370,8 +1429,14 @@ export function NowPlayingView({
                   dragTarget.prevIndex === prevIndex &&
                   !isDragging;
                 return (
-                  <div
+                  <SwipeableQueueRow
                     key={`prev-${track.identifier}-${prevIndex}`}
+                    swipeEnabled={privileged}
+                    onSwipeRemove={() => onRemovePreviousTrack(prevIndex)}
+                    onLongPress={(x, y) => openTrackMenuAt(x, y, track, { previousIndex: prevIndex })}
+                    className="rounded-lg"
+                  >
+                  <div
                     data-timeline-row="true"
                     data-timeline-section="previous"
                     data-timeline-index={prevIndex}
@@ -1436,6 +1501,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) =>
                           handleTouchDragStart(e, { section: "previous", prevIndex, displayIdx })
@@ -1539,6 +1605,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) =>
                           handleTouchDragStart(e, { section: "previous", prevIndex, displayIdx })
@@ -1553,6 +1620,7 @@ export function NowPlayingView({
                       </button>
                     )}
                   </div>
+                  </SwipeableQueueRow>
                 );
               })}
 
@@ -1561,6 +1629,11 @@ export function NowPlayingView({
                 const liked = likedTrackIds.has(current.identifier);
                 const isDraggingCurrent = dragSource?.section === "current";
                 return (
+                  <SwipeableQueueRow
+                    swipeEnabled={false}
+                    onLongPress={(x, y) => openTrackMenuAt(x, y, current, { isCurrent: true })}
+                    className="rounded-lg"
+                  >
                   <div
                     data-timeline-row="true"
                     data-timeline-section="current"
@@ -1637,6 +1710,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => handleTouchDragStart(e, { section: "current" })}
                         onPointerMove={handleTouchDragMove}
@@ -1741,6 +1815,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) => handleTouchDragStart(e, { section: "current" })}
                         onPointerMove={handleTouchDragMove}
@@ -1753,6 +1828,7 @@ export function NowPlayingView({
                       </button>
                     )}
                   </div>
+                  </SwipeableQueueRow>
                 );
               })()}
 
@@ -1766,8 +1842,14 @@ export function NowPlayingView({
                   dragTarget.queueIndex === queueIndex &&
                   !isDragging;
                 return (
-                  <div
+                  <SwipeableQueueRow
                     key={`q-${track.identifier}-${queueIndex}`}
+                    swipeEnabled={privileged}
+                    onSwipeRemove={() => onRemoveTrack(queueIndex)}
+                    onLongPress={(x, y) => openTrackMenuAt(x, y, track, { queueIndex })}
+                    className="rounded-lg"
+                  >
+                  <div
                     data-timeline-row="true"
                     data-timeline-section="manual"
                     data-timeline-index={queueIndex}
@@ -1825,6 +1907,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) =>
                           handleTouchDragStart(e, { section: "manual", queueIndex })
@@ -1932,6 +2015,7 @@ export function NowPlayingView({
                     {privileged && (
                       <button
                         type="button"
+                        data-drag-handle="true"
                         onClick={(e) => e.stopPropagation()}
                         onPointerDown={(e) =>
                           handleTouchDragStart(e, { section: "manual", queueIndex })
@@ -1946,6 +2030,7 @@ export function NowPlayingView({
                       </button>
                     )}
                   </div>
+                  </SwipeableQueueRow>
                 );
               })}
 
@@ -2070,8 +2155,14 @@ export function NowPlayingView({
                       dragTarget.queueIndex === queueIndex &&
                       !isDragging;
                     return (
-                      <div
+                      <SwipeableQueueRow
                         key={`auto-${track.identifier}-${queueIndex}`}
+                        swipeEnabled={privileged}
+                        onSwipeRemove={() => onRemoveTrack(queueIndex)}
+                        onLongPress={(x, y) => openTrackMenuAt(x, y, track, { queueIndex })}
+                        className="rounded-lg"
+                      >
+                      <div
                         data-timeline-row="true"
                         data-timeline-section="autoplay"
                         data-timeline-index={queueIndex}
@@ -2129,6 +2220,7 @@ export function NowPlayingView({
                         {privileged && (
                           <button
                             type="button"
+                            data-drag-handle="true"
                             onClick={(e) => e.stopPropagation()}
                             onPointerDown={(e) =>
                               handleTouchDragStart(e, { section: "autoplay", queueIndex })
@@ -2203,6 +2295,7 @@ export function NowPlayingView({
                         {privileged && (
                           <button
                             type="button"
+                            data-drag-handle="true"
                             onClick={(e) => e.stopPropagation()}
                             onPointerDown={(e) =>
                               handleTouchDragStart(e, { section: "autoplay", queueIndex })
@@ -2217,6 +2310,7 @@ export function NowPlayingView({
                           </button>
                         )}
                       </div>
+                      </SwipeableQueueRow>
                     );
                   })
                 ) : current ? (

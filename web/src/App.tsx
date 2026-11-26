@@ -105,7 +105,31 @@ export function App() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState("");
   const [nowPlayingOpen, setNowPlayingOpen] = useState(false);
+  const [nowPlayingMounted, setNowPlayingMounted] = useState(false);
+  const [nowPlayingVisible, setNowPlayingVisible] = useState(false);
   const [nowPlayingTab, setNowPlayingTab] = useState<NowPlayingTab>("upnext");
+
+  useEffect(() => {
+    if (nowPlayingOpen) {
+      setNowPlayingMounted(true);
+      let raf2: number | null = null;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => {
+          setNowPlayingVisible(true);
+        });
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        if (raf2 !== null) cancelAnimationFrame(raf2);
+      };
+    }
+
+    setNowPlayingVisible(false);
+    const timer = setTimeout(() => {
+      setNowPlayingMounted(false);
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [nowPlayingOpen]);
   const [lyricsSubjectTrack, setLyricsSubjectTrack] = useState<TrackDTO | null>(null);
   const [relatedSubjectTrack, setRelatedSubjectTrack] = useState<TrackDTO | null>(null);
   const [saveModalTracks, setSaveModalTracks] = useState<TrackDTO[] | null>(null);
@@ -661,87 +685,30 @@ export function App() {
         />
 
         <div className="ytm-ambient flex min-w-0 flex-1 flex-col">
-          <div className={nowPlayingOpen ? "hidden lg:block" : ""}>
-            <TopBar
-              user={user}
-              meta={effectiveMeta}
-              guilds={guilds}
-              selectedGuildId={socket.selectedGuildId}
-              defaultSearchSource={socket.preferences.defaultSearchSource}
-              searching={socket.searching}
-              onOpenMobileMenu={() => setMobileMenuOpen(true)}
-              onSearch={handleSearch}
-              onPlayTrack={(track) => handleEnqueue([track], "now")}
-              onOpenArtist={handleOpenArtist}
-              onTrackContextMenu={handleTrackContextMenu}
-              onSelectGuild={socket.selectGuild}
-              onOpenSettings={() => navigateTo("settings")}
-              onOpenShortcuts={() => setShortcutsOpen(true)}
-              onLogout={() => void handleLogout()}
-            />
-          </div>
+          <TopBar
+            user={user}
+            meta={effectiveMeta}
+            guilds={guilds}
+            selectedGuildId={socket.selectedGuildId}
+            defaultSearchSource={socket.preferences.defaultSearchSource}
+            searching={socket.searching}
+            onOpenMobileMenu={() => setMobileMenuOpen(true)}
+            onSearch={handleSearch}
+            onPlayTrack={(track) => handleEnqueue([track], "now")}
+            onOpenArtist={handleOpenArtist}
+            onTrackContextMenu={handleTrackContextMenu}
+            onSelectGuild={socket.selectGuild}
+            onOpenSettings={() => navigateTo("settings")}
+            onOpenShortcuts={() => setShortcutsOpen(true)}
+            onLogout={() => void handleLogout()}
+          />
 
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className={
-              nowPlayingOpen
-                ? "min-h-0 flex-1 overflow-hidden p-0 focus:outline-none lg:px-8 lg:py-6"
-                : "min-h-0 flex-1 overflow-y-auto px-4 py-6 focus:outline-none lg:px-8"
-            }
-          >
-            {nowPlayingOpen ? (
-              <NowPlayingView
-                playerState={socket.playerState}
-                displayPosition={socket.displayPosition}
-                lyricsState={socket.lyricsState}
-                lyricsSubjectTrack={lyricsSubjectTrack}
-                relatedSubjectTrack={relatedSubjectTrack}
-                activeTab={nowPlayingTab}
-                ambienceMode={socket.preferences.ambienceMode}
-                showArtworkSeekButtons={socket.preferences.artworkSeekButtons}
-                artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
-                lyricsAutoScroll={socket.preferences.lyricsAutoScroll}
-                likedTrackIds={likedTrackIds}
-                onTabChange={(tab) => {
-                  setLyricsSubjectTrack(null);
-                  setRelatedSubjectTrack(null);
-                  setNowPlayingTab(tab);
-                }}
-                onCloseMobile={() => setNowPlayingOpen(false)}
-                onTogglePause={socket.togglePause}
-                onSkip={socket.skip}
-                onPrevious={socket.previous}
-                onRepeat={socket.setRepeat}
-                onVolume={socket.setVolume}
-                onStop={socket.stop}
-                onSeek={socket.seek}
-                onSeekBy={socket.seekBy}
-                onPlayTrack={socket.playTrack}
-                onPlayPrevious={socket.playPrevious}
-                onEnqueue={handleEnqueue}
-                onStartMix={handleStartMix}
-                onMoveTrack={socket.moveTrack}
-                onMovePreviousTrack={socket.movePreviousTrack}
-                onMovePreviousToQueue={socket.movePreviousToQueue}
-                onMoveQueueToPrevious={socket.moveQueueToPrevious}
-                onMoveCurrentToQueue={socket.moveCurrentToQueue}
-                onMoveCurrentToPrevious={socket.moveCurrentToPrevious}
-                onRemoveTrack={socket.removeTrack}
-                onRemovePreviousTrack={socket.removePreviousTrack}
-                onShuffle={socket.shuffle}
-                onClear={socket.clearQueue}
-                onToggleLike={socket.toggleLike}
-                onToggleAutoplay={socket.toggleAutoplay}
-                onSetAutoplayMood={socket.setAutoplayMood}
-                onUpdatePreferences={socket.updatePreferences}
-                onFetchLyrics={socket.requestLyrics}
-                onOpenSaveModal={handleOpenSaveModal}
-                onOpenArtist={handleOpenArtist}
-                onTrackContextMenu={handleTrackContextMenu}
-                appVersion={appVersion}
-              />
-            ) : (
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <main
+              id="main-content"
+              tabIndex={-1}
+              className="min-h-0 flex-1 overflow-y-auto px-4 py-6 focus:outline-none lg:px-8"
+            >
               <div className="mx-auto flex min-h-full max-w-7xl flex-col">
                 {activeView === "home" && (
                   <HomeView
@@ -878,41 +845,99 @@ export function App() {
                   onOpenPlayer={() => setNowPlayingOpen(true)}
                 />
               </div>
+            </main>
+
+            {nowPlayingMounted && (
+              <div
+                aria-hidden={!nowPlayingVisible}
+                className={`fixed inset-0 z-40 flex flex-col overflow-hidden bg-[#030303] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform lg:absolute lg:inset-0 lg:z-30 lg:px-8 lg:py-6 ${
+                  nowPlayingVisible ? "translate-y-0" : "pointer-events-none translate-y-full"
+                }`}
+              >
+                <NowPlayingView
+                  playerState={socket.playerState}
+                  displayPosition={socket.displayPosition}
+                  lyricsState={socket.lyricsState}
+                  lyricsSubjectTrack={lyricsSubjectTrack}
+                  relatedSubjectTrack={relatedSubjectTrack}
+                  activeTab={nowPlayingTab}
+                  ambienceMode={socket.preferences.ambienceMode}
+                  showArtworkSeekButtons={socket.preferences.artworkSeekButtons}
+                  artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
+                  lyricsAutoScroll={socket.preferences.lyricsAutoScroll}
+                  likedTrackIds={likedTrackIds}
+                  onTabChange={(tab) => {
+                    setLyricsSubjectTrack(null);
+                    setRelatedSubjectTrack(null);
+                    setNowPlayingTab(tab);
+                  }}
+                  onCloseMobile={() => setNowPlayingOpen(false)}
+                  onTogglePause={socket.togglePause}
+                  onSkip={socket.skip}
+                  onPrevious={socket.previous}
+                  onRepeat={socket.setRepeat}
+                  onVolume={socket.setVolume}
+                  onStop={socket.stop}
+                  onSeek={socket.seek}
+                  onSeekBy={socket.seekBy}
+                  onPlayTrack={socket.playTrack}
+                  onPlayPrevious={socket.playPrevious}
+                  onEnqueue={handleEnqueue}
+                  onStartMix={handleStartMix}
+                  onMoveTrack={socket.moveTrack}
+                  onMovePreviousTrack={socket.movePreviousTrack}
+                  onMovePreviousToQueue={socket.movePreviousToQueue}
+                  onMoveQueueToPrevious={socket.moveQueueToPrevious}
+                  onMoveCurrentToQueue={socket.moveCurrentToQueue}
+                  onMoveCurrentToPrevious={socket.moveCurrentToPrevious}
+                  onRemoveTrack={socket.removeTrack}
+                  onRemovePreviousTrack={socket.removePreviousTrack}
+                  onShuffle={socket.shuffle}
+                  onClear={socket.clearQueue}
+                  onToggleLike={socket.toggleLike}
+                  onToggleAutoplay={socket.toggleAutoplay}
+                  onSetAutoplayMood={socket.setAutoplayMood}
+                  onUpdatePreferences={socket.updatePreferences}
+                  onFetchLyrics={socket.requestLyrics}
+                  onOpenSaveModal={handleOpenSaveModal}
+                  onOpenArtist={handleOpenArtist}
+                  onTrackContextMenu={handleTrackContextMenu}
+                  appVersion={appVersion}
+                />
+              </div>
             )}
-          </main>
+          </div>
         </div>
       </div>
 
-      <div className={nowPlayingOpen ? "hidden lg:block" : ""}>
-        <PlayerBar
-          playerState={socket.playerState}
-          playbackAnchor={socket.playbackAnchor}
-          displayPosition={socket.displayPosition}
-          drawerOpen={nowPlayingOpen}
-          isCurrentLiked={Boolean(
-            socket.playerState?.current && likedTrackIds.has(socket.playerState.current.identifier)
-          )}
-          artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
-          onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
-          onTogglePause={socket.togglePause}
-          onSkip={socket.skip}
-          onPrevious={socket.previous}
-          onSeek={socket.seek}
-          onVolume={socket.setVolume}
-          onRepeat={socket.setRepeat}
-          onShuffle={socket.shuffle}
-          onToggleAutoplay={socket.toggleAutoplay}
-          onSetFilter={socket.setFilter}
-          onStop={socket.stop}
-          onToggleLike={socket.toggleLike}
-          onOpenSaveModal={handleOpenSaveModal}
-          onOpenArtist={handleOpenArtist}
-          onTrackContextMenu={handleTrackContextMenu}
-        />
-      </div>
+      <PlayerBar
+        playerState={socket.playerState}
+        playbackAnchor={socket.playbackAnchor}
+        displayPosition={socket.displayPosition}
+        drawerOpen={nowPlayingOpen}
+        isCurrentLiked={Boolean(
+          socket.playerState?.current && likedTrackIds.has(socket.playerState.current.identifier)
+        )}
+        artworkSeekSeconds={socket.preferences.artworkSeekSeconds}
+        onToggleDrawer={() => setNowPlayingOpen((v) => !v)}
+        onTogglePause={socket.togglePause}
+        onSkip={socket.skip}
+        onPrevious={socket.previous}
+        onSeek={socket.seek}
+        onVolume={socket.setVolume}
+        onRepeat={socket.setRepeat}
+        onShuffle={socket.shuffle}
+        onToggleAutoplay={socket.toggleAutoplay}
+        onSetFilter={socket.setFilter}
+        onStop={socket.stop}
+        onToggleLike={socket.toggleLike}
+        onOpenSaveModal={handleOpenSaveModal}
+        onOpenArtist={handleOpenArtist}
+        onTrackContextMenu={handleTrackContextMenu}
+      />
 
       {/* Mobile Bottom Navigation Bar */}
-      {!nowPlayingOpen && <MobileBottomNav activeView={activeView} onNavigate={navigateTo} />}
+      <MobileBottomNav activeView={activeView} onNavigate={navigateTo} />
     </div>
     </I18nProvider>
   );

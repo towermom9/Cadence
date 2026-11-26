@@ -232,6 +232,27 @@ body,
   display: none;
 }
 
+@keyframes cadence-sheet-in {
+  from {
+    transform: translateY(100%);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-sheet-in {
+  animation: cadence-sheet-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (max-width: 1023px) {
+  .mobile-queue-sheet {
+    transform: translateY(var(--mobile-sheet-y, 0px));
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
