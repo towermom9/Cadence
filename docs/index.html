@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cadence - Discord Music Bot &amp; Web Dashboard</title>
+    <meta
+      name="description"
+      content="All-in-one Discord music bot and real-time YouTube Music style web dashboard built with TypeScript, Bun, React 19, and Lavalink v4."
+    />
+    <style>
+      :root {
+        --bg: #030303;
+        --surface: #121212;
+        --surface-2: #1a1a1a;
+        --border: rgba(255, 255, 255, 0.1);
+        --text: #f4f4f5;
+        --muted: #a1a1aa;
+        --accent: #ff0033;
+        --accent-hover: #ff2652;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top center, rgba(255, 0, 51, 0.16), transparent 42%),
+          var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+        line-height: 1.6;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(14px);
+        background: rgba(3, 3, 3, 0.8);
+        border-bottom: 1px solid var(--border);
+      }
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        height: 64px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        letter-spacing: -0.02em;
+      }
+      .brand-dot {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: linear-gradient(135deg, var(--accent), #b80025);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: #fff;
+        font-weight: 800;
+      }
+      .nav-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      .nav-links a:hover {
+        color: #fff;
+      }
+      .hero {
+        padding: 84px 0 56px;
+        text-align: center;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid rgba(255, 0, 51, 0.35);
+        background: rgba(255, 0, 51, 0.12);
+        color: #ff99ad;
+        border-radius: 999px;
+        padding: 5px 14px;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      h1 {
+        margin: 18px auto 14px;
+        max-width: 780px;
+        font-size: clamp(2.1rem, 4.8vw, 3.5rem);
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+      }
+      .lead {
+        margin: 0 auto 30px;
+        max-width: 680px;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 999px;
+        padding: 11px 22px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        transition: 0.16s ease;
+        border: 1px solid var(--border);
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
+      .btn-secondary {
+        background: var(--surface);
+        color: #fff;
+      }
+      .btn-secondary:hover {
+        background: var(--surface-2);
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+      section {
+        padding: 44px 0;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 1.65rem;
+        letter-spacing: -0.02em;
+      }
+      .section-sub {
+        margin: 0 0 24px;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 20px;
+      }
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 1.02rem;
+      }
+      .card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      pre {
+        margin: 0;
+        padding: 18px 20px;
+        border-radius: 14px;
+        background: #0b0b0b;
+        border: 1px solid var(--border);
+        overflow-x: auto;
+        font-size: 0.85rem;
+        line-height: 1.55;
+        color: #e4e4e7;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        overflow: hidden;
+        font-size: 0.9rem;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      th {
+        background: #181818;
+        color: #d4d4d8;
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      td code {
+        background: rgba(255, 255, 255, 0.08);
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 0.82rem;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+        margin-top: 48px;
+        padding: 28px 0 42px;
+        color: var(--muted);
+        font-size: 0.86rem;
+      }
+      .footer-inner {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+      }
+      .footer-links a:hover {
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container nav">
+        <a class="brand" href="#top">
+          <span class="brand-dot">C</span>
+          <span>Cadence</span>
+        </a>
+        <nav class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#quickstart">Quick Start</a>
+          <a href="#commands">Commands</a>
+          <a href="https://github.com/towermom9/Cadence/wiki" target="_blank" rel="noopener noreferrer">Wiki</a>
+          <a href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top" class="container">
+      <section class="hero">
+        <span class="badge">TypeScript &middot; Bun &middot; React 19 &middot; Lavalink v4</span>
+        <h1>All-in-One Discord Music Bot &amp; Live Web Dashboard</h1>
+        <p class="lead">
+          Cadence unifies a feature-rich Discord music bot, Discord OAuth2 WebSocket API,
+          YouTube Music style React 19 dashboard, and embedded SQLite database into a single lightweight process.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#quickstart">Quick Start with Docker</a>
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/towermom9/Cadence/wiki"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Read the Wiki
+          </a>
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/towermom9/Cadence"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </section>
+
+      <section id="features">
+        <h2>Built for Real-Time Listening</h2>
+        <p class="section-sub">
+          Zero external database required - one container for Cadence, paired with pre-bundled Lavalink v4.
+        </p>
+        <div class="grid">
+          <article class="card">
+            <h3>YouTube Music Style Dashboard</h3>
+            <p>
+              60fps progress interpolation, AMOLED dark mode, 10 dynamic accent themes, Up Next / Lyrics / Related tabs,
+              right-click context menus, and mobile PWA navigation.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Timeline Queue &amp; Drag-and-Drop</h3>
+            <p>
+              Inspect past tracks, current track, manual queue, and Autoplay suggestions in one timeline.
+              Reorder the currently playing track without interrupting audio.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Smart Autoplay &amp; Synced Lyrics</h3>
+            <p>
+              7 Autoplay moods powered by listener history, liked music, and YouTube Music mixes, plus synced LRC/ELRC lyrics
+              with click-to-seek and auto-scroll.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Empty VC Auto-Pause &amp; Resume</h3>
+            <p>
+              Pause playback after a configurable delay (0s to 5m) when listeners leave, optionally ignoring deafened members,
+              and automatically resume when someone joins back.
+            </p>
+          </article>
+          <article class="card">
+            <h3>4-Tier Role-Based Access</h3>
+            <p>
+              Cascading Discord permissions across User, DJ, Admin, and Server/Bot Owner tiers with automatic system log redaction.
+            </p>
+          </article>
+          <article class="card">
+            <h3>Pre-Bundled Lavalink v4</h3>
+            <p>
+              Self-contained <code>ghcr.io/towermom9/cadence-lavalink</code> image with pre-bundled YouTube, LavaSrc, and LavaLyrics plugins
+              and automatic startup updates.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="quickstart">
+        <h2>Quick Start (Docker Compose)</h2>
+        <p class="section-sub">
+          Deploy the pre-built GHCR images and finish configuration in the 4-step Web Onboarding Wizard.
+        </p>
+        <pre><code>git clone https://github.com/towermom9/Cadence.git
+cd Cadence
+docker compose up -d</code></pre>
+        <p class="section-sub" style="margin-top: 14px">
+          Open <code>http://localhost:8000</code> (or port <code>8686</code> in the VPS Compose template), enter your Discord Bot Token and OAuth2 credentials in the wizard, and start playing.
+          See the <a href="https://github.com/towermom9/Cadence/wiki/Installation-and-Deployment" target="_blank" rel="noopener noreferrer" style="color: #fff; text-decoration: underline;">Installation Guide</a> in the Wiki for full reverse-proxy and VPS examples.
+        </p>
+      </section>
+
+      <section id="commands">
+        <h2>Key Discord Commands</h2>
+        <p class="section-sub">23 global slash commands plus customizable text prefix commands (default <code>?</code>).</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Prefix Alias</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/play &lt;query&gt; [source]</code></td>
+              <td><code>?play</code>, <code>?p</code></td>
+              <td>Queue a track or playlist with autocomplete (respects Default Play Next setting).</td>
+            </tr>
+            <tr>
+              <td><code>/playnext &lt;query&gt; [source]</code></td>
+              <td><code>?playnext</code>, <code>?pn</code></td>
+              <td>Queue a track or playlist right after the currently playing song.</td>
+            </tr>
+            <tr>
+              <td><code>/playnow &lt;query&gt; [source]</code></td>
+              <td>-</td>
+              <td>Insert a track at the front of the queue and play it immediately.</td>
+            </tr>
+            <tr>
+              <td><code>/pause</code>, <code>/resume</code>, <code>/skip</code>, <code>/back</code></td>
+              <td><code>?pause</code>, <code>?resume</code>, <code>?s</code></td>
+              <td>Control playback in the active voice channel.</td>
+            </tr>
+            <tr>
+              <td><code>/volume</code>, <code>/loop</code>, <code>/shuffle</code>, <code>/filter</code></td>
+              <td>-</td>
+              <td>DJ / Admin audio and queue controls (9 DSP filter presets).</td>
+            </tr>
+            <tr>
+              <td><code>/settings &lt;subcommand&gt;</code></td>
+              <td>-</td>
+              <td>Configure volume, 24/7 mode, prefix, DJ role, empty VC pause/disconnect, and Play Next default.</td>
+            </tr>
+            <tr>
+              <td><code>/playlist</code>, <code>/queue</code>, <code>/lyrics</code>, <code>/dashboard</code></td>
+              <td><code>?q</code>, <code>?np</code></td>
+              <td>Manage personal playlists, inspect the queue, view lyrics, or open the web controller.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-inner">
+        <span>Cadence - Open-source under MIT License</span>
+        <div class="footer-links">
+          <a href="https://github.com/towermom9/Cadence" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/towermom9/Cadence/wiki" target="_blank" rel="noopener noreferrer">Wiki</a>
+          <a href="https://github.com/towermom9/Cadence/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+          <a href="https://github.com/towermom9/Cadence/pkgs/container/cadence" target="_blank" rel="noopener noreferrer">GHCR Packages</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -83,7 +83,42 @@ export function AppFooter({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-4 text-[11px] text-zinc-500">
-          <span>Cadence Music Controller</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>Cadence Music Controller</span>
+            <span aria-hidden="true" className="text-zinc-700">
+              •
+            </span>
+            <a
+              href="https://github.com/towermom9/Cadence"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-400 transition hover:text-white"
+            >
+              GitHub
+            </a>
+            <span aria-hidden="true" className="text-zinc-700">
+              •
+            </span>
+            <a
+              href="https://towermom9.github.io/Cadence/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-400 transition hover:text-white"
+            >
+              Docs
+            </a>
+            <span aria-hidden="true" className="text-zinc-700">
+              •
+            </span>
+            <a
+              href="https://github.com/towermom9/Cadence/wiki"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-400 transition hover:text-white"
+            >
+              Wiki
+            </a>
+          </div>
           <span className="font-mono">Cadence v{version}</span>
         </div>
       </div>

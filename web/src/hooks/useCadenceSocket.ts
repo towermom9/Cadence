@@ -393,9 +393,9 @@ export function useCadenceSocket(
   );
 
   const updateSettings = useCallback(
-    (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>) => {
+    (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>, silent = false) => {
       if (!selectedGuildId) return;
-      send({ type: "updateSettings", guildId: selectedGuildId, settings: patch });
+      send({ type: "updateSettings", guildId: selectedGuildId, settings: patch, silent });
     },
     [selectedGuildId, send]
   );

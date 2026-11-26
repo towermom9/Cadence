@@ -861,8 +861,16 @@ export class CadenceBot {
       new SlashCommandBuilder().setName("ping").setDescription("Check bot and Lavalink latency"),
     ];
 
-    await this.client.application.commands.set(builders.map((b) => b.toJSON()));
-    console.log(`[Bot] Synced ${builders.length} slash commands.`);
+    try {
+      const payload = builders.map((b) => b.toJSON());
+      await this.client.application.commands.set(payload);
+      console.log(
+        `[Bot] Synced ${builders.length} global slash commands: ${builders.map((b) => `/${b.name}`).join(", ")}`
+      );
+    } catch (error) {
+      console.error("[Bot] Failed to sync global slash commands:", error);
+      throw error;
+    }
   }
 
   private scheduleControllerUpdate(guildId: string): void {
@@ -985,7 +993,30 @@ export class CadenceBot {
         (await this.client.channels.fetch(targetChannelId).catch(() => null));
       if (!ch || !ch.isTextBased() || !("send" in ch)) return;
 
-      const sent = await ch.send({ content: text }).catch(() => null);
+      const guildName = this.client.guilds.cache.get(guildId)?.name ?? "Discord Server";
+      const botAvatarUrl = this.client.user?.displayAvatarURL({ size: 128 }) ?? undefined;
+      const isResume = /resumed playback/i.test(text);
+      const isDisconnect = /disconnected from voice channel/i.test(text);
+      const isPaused = /paused playback/i.test(text);
+
+      const title = isResume
+        ? "Playback Resumed"
+        : isDisconnect
+          ? "Disconnected from Voice"
+          : isPaused
+            ? "Playback Paused"
+            : "Voice Channel Empty";
+
+      const embed = new EmbedBuilder()
+        .setColor(isResume ? BRAND_COLOR : INACTIVE_COLOR)
+        .setAuthor({
+          name: `Music Controller | ${guildName}`,
+          ...(botAvatarUrl ? { iconURL: botAvatarUrl } : {}),
+        })
+        .setTitle(title)
+        .setDescription(text);
+
+      const sent = await ch.send({ embeds: [embed] }).catch(() => null);
       if (sent) {
         this.statusMessages.set(guildId, { channelId: ch.id, messageId: sent.id });
         // Auto-clean transient resume/disconnect notices after 20s; keep pause notice until resolved

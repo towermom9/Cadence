@@ -619,7 +619,9 @@ export class CadenceWsHub {
             type: "settings",
             settings: { ...updated, roles: this.bot.getGuildRoles(msg.guildId) },
           });
-          this.sendToast(ws, "success", "Server settings saved");
+          if (!msg.silent) {
+            this.sendToast(ws, "success", "Server settings saved");
+          }
           this.broadcastGuild(msg.guildId);
           return;
         }

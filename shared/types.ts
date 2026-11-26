@@ -329,6 +329,7 @@ export type WsClientMessage =
       type: "updateSettings";
       guildId: string;
       settings: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>;
+      silent?: boolean;
     }
   | { type: "getPlaylists" }
   | { type: "createPlaylist"; name: string }

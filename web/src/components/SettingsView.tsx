@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Copy,
@@ -7,7 +7,6 @@ import {
   Palette,
   Play,
   RefreshCw,
-  Save,
   Server,
   ShieldCheck,
   Sparkles,
@@ -39,7 +38,10 @@ interface Props {
   preferences: UserPreferencesDTO;
   onUpdatePreferences: (patch: Partial<UserPreferencesDTO>) => void;
   onLoadSettings: (guildId: string) => void;
-  onSaveSettings: (patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>) => void;
+  onSaveSettings: (
+    patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>,
+    silent?: boolean
+  ) => void;
 }
 
 const ACCESS_TIER_LABELS: Record<AccessTier, string> = {
@@ -212,6 +214,10 @@ export function SettingsView({
   const [sysLoading, setSysLoading] = useState(false);
   const [sysError, setSysError] = useState<string | null>(null);
   const [copiedLogs, setCopiedLogs] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingPatchRef = useRef<Partial<Omit<GuildSettingsDTO, "guildId" | "roles">> | null>(null);
 
   // Reset tab if permissions change (e.g. switched to a server where user is not admin/owner)
   useEffect(() => {
@@ -297,38 +303,87 @@ export function SettingsView({
     onUpdatePreferences({ pauseOnEmptySeconds: clamped });
   };
 
+  const clearAutoSaveTimers = useCallback(() => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    if (savedStatusTimerRef.current) {
+      clearTimeout(savedStatusTimerRef.current);
+      savedStatusTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    clearAutoSaveTimers();
+    pendingPatchRef.current = null;
+    setSaveStatus("idle");
+    return () => {
+      clearAutoSaveTimers();
+    };
+  }, [guildId, clearAutoSaveTimers]);
+
+  const markSaved = useCallback(() => {
+    setSaveStatus("saved");
+    if (savedStatusTimerRef.current) {
+      clearTimeout(savedStatusTimerRef.current);
+    }
+    savedStatusTimerRef.current = setTimeout(() => {
+      savedStatusTimerRef.current = null;
+      setSaveStatus("idle");
+    }, 1800);
+  }, []);
+
+  const commitServerPatch = useCallback(
+    (
+      patch: Partial<Omit<GuildSettingsDTO, "guildId" | "roles">>,
+      options?: { debounce?: boolean }
+    ) => {
+      if (!guildId) return;
+      if (options?.debounce) {
+        pendingPatchRef.current = { ...(pendingPatchRef.current ?? {}), ...patch };
+        setSaveStatus("saving");
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        autoSaveTimerRef.current = setTimeout(() => {
+          autoSaveTimerRef.current = null;
+          const merged = pendingPatchRef.current;
+          pendingPatchRef.current = null;
+          if (merged) {
+            onSaveSettings(merged, true);
+            markSaved();
+          }
+        }, 350);
+        return;
+      }
+
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+      const merged = { ...(pendingPatchRef.current ?? {}), ...patch };
+      pendingPatchRef.current = null;
+      onSaveSettings(merged, true);
+      markSaved();
+    },
+    [guildId, markSaved, onSaveSettings]
+  );
+
   const toggleAccessRole = (roleId: string) => {
-    setAccessRoleIds((prev) =>
-      prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
-    );
+    const next = accessRoleIds.includes(roleId)
+      ? accessRoleIds.filter((id) => id !== roleId)
+      : [...accessRoleIds, roleId];
+    setAccessRoleIds(next);
+    commitServerPatch({ accessRoleIds: next });
   };
 
   const toggleAdminRole = (roleId: string) => {
-    setAdminRoleIds((prev) =>
-      prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId]
-    );
-  };
-
-  const handleServerSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    onSaveSettings({
-      prefix: prefix.trim() || "?",
-      defaultVolume: Math.min(100, Math.max(0, defaultVolume)),
-      djRoleId: djRoleId || null,
-      accessRoleIds,
-      adminRoleIds,
-      stay247,
-      autoplay,
-      allowDuplicates,
-      pauseOnEmpty,
-      pauseOnEmptySeconds: Math.min(300, Math.max(0, Math.round(pauseOnEmptySeconds))),
-      emptyVcDisconnectMinutes: Math.min(
-        120,
-        Math.max(0, Math.round(emptyVcDisconnectMinutes))
-      ),
-      ignoreDeafenedListeners,
-      defaultPlayNext,
-    });
+    const next = adminRoleIds.includes(roleId)
+      ? adminRoleIds.filter((id) => id !== roleId)
+      : [...adminRoleIds, roleId];
+    setAdminRoleIds(next);
+    commitServerPatch({ adminRoleIds: next });
   };
 
   const visibleTabs = [
@@ -745,10 +800,7 @@ export function SettingsView({
               Select a Discord server from the top right first.
             </div>
           ) : (
-            <form
-              onSubmit={handleServerSubmit}
-              className="space-y-6 rounded-2xl border border-white/10 bg-[#121212] p-6"
-            >
+            <div className="space-y-6 rounded-2xl border border-white/10 bg-[#121212] p-6">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-4">
                 <div>
                   <h2 className="text-base font-semibold text-white">{guildName}</h2>
@@ -756,34 +808,73 @@ export function SettingsView({
                     Applied immediately across Discord slash/text commands and all web listeners.
                   </p>
                 </div>
-                <button
-                  type="submit"
-                  style={{
-                    backgroundColor: "var(--cadence-accent)",
-                    color: "var(--cadence-accent-fg)",
-                  }}
-                  className="inline-flex items-center gap-2 rounded-full px-5 py-2 text-xs font-semibold shadow-sm transition hover:brightness-110"
+                <span
+                  aria-live="polite"
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    saveStatus === "saving"
+                      ? "border-white/15 bg-white/[0.06] text-zinc-300"
+                      : saveStatus === "saved"
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        : "border-white/10 bg-white/[0.04] text-zinc-400"
+                  }`}
                 >
-                  <Save className="h-3.5 w-3.5" />
-                  Save Changes
-                </button>
+                  {saveStatus === "saving" ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Saving...
+                    </>
+                  ) : saveStatus === "saved" ? (
+                    <>
+                      <Check className="h-3 w-3" />
+                      Auto-saved
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3 w-3 opacity-60" />
+                      Changes auto-save
+                    </>
+                  )}
+                </span>
               </div>
 
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                  Text Command Prefix
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-white/8 bg-[#0b0b0b] px-4 py-3">
+                <div className="min-w-0">
+                  <label
+                    htmlFor="server-command-prefix"
+                    className="block text-sm font-medium text-white"
+                  >
+                    Text Command Prefix
+                  </label>
+                  <p className="text-xs text-zinc-400">
+                    Used for message commands like{" "}
+                    <code className="font-mono text-zinc-200">{prefix.trim() || "?"}play</code> and{" "}
+                    <code className="font-mono text-zinc-200">{prefix.trim() || "?"}playnext</code>.
+                  </p>
+                </div>
                 <input
+                  id="server-command-prefix"
                   type="text"
                   maxLength={5}
                   value={prefix}
-                  onChange={(e) => setPrefix(e.target.value)}
-                  className="w-full max-w-xs rounded-xl border border-white/12 bg-[#0b0b0b] px-3.5 py-2.5 text-sm text-white outline-none focus:border-white/40"
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setPrefix(next);
+                    const normalized = next.trim();
+                    if (normalized) {
+                      commitServerPatch({ prefix: normalized }, { debounce: true });
+                    }
+                  }}
+                  onBlur={() => {
+                    const normalized = prefix.trim() || "?";
+                    if (normalized !== prefix) {
+                      setPrefix(normalized);
+                    }
+                    commitServerPatch({ prefix: normalized });
+                  }}
+                  aria-label="Text Command Prefix"
+                  className="w-24 shrink-0 rounded-lg border border-white/15 bg-[#161616] px-3 py-1.5 text-center font-mono text-sm font-semibold text-white outline-none transition focus:border-white/40"
                 />
-                <p className="text-xs text-zinc-500">
-                  Used for message commands like {prefix || "?"}play and {prefix || "?"}playnext.
-                </p>
-              </label>
+              </div>
 
               <div className="space-y-2 rounded-xl border border-white/8 bg-[#0b0b0b] p-4">
                 <div className="flex items-center justify-between">
@@ -797,7 +888,11 @@ export function SettingsView({
                   min={0}
                   max={100}
                   value={defaultVolume}
-                  onChange={(e) => setDefaultVolume(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Math.min(100, Math.max(0, Number(e.target.value)));
+                    setDefaultVolume(next);
+                    commitServerPatch({ defaultVolume: next }, { debounce: true });
+                  }}
                   style={{ accentColor: "var(--cadence-accent)" }}
                   className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20"
                 />
@@ -813,7 +908,10 @@ export function SettingsView({
                   </div>
                   <ThemeSwitch
                     checked={stay247}
-                    onChange={setStay247}
+                    onChange={(next) => {
+                      setStay247(next);
+                      commitServerPatch({ stay247: next });
+                    }}
                     label="Toggle 24/7 Mode"
                   />
                 </div>
@@ -827,7 +925,10 @@ export function SettingsView({
                   </div>
                   <ThemeSwitch
                     checked={autoplay}
-                    onChange={setAutoplay}
+                    onChange={(next) => {
+                      setAutoplay(next);
+                      commitServerPatch({ autoplay: next });
+                    }}
                     label="Toggle Default Autoplay"
                   />
                 </div>
@@ -841,7 +942,10 @@ export function SettingsView({
                   </div>
                   <ThemeSwitch
                     checked={allowDuplicates}
-                    onChange={setAllowDuplicates}
+                    onChange={(next) => {
+                      setAllowDuplicates(next);
+                      commitServerPatch({ allowDuplicates: next });
+                    }}
                     label="Toggle Allow Duplicate Tracks"
                   />
                 </div>
@@ -855,7 +959,10 @@ export function SettingsView({
                   </div>
                   <ThemeSwitch
                     checked={defaultPlayNext}
-                    onChange={setDefaultPlayNext}
+                    onChange={(next) => {
+                      setDefaultPlayNext(next);
+                      commitServerPatch({ defaultPlayNext: next });
+                    }}
                     label="Toggle Default to Play Next"
                   />
                 </div>
@@ -872,7 +979,10 @@ export function SettingsView({
                     </div>
                     <ThemeSwitch
                       checked={pauseOnEmpty}
-                      onChange={setPauseOnEmpty}
+                      onChange={(next) => {
+                        setPauseOnEmpty(next);
+                        commitServerPatch({ pauseOnEmpty: next });
+                      }}
                       label="Toggle Server Pause When Voice Channel is Empty"
                     />
                   </div>
@@ -897,7 +1007,11 @@ export function SettingsView({
                       step={5}
                       disabled={!pauseOnEmpty}
                       value={pauseOnEmptySeconds}
-                      onChange={(e) => setPauseOnEmptySeconds(Number(e.target.value))}
+                      onChange={(e) => {
+                        const next = Math.min(300, Math.max(0, Math.round(Number(e.target.value))));
+                        setPauseOnEmptySeconds(next);
+                        commitServerPatch({ pauseOnEmptySeconds: next }, { debounce: true });
+                      }}
                       style={{ accentColor: "var(--cadence-accent)" }}
                       aria-label="Server empty voice channel play duration"
                       className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
@@ -939,7 +1053,11 @@ export function SettingsView({
                       step={5}
                       disabled={!pauseOnEmpty || stay247}
                       value={emptyVcDisconnectMinutes}
-                      onChange={(e) => setEmptyVcDisconnectMinutes(Number(e.target.value))}
+                      onChange={(e) => {
+                        const next = Math.min(120, Math.max(0, Math.round(Number(e.target.value))));
+                        setEmptyVcDisconnectMinutes(next);
+                        commitServerPatch({ emptyVcDisconnectMinutes: next }, { debounce: true });
+                      }}
                       style={{ accentColor: "var(--cadence-accent)" }}
                       aria-label="Auto-disconnect after extended auto-pause"
                       className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 disabled:cursor-not-allowed"
@@ -968,7 +1086,10 @@ export function SettingsView({
                     </div>
                     <ThemeSwitch
                       checked={ignoreDeafenedListeners}
-                      onChange={setIgnoreDeafenedListeners}
+                      onChange={(next) => {
+                        setIgnoreDeafenedListeners(next);
+                        commitServerPatch({ ignoreDeafenedListeners: next });
+                      }}
                       label="Toggle Ignore Deafened Listeners"
                     />
                   </div>
@@ -1003,7 +1124,10 @@ export function SettingsView({
                     {accessRoleIds.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => setAccessRoleIds([])}
+                        onClick={() => {
+                          setAccessRoleIds([]);
+                          commitServerPatch({ accessRoleIds: [] });
+                        }}
                         className="rounded-full border border-white/12 px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
                       >
                         Allow Everyone
@@ -1064,7 +1188,10 @@ export function SettingsView({
                     {djRoleId && (
                       <button
                         type="button"
-                        onClick={() => setDjRoleId("")}
+                        onClick={() => {
+                          setDjRoleId("");
+                          commitServerPatch({ djRoleId: null });
+                        }}
                         className="rounded-full border border-white/12 px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
                       >
                         Clear DJ Role
@@ -1080,7 +1207,11 @@ export function SettingsView({
                           <button
                             key={role.id}
                             type="button"
-                            onClick={() => setDjRoleId(selected ? "" : role.id)}
+                            onClick={() => {
+                              const next = selected ? "" : role.id;
+                              setDjRoleId(next);
+                              commitServerPatch({ djRoleId: next || null });
+                            }}
                             style={
                               selected
                                 ? {
@@ -1125,7 +1256,10 @@ export function SettingsView({
                     {adminRoleIds.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => setAdminRoleIds([])}
+                        onClick={() => {
+                          setAdminRoleIds([]);
+                          commitServerPatch({ adminRoleIds: [] });
+                        }}
                         className="rounded-full border border-white/12 px-3 py-1 text-[11px] font-medium text-zinc-300 transition hover:bg-white/10 hover:text-white"
                       >
                         Clear Custom Admins
@@ -1174,7 +1308,7 @@ export function SettingsView({
                   - Full access to all playback controls, Server Settings, and System diagnostics &amp; debug logs.
                 </div>
               </div>
-            </form>
+            </div>
           )}
         </>
       )}
