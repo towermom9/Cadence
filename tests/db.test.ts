@@ -80,4 +80,19 @@ describe("server/db (isolated SQLite)", () => {
     const loaded = db.getAppConfig();
     expect(loaded?.dashboardUrl).toBe("https://cadence.example.com");
   });
+
+  test("resets guild settings back to defaults cleanly", () => {
+    db.updateGuildSettings("guild-reset", {
+      prefix: "!",
+      defaultVolume: 45,
+      stay247: true,
+      autoplay: true,
+      defaultPlayNext: true,
+    });
+    const reset = db.resetGuildSettings("guild-reset");
+    expect(reset.defaultVolume).toBe(100);
+    expect(reset.stay247).toBe(false);
+    expect(reset.autoplay).toBe(false);
+    expect(reset.defaultPlayNext).toBe(false);
+  });
 });

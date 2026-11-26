@@ -543,7 +543,7 @@ export function NowPlayingView({
         </div>
         <button
           type="button"
-          disabled={!playerState?.connected || !privileged}
+          disabled={(!playerState?.connected && !playerState?.voiceChannelId && !current) || !privileged}
           onClick={onStop}
           title="Disconnect"
           aria-label="Disconnect voice"

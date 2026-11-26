@@ -9,7 +9,7 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
     - `server/index.ts` - Single-process entrypoint wiring `CadenceDatabase`, `CadenceBot`, `CadenceWsHub`, and `createWebApp`.
     - `server/config.ts` - Environment variables + SQLite `app_config` overlay (`config.needsSetup`, `config.dataDir`, `config.dashboardUrl`).
     - `server/db.ts` - `CadenceDatabase` schema, idempotent column migrations, sessions, playlists, pins, paginated history, preferences, and guild settings.
-    - `server/bot.ts` - Discord gateway client, 23 global slash commands, prefix commands, autocomplete, Music Controller embeds, voice status embeds, and cleanup timers.
+    - `server/bot.ts` - Discord gateway client, 35 global slash commands, prefix commands, autocomplete, Music Controller embeds, voice status embeds, and cleanup timers.
     - `server/music.ts` - `MusicService` (`LavalinkManager`), timeline queue operations, Queue Loop wrapping, 7-mood Autoplay, DSP presets, perceptual volume loop, and empty-VC state machine.
     - `server/ws.ts` - `CadenceWsHub` real-time `/ws` router, RBAC enforcement, toast/playerState broadcasts, and playlist/history/settings handlers.
     - `server/web.ts` - Hono REST endpoints (`/api/*`), Discord OAuth2 flow, `/api/artwork` proxy, `/api/recommendations`, `/api/system/*`, and static SPA serving.
@@ -76,7 +76,8 @@ Before writing or modifying any backend, Discord bot, frontend, or Lavalink conf
   - Always convert UI volume (`0-100%`) to Lavalink volume using `uiVolumeToLavalink` in `shared/volume.ts` (`((clamped / 100) ** 1.6) * 100`).
   - Do not trigger full-app React state updates on every slider pixel drag in `useCadenceSocket.setVolume`; rely on the coalesced volume loop in `MusicService.setVolume`.
 - **Discord Slash Commands, Controller & Status Embed Hygiene (`server/bot.ts`):**
-  - Keep `registerSlashCommands()` synced globally (`23` commands including `/play`, `/playnext`, `/playnow`, `/settings playnext`) and never register duplicate guild-scoped copies alongside global commands. Respect Discord's 100-char limit on command/option descriptions and choice names/values.
+  - Keep `registerSlashCommands()` synced globally (`35` commands including `/play`, `/playnext`, `/playnow`, `/connect`, `/skipto`, `/replay`, `/move`, `/swap`, `/grab`, `/history`, `/speed`, `/pitch`, `/cleareffect`) and never register duplicate guild-scoped copies alongside global commands. Respect Discord's 100-char limit on command/option descriptions and choice names/values.
+  - In `MusicService.serializePlayer()`, derive `connected` from `Boolean(player.connected || player.voiceChannelId || player.playing || player.queue.current)` because `lavalink-client` leaves `player.connected` `undefined` until the first `playerUpdate` heartbeat arrives (similarly, `PlayerBar.tsx` checks `playerState?.connected || playerState?.voiceChannelId || track`).
   - `MusicService.ensurePlayer` must default `textChannelId` to `voiceChannelId` (and `CadenceBot.invokeController` must fall back to `player.voiceChannelId`) so starting playback from the web dashboard posts the Now Playing controller into the voice channel's text chat.
   - Keep the Discord Now Playing controller buttons clean: Row 1 = `Back`, `Pause`/`Resume`, `Skip`; Row 2 = `Leave`, `❤️`, `Queue`, `Web` (no Loop or Shuffle buttons on the embed, and no phone emoji in the author header).
   - Style voice-status notices (`postVoiceStatusMessage`) as `EmbedBuilder` cards (`Music Controller | <Guild>` author header with `BRAND_COLOR` for resume and `INACTIVE_COLOR` for pause/countdown/disconnect) rather than plain text messages.

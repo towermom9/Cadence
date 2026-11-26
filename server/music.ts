@@ -151,6 +151,7 @@ export type ControllerEventType = "trackStart" | "queueEnd" | "playerDestroy" | 
 export class MusicService {
   readonly manager: LavalinkManager;
   private activeFilters = new Map<string, FilterPreset>();
+  private timescales = new Map<string, { speed: number; pitch: number }>();
   private repeatModes = new Map<string, RepeatModeType>();
   private autoplayOverrides = new Map<string, boolean>();
   private autoplayMoods = new Map<string, AutoplayMood>();
@@ -292,6 +293,7 @@ export class MusicService {
       this.queueLoopWrapped.delete(player.guildId);
       this.activePlaylistNames.delete(player.guildId);
       this.activeFilters.delete(player.guildId);
+      this.timescales.delete(player.guildId);
       this.repeatModes.delete(player.guildId);
       this.autoplayOverrides.delete(player.guildId);
       this.autoplayMoods.delete(player.guildId);
@@ -506,8 +508,8 @@ export class MusicService {
         }
       }
 
-      const last = this.lastPositionBroadcast.get(player.guildId) ?? 0;
-      if (now - last >= 1500) {
+      const last = this.lastPositionBroadcast.get(player.guildId);
+      if (last === undefined || now - last >= 1500) {
         this.lastPositionBroadcast.set(player.guildId, now);
         this.onStateChange(player.guildId);
       }
@@ -571,6 +573,15 @@ export class MusicService {
       await player.connect();
     }
     return player;
+  }
+
+  async connectOnly(
+    guildId: string,
+    voiceChannelId: string,
+    textChannelId?: string
+  ): Promise<void> {
+    await this.ensurePlayer(guildId, voiceChannelId, textChannelId);
+    this.emitStateChange(guildId);
   }
 
   async search(
@@ -1357,6 +1368,35 @@ export class MusicService {
     this.emitStateChange(guildId);
   }
 
+  async swapTracks(
+    guildId: string,
+    firstIndex: number,
+    secondIndex: number
+  ): Promise<{ first: TrackDTO; second: TrackDTO }> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+    const len = player.queue.tracks.length;
+    if (firstIndex < 0 || firstIndex >= len || secondIndex < 0 || secondIndex >= len) {
+      throw new Error("Track positions are out of range.");
+    }
+    if (firstIndex === secondIndex) {
+      throw new Error("Provide two different queue positions to swap.");
+    }
+    const first = player.queue.tracks[firstIndex];
+    const second = player.queue.tracks[secondIndex];
+    if (this.isAutoplayTrack(first) || this.isAutoplayTrack(second)) {
+      throw new Error("Autoplay suggestions cannot be swapped.");
+    }
+
+    const updated = [...player.queue.tracks];
+    [updated[firstIndex], updated[secondIndex]] = [updated[secondIndex], updated[firstIndex]];
+    await player.queue.splice(0, len);
+    await player.queue.add(updated);
+    await player.queue.utils.save();
+    this.emitStateChange(guildId);
+    return { first: trackToDTO(first), second: trackToDTO(second) };
+  }
+
   canRemoveTrack(guildId: string, userId: string, index: number): boolean {
     if (this.isPrivileged(guildId, userId)) return true;
     const player = this.getPlayer(guildId);
@@ -1967,6 +2007,7 @@ export class MusicService {
     if (!player) throw new Error("No active player in this server.");
 
     await player.filterManager.resetFilters();
+    this.timescales.delete(guildId);
 
     switch (preset) {
       case "none":
@@ -2000,6 +2041,32 @@ export class MusicService {
     this.activeFilters.set(guildId, preset);
     this.emitStateChange(guildId);
     return preset;
+  }
+
+  async setTimescale(
+    guildId: string,
+    opts: { speed?: number; pitch?: number }
+  ): Promise<{ speed: number; pitch: number }> {
+    const player = this.getPlayer(guildId);
+    if (!player) throw new Error("No active player in this server.");
+
+    const clampFactor = (v: number) => Math.round(Math.max(0.5, Math.min(2.0, v)) * 100) / 100;
+    const prev = this.timescales.get(guildId) ?? { speed: 1, pitch: 1 };
+    const next = {
+      speed: typeof opts.speed === "number" && Number.isFinite(opts.speed) ? clampFactor(opts.speed) : prev.speed,
+      pitch: typeof opts.pitch === "number" && Number.isFinite(opts.pitch) ? clampFactor(opts.pitch) : prev.pitch,
+    };
+
+    await player.filterManager.setSpeed(next.speed);
+    await player.filterManager.setPitch(next.pitch);
+    this.timescales.set(guildId, next);
+    this.activeFilters.set(guildId, "none");
+    this.emitStateChange(guildId);
+    return next;
+  }
+
+  async clearEffects(guildId: string): Promise<void> {
+    await this.applyFilter(guildId, "none");
   }
 
   private async handleAutoplay(player: Player, lastPlayedTrack: Track): Promise<void> {
@@ -2422,7 +2489,9 @@ export class MusicService {
         (player.queue.current ? player.queue.current.info.title : null),
       voiceChannelId: vcId,
       voiceChannelName: vc?.name ?? null,
-      connected: Boolean(player.connected),
+      connected: Boolean(
+        player.connected || player.voiceChannelId || player.playing || player.queue.current
+      ),
       playing: Boolean(player.playing),
       paused: Boolean(player.paused),
       autoPausedEmptyVc: Boolean(player.paused && this.autoPausedByEmptyVc.has(guildId)),

@@ -9,8 +9,9 @@
 <p align="center">
   <strong>All-in-one Discord music bot &amp; real-time YouTube Music style web dashboard built with TypeScript, Bun &amp; Lavalink v4.</strong><br />
   <a href="https://towermom9.github.io/Cadence/">Website</a> &middot;
-  <a href="https://towermom9.github.io/Cadence/docs/guides/getting-started/">Documentation &amp; Guides</a> &middot;
-  <a href="https://towermom9.github.io/Cadence/docs/reference/commands/">Commands</a>
+  <a href="https://towermom9.github.io/Cadence/docs/guides/getting-started/">Guides</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/reference/commands/">Commands</a> &middot;
+  <a href="https://towermom9.github.io/Cadence/docs/reference/changelog/">Changelog</a>
 </p>
 
 | Docker Packages (GHCR) | Build & Release Status |
@@ -71,22 +72,22 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 </details>
 
 <details>
-  <summary><strong>Discord Slash &amp; Prefix Commands (23 Commands)</strong></summary>
+  <summary><strong>Discord Slash &amp; Prefix Commands (35 Commands)</strong></summary>
 
 - **Playback & Search**:
   - `/play <query> [source]` - Queue a song or playlist with live autocomplete from recent history & YouTube suggestions.
   - `/playnext <query> [source]` - Queue a track or playlist right after the current song (or set as default via `/settings playnext`).
   - `/playnow <query> [source]` - Insert track at the front of the queue and play immediately.
   - `/search <query> [source]` - Search and pick from an interactive dropdown menu.
-  - `/pause`, `/resume`, `/skip [amount]`, `/back`, `/seek <seconds>`, `/stop`
-- **Audio & Queue**:
-  - `/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay`, `/filter <preset>` (9 DSP presets: `bassboost`, `nightcore`, `vaporwave`, `8d`, `karaoke`, `lowpass`, `tremolo`, `vibrato`, `none`)
-  - `/queue`, `/nowplaying`, `/shuffle`, `/remove <position>`, `/clear`, `/lyrics`
+  - `/connect`, `/pause`, `/resume`, `/skip [amount]`, `/skipto <position>`, `/back`, `/replay`, `/seek <seconds>`, `/forward [seconds]`, `/rewind [seconds]`, `/stop`
+- **Audio, Queue & History**:
+  - `/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay`, `/filter <preset>` (9 DSP presets: `bassboost`, `nightcore`, `vaporwave`, `8d`, `karaoke`, `lowpass`, `tremolo`, `vibrato`, `none`), `/speed <0.5-2.0>`, `/pitch <0.5-2.0>`, `/cleareffect`
+  - `/queue`, `/history`, `/nowplaying`, `/grab`, `/shuffle`, `/move <from> <to>`, `/swap <first> <second>`, `/remove <position>`, `/clear`, `/lyrics`
 - **Playlists, Settings & Utility**:
-  - `/playlist <list|create|add|play|delete>` - Manage and play your personal playlists from Discord.
-  - `/settings <view|volume|247|dj|duplicates|prefix|emptyvc|playnext>` - Configure server settings (Tier 3 Admin / Owner).
+  - `/playlist <list|view|create|add|savequeue|remove|rename|play|delete>` - Manage and play your personal playlists from Discord.
+  - `/settings <view|volume|247|autoplay|dj|duplicates|prefix|emptyvc|playnext|reset>` - Configure server settings (Tier 3 Admin / Owner).
   - `/dashboard`, `/ping`, `/help`
-  - Plus customizable prefix commands (`?play`, `?playnext`, `?skip`, `?pause`, `?resume`, `?stop`, `?queue`, `?np`).
+  - Plus customizable prefix commands (`?play`, `?playnext`, `?connect`, `?skip`, `?skipto`, `?back`, `?replay`, `?forward`, `?rewind`, `?pause`, `?resume`, `?stop`, `?volume`, `?loop`, `?shuffle`, `?move`, `?swap`, `?clear`, `?autoplay`, `?cleareffect`, `?queue`, `?history`, `?grab`, `?np`).
 
 </details>
 
@@ -98,7 +99,7 @@ A free and open-source Discord music bot and real-time web dashboard inspired by
 | **Tier 1 · User** | Everyone in the server by default, or members with configured **Basic Access Roles** | Search, play/enqueue tracks, view queue/lyrics/related, manage personal playlists/likes/pins, remove own queued tracks |
 | **Tier 2 · DJ** | Members with the configured **DJ Role** (or alone in voice channel) | All Tier 1 permissions + skip, back, seek, volume, loop, shuffle, autoplay, filters, drag/reorder/clear/dismiss queue, remove any track, disconnect |
 | **Tier 3 · Admin** | Members with configured **Admin Roles** or Discord `Manage Server` / `Administrator` | All Tier 2 permissions + **Server Settings** tab & `/settings` command |
-| **Tier 4 · Owner** | Discord **Server Owner** or **Bot Owner** | All Tier 3 permissions + **System Settings** tab (runtime/Lavalink plugin versions & one-click redacted debug log export) |
+| **Tier 4 · Owner** | Discord **Server Owner** or **Bot Owner** | All Tier 3 permissions + **System Settings** tab (live domain/Redirect URI configuration, runtime & Lavalink plugin versions, one-click redacted debug log export) |
 
 </details>
 

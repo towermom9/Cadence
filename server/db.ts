@@ -501,6 +501,11 @@ export class CadenceDatabase {
     return next;
   }
 
+  resetGuildSettings(guildId: string): GuildSettingsDTO {
+    this.db.query(`DELETE FROM guild_settings WHERE guild_id = ?`).run(guildId);
+    return this.getGuildSettings(guildId);
+  }
+
   private rowToPlaylist(row: PlaylistRow): PlaylistDTO {
     return {
       id: row.id,

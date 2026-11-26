@@ -733,6 +733,46 @@ export class CadenceBot {
               { name: "Queue", value: "queue" }
             )
         ),
+      new SlashCommandBuilder().setName("connect").setDescription("Connect Cadence to your voice channel"),
+      new SlashCommandBuilder().setName("replay").setDescription("Restart the current track from the beginning"),
+      new SlashCommandBuilder()
+        .setName("skipto")
+        .setDescription("Jump directly to a track position in the queue")
+        .addIntegerOption((opt) =>
+          opt.setName("position").setDescription("1-based queue position").setRequired(true).setMinValue(1)
+        ),
+      new SlashCommandBuilder()
+        .setName("forward")
+        .setDescription("Fast-forward the current track")
+        .addIntegerOption((opt) =>
+          opt.setName("seconds").setDescription("Seconds to jump forward (default 10)").setMinValue(1).setMaxValue(600)
+        ),
+      new SlashCommandBuilder()
+        .setName("rewind")
+        .setDescription("Rewind the current track")
+        .addIntegerOption((opt) =>
+          opt.setName("seconds").setDescription("Seconds to jump backward (default 10)").setMinValue(1).setMaxValue(600)
+        ),
+      new SlashCommandBuilder()
+        .setName("move")
+        .setDescription("Move a queued track to another position")
+        .addIntegerOption((opt) =>
+          opt.setName("from").setDescription("Current 1-based queue position").setRequired(true).setMinValue(1)
+        )
+        .addIntegerOption((opt) =>
+          opt.setName("to").setDescription("Target 1-based queue position").setRequired(true).setMinValue(1)
+        ),
+      new SlashCommandBuilder()
+        .setName("swap")
+        .setDescription("Swap two tracks in the upcoming queue")
+        .addIntegerOption((opt) =>
+          opt.setName("first").setDescription("First 1-based queue position").setRequired(true).setMinValue(1)
+        )
+        .addIntegerOption((opt) =>
+          opt.setName("second").setDescription("Second 1-based queue position").setRequired(true).setMinValue(1)
+        ),
+      new SlashCommandBuilder().setName("history").setDescription("Show recently played tracks in this session"),
+      new SlashCommandBuilder().setName("grab").setDescription("Send the currently playing track to your DMs"),
       new SlashCommandBuilder().setName("shuffle").setDescription("Shuffle the upcoming queue"),
       new SlashCommandBuilder()
         .setName("remove")
@@ -752,11 +792,32 @@ export class CadenceBot {
             .setRequired(true)
             .addChoices(...FILTER_CHOICES)
         ),
+      new SlashCommandBuilder()
+        .setName("speed")
+        .setDescription("Adjust playback speed (0.5x - 2.0x)")
+        .addNumberOption((opt) =>
+          opt.setName("value").setDescription("Speed multiplier (1.0 = normal)").setRequired(true).setMinValue(0.5).setMaxValue(2.0)
+        ),
+      new SlashCommandBuilder()
+        .setName("pitch")
+        .setDescription("Adjust playback pitch (0.5x - 2.0x)")
+        .addNumberOption((opt) =>
+          opt.setName("value").setDescription("Pitch multiplier (1.0 = normal)").setRequired(true).setMinValue(0.5).setMaxValue(2.0)
+        ),
+      new SlashCommandBuilder().setName("cleareffect").setDescription("Reset all audio filters, speed, and pitch effects"),
       new SlashCommandBuilder().setName("lyrics").setDescription("Fetch lyrics for the current track"),
       new SlashCommandBuilder()
         .setName("playlist")
         .setDescription("Manage your personal playlists")
         .addSubcommand((sub) => sub.setName("list").setDescription("List your saved playlists"))
+        .addSubcommand((sub) =>
+          sub
+            .setName("view")
+            .setDescription("View tracks inside a saved playlist")
+            .addStringOption((opt) =>
+              opt.setName("name").setDescription("Playlist name").setRequired(true)
+            )
+        )
         .addSubcommand((sub) =>
           sub
             .setName("create")
@@ -771,6 +832,36 @@ export class CadenceBot {
             .setDescription("Save the currently playing track to a playlist")
             .addStringOption((opt) =>
               opt.setName("name").setDescription("Playlist name").setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("savequeue")
+            .setDescription("Save the current track and queue to a playlist")
+            .addStringOption((opt) =>
+              opt.setName("name").setDescription("Playlist name").setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("remove")
+            .setDescription("Remove a track from a playlist by 1-based position")
+            .addStringOption((opt) =>
+              opt.setName("name").setDescription("Playlist name").setRequired(true)
+            )
+            .addIntegerOption((opt) =>
+              opt.setName("position").setDescription("1-based track position").setRequired(true).setMinValue(1)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("rename")
+            .setDescription("Rename one of your playlists")
+            .addStringOption((opt) =>
+              opt.setName("name").setDescription("Current playlist name").setRequired(true)
+            )
+            .addStringOption((opt) =>
+              opt.setName("new_name").setDescription("New playlist name").setRequired(true)
             )
         )
         .addSubcommand((sub) =>
@@ -807,6 +898,14 @@ export class CadenceBot {
             .setDescription("Toggle 24/7 stay-in-channel mode")
             .addBooleanOption((opt) =>
               opt.setName("enabled").setDescription("Keep bot connected when idle").setRequired(true)
+            )
+        )
+        .addSubcommand((sub) =>
+          sub
+            .setName("autoplay")
+            .setDescription("Toggle default Autoplay for this server")
+            .addBooleanOption((opt) =>
+              opt.setName("enabled").setDescription("Enable Autoplay by default").setRequired(true)
             )
         )
         .addSubcommand((sub) =>
@@ -871,6 +970,9 @@ export class CadenceBot {
                 .setDescription("Make /play queue tracks at the front (Play Next) by default")
                 .setRequired(true)
             )
+        )
+        .addSubcommand((sub) =>
+          sub.setName("reset").setDescription("Reset all server settings back to factory defaults")
         ),
       new SlashCommandBuilder().setName("dashboard").setDescription("Get the link to the Cadence web dashboard"),
       new SlashCommandBuilder().setName("help").setDescription("Show all Cadence music commands and controls"),
@@ -1452,7 +1554,15 @@ export class CadenceBot {
     const member = interaction.member as GuildMember;
 
     try {
-      const ephemeralCommands = new Set(["search", "nowplaying", "dashboard", "help", "ping"]);
+      const ephemeralCommands = new Set([
+        "search",
+        "nowplaying",
+        "dashboard",
+        "help",
+        "ping",
+        "history",
+        "grab",
+      ]);
       let isEphemeral = ephemeralCommands.has(interaction.commandName);
       if (interaction.commandName === "playlist") {
         isEphemeral = interaction.options.getSubcommand() !== "play";
@@ -1677,6 +1787,146 @@ export class CadenceBot {
           return;
         }
 
+        case "connect": {
+          const vcId = this.requireSameVoice(guildId, member);
+          await this.music.connectOnly(guildId, vcId, interaction.channelId);
+          await this.editAndTrackReply(guildId, interaction, "Connected to your voice channel.");
+          return;
+        }
+
+        case "replay": {
+          this.requireSameVoice(guildId, member);
+          await this.music.seek(guildId, 0);
+          await this.editAndTrackReply(guildId, interaction, "Restarted the current track.");
+          return;
+        }
+
+        case "skipto": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          const pos = interaction.options.getInteger("position", true);
+          await this.music.playTrack(guildId, pos - 1);
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Skipped ahead to track **#${pos}**.`
+          );
+          return;
+        }
+
+        case "forward": {
+          this.requireSameVoice(guildId, member);
+          const sec = interaction.options.getInteger("seconds") ?? 10;
+          const state = this.music.serializePlayer(guildId);
+          if (!state.current || state.current.isStream) {
+            throw new Error("Cannot seek inside this track.");
+          }
+          const target = Math.min(state.current.duration || state.position + sec * 1000, state.position + sec * 1000);
+          await this.music.seek(guildId, target);
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Fast-forwarded **${sec}s** to **${formatDuration(target)}**.`
+          );
+          return;
+        }
+
+        case "rewind": {
+          this.requireSameVoice(guildId, member);
+          const sec = interaction.options.getInteger("seconds") ?? 10;
+          const state = this.music.serializePlayer(guildId);
+          if (!state.current || state.current.isStream) {
+            throw new Error("Cannot seek inside this track.");
+          }
+          const target = Math.max(0, state.position - sec * 1000);
+          await this.music.seek(guildId, target);
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Rewound **${sec}s** to **${formatDuration(target)}**.`
+          );
+          return;
+        }
+
+        case "move": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          const from = interaction.options.getInteger("from", true);
+          const to = interaction.options.getInteger("to", true);
+          await this.music.moveTrack(guildId, from - 1, to - 1);
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Moved track from position **#${from}** to **#${to}**.`
+          );
+          return;
+        }
+
+        case "swap": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          const first = interaction.options.getInteger("first", true);
+          const second = interaction.options.getInteger("second", true);
+          const swapped = await this.music.swapTracks(guildId, first - 1, second - 1);
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Swapped **#${first}** (${swapped.first.title}) with **#${second}** (${swapped.second.title}).`
+          );
+          return;
+        }
+
+        case "history": {
+          const state = this.music.serializePlayer(guildId);
+          if (state.previous.length === 0) {
+            await interaction.editReply("No tracks have finished playing in this session yet.");
+            return;
+          }
+          const lines = state.previous
+            .slice(0, 12)
+            .map(
+              (t, i) =>
+                `**${i + 1}.** [${t.title}](${t.uri || config.dashboardUrl}) - \`${t.isStream ? "LIVE" : formatDuration(t.duration)}\``
+            );
+          const embed = new EmbedBuilder()
+            .setColor(BRAND_COLOR)
+            .setTitle(`Session History • ${interaction.guild.name}`)
+            .setDescription(lines.join("\n"));
+          if (state.previous.length > 12) {
+            embed.setFooter({ text: `Showing 12 of ${state.previous.length} recent tracks` });
+          }
+          await interaction.editReply({ embeds: [embed] });
+          return;
+        }
+
+        case "grab": {
+          const state = this.music.serializePlayer(guildId);
+          if (!state.current) {
+            await interaction.editReply("Nothing is playing right now.");
+            return;
+          }
+          const track = state.current;
+          const grabEmbed = new EmbedBuilder()
+            .setColor(getSourceColor(track.sourceName))
+            .setTitle(track.title)
+            .setDescription(
+              `**Artist:** ${track.author}\n**Duration:** \`${track.isStream ? "LIVE" : formatDuration(track.duration)}\`\n**Server:** ${state.guildName}\n**Link:** [Open Track](${track.uri || config.dashboardUrl})`
+            );
+          if (track.artworkUrl) {
+            grabEmbed.setThumbnail(track.artworkUrl);
+          }
+          try {
+            await member.user.send({ embeds: [grabEmbed] });
+            await interaction.editReply(`Sent **${track.title}** to your DMs.`);
+          } catch {
+            await interaction.editReply({
+              content: "Could not send a DM (check your privacy settings). Here is the current track:",
+              embeds: [grabEmbed],
+            });
+          }
+          return;
+        }
+
         case "shuffle": {
           this.requireSameVoice(guildId, member);
           this.requirePrivileged(guildId, member.id);
@@ -1729,6 +1979,40 @@ export class CadenceBot {
             interaction,
             preset === "none" ? "Cleared all audio filters." : `Applied **${preset}** filter.`
           );
+          return;
+        }
+
+        case "speed": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          const value = interaction.options.getNumber("value", true);
+          const next = await this.music.setTimescale(guildId, { speed: value });
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Playback speed set to **${next.speed}x**.`
+          );
+          return;
+        }
+
+        case "pitch": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          const value = interaction.options.getNumber("value", true);
+          const next = await this.music.setTimescale(guildId, { pitch: value });
+          await this.editAndTrackReply(
+            guildId,
+            interaction,
+            `Playback pitch set to **${next.pitch}x**.`
+          );
+          return;
+        }
+
+        case "cleareffect": {
+          this.requireSameVoice(guildId, member);
+          this.requirePrivileged(guildId, member.id);
+          await this.music.clearEffects(guildId);
+          await this.editAndTrackReply(guildId, interaction, "Reset all active audio effects.");
           return;
         }
 
@@ -1798,27 +2082,24 @@ export class CadenceBot {
               {
                 name: "Playback",
                 value: [
-                  "`/play <query>` - Queue a track or playlist (with autocomplete)",
-                  "`/playnext <query>` - Queue a track or playlist right after current track",
-                  "`/playnow <query>` - Insert at front of queue and play immediately",
-                  "`/search <query>` - Pick from search results",
-                  "`/pause`, `/resume`, `/skip`, `/back`, `/seek`, `/stop`",
-                  "`/volume <0-100>`, `/loop <off|track|queue>`, `/autoplay`, `/filter`",
+                  "`/play <query>`, `/playnext <query>`, `/playnow <query>`, `/search <query>`",
+                  "`/connect`, `/pause`, `/resume`, `/skip`, `/skipto`, `/back`, `/replay`",
+                  "`/seek`, `/forward`, `/rewind`, `/stop`",
+                  "`/volume`, `/loop`, `/autoplay`, `/filter`, `/speed`, `/pitch`, `/cleareffect`",
                 ].join("\n"),
               },
               {
-                name: "Queue & Lyrics",
+                name: "Queue, History & Lyrics",
                 value: [
-                  "`/queue` - View current queue",
-                  "`/nowplaying` - Repost the interactive music controller",
-                  "`/shuffle`, `/remove <pos>`, `/clear`, `/lyrics`",
+                  "`/queue`, `/history`, `/nowplaying`, `/grab`, `/lyrics`",
+                  "`/shuffle`, `/move <from> <to>`, `/swap <a> <b>`, `/remove <pos>`, `/clear`",
                 ].join("\n"),
               },
               {
                 name: "Playlists & Utility",
                 value: [
-                  "`/playlist list|create|add|play|delete` - Manage personal playlists",
-                  "`/settings` - Configure server settings (Admin / Owner)",
+                  "`/playlist list|view|create|add|savequeue|remove|rename|play|delete`",
+                  "`/settings view|volume|247|autoplay|dj|duplicates|prefix|emptyvc|playnext|reset`",
                   "`/dashboard`, `/ping`, `/help`",
                 ].join("\n"),
               }
@@ -1875,13 +2156,56 @@ export class CadenceBot {
     const name = interaction.options.getString("name", true);
     if (sub === "create") {
       const created = this.db.createPlaylist(userId, name);
+      this.onUserPlaylistsChange(userId);
       await interaction.editReply(`Created playlist **${created.name}**.`);
+      return;
+    }
+
+    if (sub === "savequeue") {
+      const state = this.music.serializePlayer(interaction.guildId!);
+      const toSave: TrackDTO[] = [];
+      if (state.current) toSave.push(state.current);
+      for (const qTrack of state.queue) {
+        if (!qTrack.isAutoplay) toSave.push(qTrack);
+      }
+      if (toSave.length === 0) {
+        throw new Error("There are no tracks playing or queued to save.");
+      }
+      const existing = this.db.findPlaylistByName(userId, name);
+      const target = existing ?? this.db.createPlaylist(userId, name);
+      const res = this.db.addTracksToPlaylist(userId, target.id, toSave);
+      this.onUserPlaylistsChange(userId);
+      await interaction.editReply(
+        `Saved **${res.added}** track${res.added === 1 ? "" : "s"} into **${target.name}**.`
+      );
       return;
     }
 
     const playlist = this.db.findPlaylistByName(userId, name);
     if (!playlist) {
       throw new Error(`Playlist "${name}" was not found.`);
+    }
+
+    if (sub === "view") {
+      if (playlist.tracks.length === 0) {
+        await interaction.editReply(`Playlist **${playlist.name}** is currently empty.`);
+        return;
+      }
+      const lines = playlist.tracks
+        .slice(0, 15)
+        .map(
+          (t, i) =>
+            `**${i + 1}.** [${t.title}](${t.uri || config.dashboardUrl}) - \`${t.isStream ? "LIVE" : formatDuration(t.duration)}\``
+        );
+      const embed = new EmbedBuilder()
+        .setColor(BRAND_COLOR)
+        .setTitle(`Playlist • ${playlist.name}`)
+        .setDescription(lines.join("\n"));
+      if (playlist.tracks.length > 15) {
+        embed.setFooter({ text: `And ${playlist.tracks.length - 15} more in dashboard` });
+      }
+      await interaction.editReply({ embeds: [embed] });
+      return;
     }
 
     if (sub === "add") {
@@ -1891,7 +2215,30 @@ export class CadenceBot {
       }
       const dto = trackToDTO(player.queue.current);
       this.db.addTrackToPlaylist(userId, playlist.id, dto);
+      this.onUserPlaylistsChange(userId);
       await interaction.editReply(`Added **${dto.title}** to **${playlist.name}**.`);
+      return;
+    }
+
+    if (sub === "remove") {
+      const position = interaction.options.getInteger("position", true);
+      if (position < 1 || position > playlist.tracks.length) {
+        throw new Error(`Track position must be between 1 and ${playlist.tracks.length}.`);
+      }
+      const removed = playlist.tracks[position - 1];
+      this.db.removeTrackFromPlaylist(userId, playlist.id, position - 1);
+      this.onUserPlaylistsChange(userId);
+      await interaction.editReply(
+        `Removed **${removed.title}** (#${position}) from **${playlist.name}**.`
+      );
+      return;
+    }
+
+    if (sub === "rename") {
+      const newName = interaction.options.getString("new_name", true);
+      const renamed = this.db.renamePlaylist(userId, playlist.id, newName);
+      this.onUserPlaylistsChange(userId);
+      await interaction.editReply(`Renamed playlist to **${renamed.name}**.`);
       return;
     }
 
@@ -2047,6 +2394,14 @@ export class CadenceBot {
           ? `Empty VC auto-pause is **enabled** (${updated.pauseOnEmptySeconds}s delay, ${disconnectLabel}, ${updated.ignoreDeafenedListeners ? "ignoring deafened users" : "counting deafened users"}).`
           : "Empty VC auto-pause is now **disabled**."
       );
+    } else if (sub === "autoplay") {
+      const enabled = interaction.options.getBoolean("enabled", true);
+      this.db.updateGuildSettings(guildId, { autoplay: enabled });
+      await this.editAndTrackReply(
+        guildId,
+        interaction,
+        `Default Autoplay is now **${enabled ? "enabled" : "disabled"}**.`
+      );
     } else if (sub === "playnext") {
       const enabled = interaction.options.getBoolean("enabled", true);
       this.db.updateGuildSettings(guildId, { defaultPlayNext: enabled });
@@ -2054,6 +2409,14 @@ export class CadenceBot {
         guildId,
         interaction,
         `Default Play Next is now **${enabled ? "enabled" : "disabled"}**.`
+      );
+    } else if (sub === "reset") {
+      this.db.resetGuildSettings(guildId);
+      this.music.onGuildSettingsUpdated(guildId);
+      await this.editAndTrackReply(
+        guildId,
+        interaction,
+        "Reset all server settings back to factory defaults."
       );
     }
 
@@ -2423,10 +2786,117 @@ export class CadenceBot {
           repostIfStale: true,
           forceChannelId: message.channelId,
         });
+      } else if (cmd === "connect" || cmd === "join") {
+        const vcId = this.requireSameVoice(guildId, member);
+        await this.music.connectOnly(guildId, vcId, message.channelId);
+        await replyTracked("Connected to your voice channel.");
       } else if (cmd === "skip" || cmd === "s") {
         this.requireSameVoice(guildId, member);
         await this.music.skip(guildId, 1);
         await replyTracked("Skipped current track.");
+      } else if (cmd === "skipto") {
+        const pos = Number.parseInt(rest[0] || "", 10);
+        if (!Number.isFinite(pos) || pos < 1) {
+          await replyTracked(`Usage: \`${prefix}skipto <position>\``);
+          return;
+        }
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        await this.music.playTrack(guildId, pos - 1);
+        await replyTracked(`Skipped ahead to track **#${pos}**.`);
+      } else if (cmd === "back" || cmd === "prev") {
+        this.requireSameVoice(guildId, member);
+        const outcome = await this.music.previous(guildId);
+        await replyTracked(outcome === "restarted" ? "Restarted current track." : "Playing previous track.");
+      } else if (cmd === "replay") {
+        this.requireSameVoice(guildId, member);
+        await this.music.seek(guildId, 0);
+        await replyTracked("Restarted the current track.");
+      } else if (cmd === "forward" || cmd === "ff") {
+        this.requireSameVoice(guildId, member);
+        const sec = rest[0] ? Math.max(1, Math.min(600, Number.parseInt(rest[0], 10) || 10)) : 10;
+        const state = this.music.serializePlayer(guildId);
+        if (!state.current || state.current.isStream) {
+          await replyTracked("Cannot seek inside this track.");
+          return;
+        }
+        const target = Math.min(state.current.duration || state.position + sec * 1000, state.position + sec * 1000);
+        await this.music.seek(guildId, target);
+        await replyTracked(`Fast-forwarded **${sec}s** to **${formatDuration(target)}**.`);
+      } else if (cmd === "rewind" || cmd === "rw") {
+        this.requireSameVoice(guildId, member);
+        const sec = rest[0] ? Math.max(1, Math.min(600, Number.parseInt(rest[0], 10) || 10)) : 10;
+        const state = this.music.serializePlayer(guildId);
+        if (!state.current || state.current.isStream) {
+          await replyTracked("Cannot seek inside this track.");
+          return;
+        }
+        const target = Math.max(0, state.position - sec * 1000);
+        await this.music.seek(guildId, target);
+        await replyTracked(`Rewound **${sec}s** to **${formatDuration(target)}**.`);
+      } else if (cmd === "move" || cmd === "mv") {
+        const from = Number.parseInt(rest[0] || "", 10);
+        const to = Number.parseInt(rest[1] || "", 10);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < 1) {
+          await replyTracked(`Usage: \`${prefix}move <from> <to>\``);
+          return;
+        }
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        await this.music.moveTrack(guildId, from - 1, to - 1);
+        await replyTracked(`Moved track from **#${from}** to **#${to}**.`);
+      } else if (cmd === "swap") {
+        const first = Number.parseInt(rest[0] || "", 10);
+        const second = Number.parseInt(rest[1] || "", 10);
+        if (!Number.isFinite(first) || !Number.isFinite(second) || first < 1 || second < 1) {
+          await replyTracked(`Usage: \`${prefix}swap <first> <second>\``);
+          return;
+        }
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const swapped = await this.music.swapTracks(guildId, first - 1, second - 1);
+        await replyTracked(`Swapped **#${first}** (${swapped.first.title}) with **#${second}** (${swapped.second.title}).`);
+      } else if (cmd === "volume" || cmd === "vol") {
+        const vol = Number.parseInt(rest[0] || "", 10);
+        if (!Number.isFinite(vol) || vol < 0 || vol > 100) {
+          await replyTracked(`Usage: \`${prefix}volume <0-100>\``);
+          return;
+        }
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const updated = await this.music.setVolume(guildId, vol);
+        await replyTracked(`Volume set to **${updated}%**.`);
+      } else if (cmd === "loop") {
+        const mode = (rest[0] || "").toLowerCase() as RepeatModeType;
+        if (mode !== "off" && mode !== "track" && mode !== "queue") {
+          await replyTracked(`Usage: \`${prefix}loop <off|track|queue>\``);
+          return;
+        }
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        await this.music.setRepeatMode(guildId, mode);
+        await replyTracked(`Loop mode set to **${mode}**.`);
+      } else if (cmd === "shuffle") {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const count = await this.music.shuffle(guildId);
+        await replyTracked(`Shuffled **${count}** tracks.`);
+      } else if (cmd === "clear") {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        await this.music.clearQueue(guildId);
+        await replyTracked("Cleared the upcoming queue.");
+      } else if (cmd === "autoplay") {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        const next = !this.music.isAutoplayEnabled(guildId);
+        await this.music.toggleAutoplay(guildId, next);
+        await replyTracked(`Autoplay is now **${next ? "enabled" : "disabled"}**.`);
+      } else if (cmd === "cleareffect" || cmd === "resetfilter") {
+        this.requireSameVoice(guildId, member);
+        this.requirePrivileged(guildId, member.id);
+        await this.music.clearEffects(guildId);
+        await replyTracked("Reset all active audio effects.");
       } else if (cmd === "pause") {
         this.requireSameVoice(guildId, member);
         await this.music.setPause(guildId, true);
@@ -2440,6 +2910,32 @@ export class CadenceBot {
         this.requirePrivileged(guildId, member.id);
         await this.music.stop(guildId);
         await replyTracked("Stopped playback and disconnected.");
+      } else if (cmd === "history") {
+        const state = this.music.serializePlayer(guildId);
+        if (state.previous.length === 0) {
+          await replyTracked("No tracks have finished playing in this session yet.");
+          return;
+        }
+        const recent = state.previous
+          .slice(0, 8)
+          .map((t, i) => `${i + 1}. ${t.title} (${t.isStream ? "LIVE" : formatDuration(t.duration)})`)
+          .join("\n");
+        await replyTracked(`**Recently Played:**\n${recent}`);
+      } else if (cmd === "grab") {
+        const state = this.music.serializePlayer(guildId);
+        if (!state.current) {
+          await replyTracked("Nothing is playing right now.");
+          return;
+        }
+        const t = state.current;
+        try {
+          await member.user.send(
+            `**${t.title}** by *${t.author}* (\`${t.isStream ? "LIVE" : formatDuration(t.duration)}\`)\n${t.uri || config.dashboardUrl}`
+          );
+          await replyTracked(`Sent **${t.title}** to your DMs.`);
+        } catch {
+          await replyTracked("Could not send you a DM. Please check your privacy settings.");
+        }
       } else if (cmd === "queue" || cmd === "q") {
         const state = this.music.serializePlayer(guildId);
         if (!state.current && state.queue.length === 0) {

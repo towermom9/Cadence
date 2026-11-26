@@ -48,7 +48,7 @@ Cadence/
 ├── server/
 │   ├── index.ts                # Unified process entrypoint (HTTP, WS, Discord Bot, SQLite)
 │   ├── auth.ts                 # Discord OAuth2 session & guild cache helpers
-│   ├── bot.ts                  # Discord.js client, 23 slash commands, prefix commands, VC controller
+│   ├── bot.ts                  # Discord.js client, 35 slash commands, prefix commands, VC controller
 │   ├── config.ts               # Runtime environment & SQLite app_config overlay
 │   ├── db.ts                   # bun:sqlite schema, migrations, playlists, paginated history, settings
 │   ├── logger.ts               # Ring-buffer server logger with automatic secret/PII redaction
@@ -192,7 +192,7 @@ Cadence uses `bun:sqlite` in WAL mode (`server/db.ts`) stored at `$DATA_DIR/cade
 
 ## GitHub Pages Documentation
 
-- **Unified Documentation Site (`docs/`):** Static dark documentation site (landing page + Guides + Reference pages) deployed automatically by `.github/workflows/pages.yml` on pushes to `main` touching `docs/**`. To enable in a fork/repo, open **Settings -> Pages** and set **Source** to **GitHub Actions**.
+- **Unified Documentation Site (`docs/`):** Static dark/light/system documentation site (landing page + Guides + Commands + Changelog + FAQ) deployed automatically by `.github/workflows/pages.yml` on pushes to `main` touching `docs/**`. To enable in a fork/repo, open **Settings -> Pages** and set **Source** to **GitHub Actions**.
 
 ---
 

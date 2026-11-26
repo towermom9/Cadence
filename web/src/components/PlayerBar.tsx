@@ -125,7 +125,8 @@ export function PlayerBar({
   const clampedPos = duration > 0 ? Math.min(duration, Math.max(0, displayPosition)) : 0;
   const effectivePos = isSeeking ? scrubPosition : clampedPos;
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (effectivePos / duration) * 100)) : 0;
-  const hasPlayer = Boolean(playerState?.connected && track);
+  const isConnected = Boolean(playerState?.connected || playerState?.voiceChannelId || track);
+  const hasPlayer = Boolean(isConnected && track);
   const canSeek = Boolean(hasPlayer && !track?.isStream && duration > 0);
   const activeFilter = playerState?.activeFilter ?? "none";
   const privileged = Boolean(playerState?.isPrivileged);
@@ -650,7 +651,7 @@ export function PlayerBar({
           <div className="hidden items-center gap-1.5 md:flex">
             <button
               type="button"
-              disabled={!playerState?.connected || !privileged}
+              disabled={!isConnected || !privileged}
               onClick={handleToggleMute}
               title="Mute / Unmute"
               className="rounded-full p-2 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
@@ -666,7 +667,7 @@ export function PlayerBar({
               min={0}
               max={100}
               value={localVolume}
-              disabled={!playerState?.connected || !privileged}
+              disabled={!isConnected || !privileged}
               onPointerDown={() => {
                 isDraggingVolumeRef.current = true;
               }}
@@ -689,7 +690,7 @@ export function PlayerBar({
                 type="text"
                 inputMode="numeric"
                 aria-label="Volume percentage"
-                disabled={!playerState?.connected || !privileged}
+                disabled={!isConnected || !privileged}
                 value={volumeDraft}
                 onFocus={(e) => {
                   setIsEditingVolume(true);
@@ -708,7 +709,7 @@ export function PlayerBar({
           <div ref={effectsRef} className="relative hidden sm:block">
             <button
               type="button"
-              disabled={!playerState?.connected || !privileged}
+              disabled={!isConnected || !privileged}
               onClick={() => setEffectsOpen((v) => !v)}
               title="Audio effects"
               style={activeFilter !== "none" ? { color: "var(--cadence-accent)" } : undefined}
@@ -806,7 +807,7 @@ export function PlayerBar({
 
           <button
             type="button"
-            disabled={!playerState?.connected || !privileged}
+            disabled={!isConnected || !privileged}
             onClick={onStop}
             title={
               playerState?.voiceChannelName
